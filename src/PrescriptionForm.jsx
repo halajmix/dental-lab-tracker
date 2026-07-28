@@ -435,6 +435,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   };
   const isValid = !Object.values(errors).some(Boolean);
 
+  // Human-readable list of what is still missing, so the user is never left
+  // guessing why the Submit button does nothing.
+  const MISSING_LABEL = {
+    patientName: "Patient name",
+    teeth: "At least one tooth on the chart",
+    labId: "Target lab",
+    material: "Material",
+  };
+  const missing = Object.entries(errors)
+    .filter(([, bad]) => bad)
+    .map(([k]) => MISSING_LABEL[k]);
+
   const reset = () => {
     setNotation("FDI"); setMode("unit"); setSelection({});
     setPatientName(""); setPatientId(""); setPatientPhone("");
@@ -751,11 +763,20 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-            <Info size={13} />
-            {isValid ? "Ready to submit to lab queue." : "Complete required fields (*) to submit."}
-          </div>
+        <div className={`flex items-center justify-between gap-3 border-t px-6 py-4 ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-100 bg-slate-50"}`}>
+          {touched && !isValid ? (
+            <div className="flex items-start gap-1.5 text-xs text-rose-700">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                <b>Can't submit yet</b> — still needed: {missing.join(", ")}.
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <Info size={13} />
+              {isValid ? "Ready to submit to lab queue." : "Complete required fields (*) to submit."}
+            </div>
+          )}
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
               Cancel
