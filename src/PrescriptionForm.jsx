@@ -17,6 +17,7 @@ import {
   Clock,
   ScanLine,
   DollarSign,
+  MessageCircle,
 } from "lucide-react";
 import { caseFee } from "./Analytics.jsx";
 
@@ -457,7 +458,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     setScans([]); setPhotos([]); setNotes(""); setTouched(false);
   };
 
-  const submit = () => {
+  // `opts.share` submits and immediately opens the share panel for the new case.
+  const submit = (opts = {}) => {
     setTouched(true);
     if (!isValid) return;
     const prescription = {
@@ -476,14 +478,17 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
       files: [...scans.map((f) => ({ ...f, kind: "scan" })), ...photos.map((f) => ({ ...f, kind: "photo" }))],
       notes: notes.trim(),
     };
-    onSave({
-      patientName: patientName.trim(),
-      patientId: patientId.trim() || "PT-NEW",
-      patientPhone: patientPhone.trim(),
-      appointmentDate: insertionDate || "—",
-      labId,
-      prescription,
-    });
+    onSave(
+      {
+        patientName: patientName.trim(),
+        patientId: patientId.trim() || "PT-NEW",
+        patientPhone: patientPhone.trim(),
+        appointmentDate: insertionDate || "—",
+        labId,
+        prescription,
+      },
+      opts
+    );
     reset();
     onClose();
   };
@@ -783,10 +788,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
             </button>
             <button
               type="button"
-              onClick={submit}
+              onClick={() => submit()}
               className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
             >
               <Check size={15} /> Submit Prescription
+            </button>
+            <button
+              type="button"
+              onClick={() => submit({ share: true })}
+              title="Save the case and immediately share the Rx PDF with the patient"
+              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
+            >
+              <MessageCircle size={15} /> Submit &amp; Share
             </button>
           </div>
         </div>

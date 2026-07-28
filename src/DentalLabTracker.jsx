@@ -288,7 +288,7 @@ export default function DentalLabTracker() {
     setLabs((p) => [...p, { id, ...data }]);
   };
 
-  const addCase = (data) => {
+  const addCase = (data, opts = {}) => {
     // Highest existing C-#### + 1, so ids stay unique across reloads.
     const maxNum = cases
       .map((c) => parseInt(c.id.replace(/\D/g, ""), 10))
@@ -307,6 +307,11 @@ export default function DentalLabTracker() {
       },
       ...p,
     ]);
+    // "Submit & Share" → jump straight into the share flow for the new case.
+    if (opts.share) {
+      setAutoShare(true);
+      setPrintCaseId(id);
+    }
   };
 
   // Restore seed data and clear persisted state (dev / demo escape hatch).
