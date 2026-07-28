@@ -105,7 +105,7 @@ function makeSeedCases() {
   });
   return [
     base("C-1042", "Sarah Mitchell", "PT-88213", "lab-apex", "Apex Dental Lab", 5, STAGE_INDEX.WORK_IN_PROGRESS,
-      seedRx("FDI", [[8, "unit"], [9, "unit"]], "Crown / bridge - tooth", "Lithium Disilicate (E.max)", "A2"), { patientPhone: "+968 91234567" }),
+      seedRx("FDI", [[8, "unit"], [9, "unit"]], "Crown / bridge - tooth", "Lithium Disilicate (E.max)", "A2")),
     // ≤48h away, still in lab → red alert
     base("C-1043", "James Okafor", "PT-88220", "lab-precision", "Precision Ceramics", 1, STAGE_INDEX.WORK_IN_PROGRESS,
       seedRx("FDI", [[30, "unit"]], "Crown / bridge - tooth", "Monolithic Zirconia", "A3", { rush: true, notes: "Deep chamfer, tight contacts." })),
@@ -168,8 +168,8 @@ const inputCls =
 
 // Bump when the shape of persisted data changes incompatibly; a mismatch
 // discards the old blob and falls back to seed data instead of crashing.
-// v11: patient WhatsApp phone added for sharing the Rx.
-const STORAGE_VERSION = 11;
+// v12: removed the fake demo patient phone (caused "invalid number" in WhatsApp).
+const STORAGE_VERSION = 12;
 const STORAGE_KEY = "dentatrack.v" + STORAGE_VERSION;
 const CLINIC_USER = "Dr. Chen (Clinic)";
 

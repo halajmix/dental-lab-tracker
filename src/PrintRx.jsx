@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { X, Printer, FileText, Zap, Paperclip, MessageCircle, Loader2 } from "lucide-react";
+import { X, Printer, FileText, Zap, Paperclip, MessageCircle, Loader2, Check, Download } from "lucide-react";
 import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary } from "./PrescriptionForm.jsx";
 
 // Render an on-screen element to a multi-page A4 PDF File (no print dialog).
@@ -40,15 +40,11 @@ function downloadFile(file) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-function openInNewTab(url) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+// A WhatsApp number must be full international format, digits only, no leading 0.
+const normalizePhone = (p) => {
+  const digits = (p || "").replace(/\D/g, "");
+  return digits.replace(/^0+/, "");
+};
 
 // Build a plain-text prescription summary for the WhatsApp message.
 function buildRxMessage(caseObj, clinic, lab) {
@@ -71,14 +67,16 @@ function buildRxMessage(caseObj, clinic, lab) {
   return lines.join("\n");
 }
 
-// Digits only (WhatsApp deep-link format is international, no "+").
-const normalizePhone = (p) => (p || "").replace(/\D/g, "");
-
-// Generate the Rx PDF and share it. On phones/tablets (and supported desktops)
-// the native share sheet opens with the PDF already attached — pick WhatsApp and
-// send. On desktop WhatsApp Web (can't receive files via a link) it downloads the
-// PDF and opens the chat pre-filled so the file can be dropped in.
-async function sharePrescription(sheetEl, caseObj, clinic, lab) {
+/**
+ * Build the PDF and work out how to share it.
+ *
+ * On phones/tablets the native share sheet takes the PDF directly (best path).
+ * Everywhere else we must NOT try to auto-open WhatsApp: this runs after an
+ * `await`, so the browser has already dropped user-activation and any
+ * programmatic `window.open` / anchor click is silently blocked. Instead we
+ * return the details and let the UI render a real link for the user to click.
+ */
+async function buildShare(sheetEl, caseObj, clinic, lab) {
   const msg = buildRxMessage(caseObj, clinic, lab);
   const phone = normalizePhone(caseObj.patientPhone);
   const waUrl = phone
@@ -86,24 +84,26 @@ async function sharePrescription(sheetEl, caseObj, clinic, lab) {
     : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
 
   let file = null;
+  let error = null;
   try {
     if (sheetEl) file = await elementToPdfFile(sheetEl, `prescription-${caseObj.id}.pdf`);
   } catch (e) {
     console.error("PDF generation failed", e);
+    error = e?.message || "Could not build the PDF.";
   }
 
+  // Native share sheet: attaches the PDF itself (iOS/Android/Safari).
   if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: `Prescription ${caseObj.id}`, text: msg });
-      return;
+      return { shared: true };
     } catch (e) {
-      if (e?.name === "AbortError") return; // user cancelled the share sheet
-      // otherwise fall through to the download + link fallback
+      if (e?.name === "AbortError") return { shared: true }; // user cancelled
+      // fall through to the manual panel
     }
   }
 
-  if (file) downloadFile(file);
-  openInNewTab(waUrl);
+  return { shared: false, file, waUrl, msg, phone, error };
 }
 
 /* ================================================================== */
@@ -161,12 +161,15 @@ const Spec = ({ label, value }) => (
 export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare = false }) {
   const sheetRef = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [share, setShare] = useState(null); // { file, waUrl, msg, phone, error }
   const firedRef = useRef(false);
 
   const onShare = async () => {
     setBusy(true);
+    setShare(null);
     try {
-      await sharePrescription(sheetRef.current, caseObj, clinic, lab);
+      const result = await buildShare(sheetRef.current, caseObj, clinic, lab);
+      if (!result.shared) setShare(result);
     } finally {
       setBusy(false);
     }
@@ -222,9 +225,69 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
           </button>
         </div>
       </div>
-      <div className="no-print bg-emerald-50 px-4 py-1.5 text-center text-[11px] text-emerald-700">
-        <b>Share via WhatsApp</b> builds the PDF instantly — no printing needed. On phone/tablet it opens WhatsApp with the file attached; on desktop the PDF downloads and the chat opens to drop it in.
-      </div>
+      {!share && (
+        <div className="no-print bg-emerald-50 px-4 py-1.5 text-center text-[11px] text-emerald-700">
+          <b>Share via WhatsApp</b> builds the PDF instantly — no printing needed. On phone/tablet it attaches the file directly.
+        </div>
+      )}
+
+      {/* Share panel — shown after the PDF is built. The WhatsApp link is a real
+          anchor the user clicks, so it can never be popup-blocked. */}
+      {share && (
+        <div className="no-print border-b border-emerald-200 bg-emerald-50 px-4 py-3">
+          <div className="mx-auto flex max-w-[794px] flex-col gap-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-1.5 text-sm font-bold text-emerald-800">
+                  <Check size={15} /> Prescription PDF ready
+                </p>
+                <p className="mt-0.5 text-[11px] text-emerald-700">
+                  {share.phone ? (
+                    <>Step 1 — download the PDF. Step 2 — open the chat with <b>+{share.phone}</b> and attach it.</>
+                  ) : (
+                    <>No patient WhatsApp number on this case — the chat will open so you can pick the contact.</>
+                  )}
+                </p>
+              </div>
+              <button onClick={() => setShare(null)} className="rounded p-1 text-emerald-700 hover:bg-emerald-100" title="Dismiss">
+                <X size={15} />
+              </button>
+            </div>
+
+            {share.error && (
+              <p className="rounded-lg bg-rose-100 px-3 py-2 text-[11px] font-medium text-rose-700">
+                PDF could not be generated: {share.error} — you can still send the details as text.
+              </p>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              {share.file && (
+                <button
+                  onClick={() => downloadFile(share.file)}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                >
+                  <Download size={15} /> 1 · Download PDF
+                </button>
+              )}
+              {/* real anchor → user gesture → never blocked */}
+              <a
+                href={share.waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                <MessageCircle size={15} /> 2 · Open WhatsApp chat
+              </a>
+              <button
+                onClick={() => navigator.clipboard?.writeText(share.msg)}
+                className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+              >
+                <Paperclip size={15} /> Copy message text
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* the A4 sheet */}
       <div ref={sheetRef} className="mx-auto my-6 max-w-[794px] bg-white p-10 text-[13px] leading-relaxed text-slate-800 shadow-2xl print-sheet print:my-0 print:max-w-none print:p-0 print:shadow-none">
