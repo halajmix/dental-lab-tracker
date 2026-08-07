@@ -55,7 +55,9 @@ function buildRxMessage(caseObj, clinic, lab) {
     `Patient: ${caseObj.patientName} (${caseObj.patientId})`,
     `Case: ${caseObj.id}`,
     `Lab: ${lab?.name ?? "—"}`,
-    `Deliver to clinic on: ${caseObj.appointmentDate}`,
+    `Deliver to clinic on: ${caseObj.appointmentDate}${
+      caseObj.deliveryTime && caseObj.deliveryTime !== "Anytime" ? ` (${caseObj.deliveryTime})` : ""
+    }`,
   ];
   if (rx) {
     lines.push(`Restoration: ${rx.category}${rx.material ? ` — ${rx.material}` : ""}`);
@@ -337,7 +339,10 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
             <p className="text-xs text-slate-500">Case: {caseObj.id}</p>
             {caseObj.patientPhone && <p className="text-xs text-slate-500">WhatsApp: {caseObj.patientPhone}</p>}
             <p className="text-xs text-slate-500">
-              Target Appointment: <span className="font-semibold text-slate-700">{caseObj.appointmentDate}</span>
+              Deliver to clinic on: <span className="font-semibold text-slate-700">{caseObj.appointmentDate}</span>
+              {caseObj.deliveryTime && caseObj.deliveryTime !== "Anytime" && (
+                <span className="font-semibold text-slate-700"> · {caseObj.deliveryTime}</span>
+              )}
             </p>
             {rx?.rush && (
               <span className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700 print:border print:border-amber-400">

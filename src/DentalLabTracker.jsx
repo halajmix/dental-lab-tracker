@@ -97,6 +97,7 @@ function makeSeedCases() {
     patientPhone: extra.patientPhone ?? "",
     labId,
     appointmentDate: daysFromNow(apptOffset),
+    deliveryTime: extra.deliveryTime ?? "Anytime",
     createdDate: daysFromNow(-4),
     stageIndex,
     handover: extra.handover ?? null,
@@ -109,7 +110,8 @@ function makeSeedCases() {
       seedRx("FDI", [[8, "unit"], [9, "unit"]], "Crown - tooth", "Lithium Disilicate (E.max)", "A2")),
     // ≤48h away, still in lab → red alert
     base("C-1043", "James Okafor", "PT-88220", "lab-precision", "Precision Ceramics", 1, STAGE_INDEX.WORK_IN_PROGRESS,
-      seedRx("FDI", [[30, "unit"]], "Crown - tooth", "Monolithic Zirconia", "A3", { rush: true, notes: "Deep chamfer, tight contacts." })),
+      seedRx("FDI", [[30, "unit"]], "Crown - tooth", "Monolithic Zirconia", "A3", { rush: true, notes: "Deep chamfer, tight contacts." }),
+      { deliveryTime: "Morning" }),
     // work complete but appointment is today → dentist needs to receive (alert)
     base("C-1044", "Elena Rodríguez", "PT-88231", "lab-apex", "Apex Dental Lab", 0, STAGE_INDEX.WORK_COMPLETE,
       seedRx("FDI", [[3, "unit"], [4, "unit"], [5, "unit"]], "Crown - implant", "Zirconia", "B1")),
@@ -169,8 +171,8 @@ const inputCls =
 
 // Bump when the shape of persisted data changes incompatibly; a mismatch
 // discards the old blob and falls back to seed data instead of crashing.
-// v13: crown/bridge categories split into 5 + Veneer added.
-const STORAGE_VERSION = 13;
+// v14: preferred delivery time added to cases.
+const STORAGE_VERSION = 14;
 const STORAGE_KEY = "dentatrack.v" + STORAGE_VERSION;
 const CLINIC_USER = "Dr. Chen (Clinic)";
 
@@ -741,6 +743,9 @@ function DentistDashboard({
                   <td className="px-4 py-3 text-slate-600">{labById[c.labId]?.name ?? "—"}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="text-slate-600">{c.appointmentDate}</div>
+                    {c.deliveryTime && c.deliveryTime !== "Anytime" && (
+                      <div className="text-[11px] text-slate-400">{c.deliveryTime}</div>
+                    )}
                     <AppointmentBadge caseObj={c} className="mt-1" />
                   </td>
                   <td className="px-4 py-3">
@@ -889,6 +894,12 @@ function LabCaseCard({ c, lab, onAdvance, onRevert, onOpenCase, onLogRemake }) {
           </div>
           <p className="mt-0.5 text-sm text-slate-600">
             {c.patientName} <span className="text-slate-400">· {c.patientId}</span>
+          </p>
+          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
+            <Clock size={11} /> Deliver {c.appointmentDate}
+            {c.deliveryTime && c.deliveryTime !== "Anytime" && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">{c.deliveryTime}</span>
+            )}
           </p>
         </div>
         <button

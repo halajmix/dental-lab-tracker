@@ -164,6 +164,9 @@ const REFER = "Refer to notes";
 const REFER_CATEGORY = "Others - refer to notes";
 const PONTIC_DESIGNS = ["Modified Ridge Lap", "Ovate", "Sanitary / Hygienic", "Conical", "Ridge Lap (Full)"];
 
+// Preferred time of day for the lab to deliver back to the clinic.
+const DELIVERY_TIMES = ["Anytime", "Morning", "Afternoon", "Before sunset", "Evening"];
+
 // Physical items sent to the lab alongside the case.
 const INCLUDED_ITEMS = [
   "Upper impression",
@@ -480,6 +483,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const [ponticDesign, setPonticDesign] = useState(PONTIC_DESIGNS[0]);
 
   const [labId, setLabId] = useState("");
+  const [deliveryTime, setDeliveryTime] = useState(DELIVERY_TIMES[0]);
   const [rush, setRush] = useState(false);
   const [insertionDate, setInsertionDate] = useState("");
 
@@ -594,7 +598,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setPonticDesign(PONTIC_DESIGNS[0]);
-    setLabId(""); setRush(false); setInsertionDate("");
+    setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
     setScans([]); setPhotos([]); setNotes(""); setTouched(false);
   };
 
@@ -626,6 +630,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
         patientId: patientId.trim() || "PT-NEW",
         patientPhone: patientPhone.trim(),
         appointmentDate: insertionDate || "—",
+        deliveryTime,
         labId,
         prescription,
       },
@@ -822,6 +827,13 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
               </Field>
               <Field label="Deliver to Clinic on">
                 <input type="date" className={inputCls} value={insertionDate} onChange={(e) => setInsertionDate(e.target.value)} />
+              </Field>
+              <Field label="Preferred Delivery Time">
+                <select className={inputCls} value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)}>
+                  {DELIVERY_TIMES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
               </Field>
               <div>
                 <span className="mb-1 flex items-center gap-1 text-xs font-medium text-slate-600">Express</span>
