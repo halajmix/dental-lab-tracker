@@ -205,6 +205,55 @@ const ABUTMENT_DIAMETERS = [
   "Ø6.0 (Extra Wide)",
 ];
 
+// Translucent / tooth-coloured materials where the underlying prep colour shows
+// through — these are the only ones that need a stump shade.
+const AESTHETIC_MATERIALS = [
+  "Monolithic Zirconia",
+  "Layered Zirconia",
+  "Lithium Disilicate (E.max)",
+  "Feldspathic Porcelain",
+  "Composite",
+];
+
+// One-tap starting points for the most common chairside prescriptions.
+const QUICK_PRESETS = [
+  {
+    label: "E.max Crown",
+    hint: "Standard anterior/posterior single unit",
+    apply: { category: "Crown - tooth", material: "Lithium Disilicate (E.max)", shadeGuide: "Vita Classical", vitaShade: "A2" },
+  },
+  {
+    label: "Zirconia Posterior",
+    hint: "Monolithic full-contour",
+    apply: { category: "Crown - tooth", material: "Monolithic Zirconia", shadeGuide: "Vita Classical", vitaShade: "A3" },
+  },
+  {
+    label: "PFM Bridge",
+    hint: "Conventional tooth-borne",
+    apply: { category: "Bridge - tooth (conventional)", material: "PFM (Porcelain-Fused-to-Metal)", shadeGuide: "Vita Classical", vitaShade: "A3" },
+  },
+  {
+    label: "Implant Crown",
+    hint: "Screw-retained zirconia",
+    apply: { category: "Crown - implant", material: "Zirconia", shadeGuide: "Vita Classical", vitaShade: "A2" },
+  },
+  {
+    label: "Ortho Splint",
+    hint: "Retainer / appliance",
+    apply: { category: "Orthodontics splint" },
+  },
+];
+
+// Quick-select tooth groups (Universal numbers).
+const TOOTH_GROUPS = [
+  { label: "Max. Anterior", teeth: [6, 7, 8, 9, 10, 11] },
+  { label: "Max. Posterior", teeth: [1, 2, 3, 4, 5, 12, 13, 14, 15, 16] },
+  { label: "Max. Molars", teeth: [1, 2, 3, 14, 15, 16] },
+  { label: "Mand. Anterior", teeth: [22, 23, 24, 25, 26, 27] },
+  { label: "Mand. Posterior", teeth: [17, 18, 19, 20, 21, 28, 29, 30, 31, 32] },
+  { label: "Mand. Molars", teeth: [17, 18, 19, 30, 31, 32] },
+];
+
 // Physical items sent to the lab alongside the case.
 const INCLUDED_ITEMS = [
   "Upper impression",
@@ -251,14 +300,15 @@ export function toothSummary(prescription) {
 /*  Interactive Tooth Chart                                            */
 /* ================================================================== */
 
-const TOOTH_W = 30;
-const STEP = 37;
+// Larger touch targets for chairside use (was 30/37).
+const TOOTH_W = 38;
+const STEP = 45;
 const MARGIN_X = 26;
-const MIDGAP = 20;
+const MIDGAP = 22;
 const colX = (i) => MARGIN_X + i * STEP + (i >= 8 ? MIDGAP : 0);
 const CHART_W = colX(15) + TOOTH_W + MARGIN_X;
 
-function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onClear }) {
+function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onClear, onGroup }) {
   const rows = [
     { key: "upper", teeth: UPPER_ROW, y: 34 },
     { key: "lower", teeth: LOWER_ROW, y: 150 },
@@ -320,8 +370,23 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
         </button>
       </div>
 
+      {/* Quick-select groups — whole segments in one tap */}
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] font-medium text-slate-400">Quick select:</span>
+        {TOOTH_GROUPS.map((g) => (
+          <button
+            key={g.label}
+            type="button"
+            onClick={() => onGroup(g.teeth)}
+            className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+          >
+            {g.label}
+          </button>
+        ))}
+      </div>
+
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
-        <svg viewBox={`0 0 ${CHART_W} 210`} className="w-full select-none" style={{ maxHeight: 260 }}>
+        <svg viewBox={`0 0 ${CHART_W} 210`} className="w-full select-none" style={{ maxHeight: 300 }}>
           <style>{`
             .tooth-empty:hover .glyph { fill:#e2e8f0; stroke:#94a3b8; }
             .tooth-hit { cursor:pointer; }
@@ -478,6 +543,45 @@ function Field({ label, children, hint, required }) {
   );
 }
 
+/**
+ * One collapsible step of the prescription. The header stays visible when
+ * collapsed and shows a live summary, so the dentist can see the whole order
+ * at a glance without expanding everything.
+ */
+function Step({ n, title, subtitle, summary, open, onToggle, complete, invalid, children }) {
+  return (
+    <section className={`overflow-hidden rounded-xl border transition ${open ? "border-blue-200 bg-white shadow-sm" : "border-slate-200 bg-white"}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`flex w-full items-center gap-3 px-4 py-3 text-left transition ${open ? "bg-blue-50/60" : "hover:bg-slate-50"}`}
+      >
+        <span
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+            invalid
+              ? "bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-300"
+              : complete
+              ? "bg-emerald-500 text-white"
+              : open
+              ? "bg-blue-600 text-white"
+              : "bg-slate-200 text-slate-600"
+          }`}
+        >
+          {complete && !invalid ? <Check size={14} strokeWidth={3} /> : n}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-slate-800">{title}</span>
+          <span className="block truncate text-[11px] text-slate-500">
+            {!open && summary ? summary : subtitle}
+          </span>
+        </span>
+        <ChevronDown size={18} className={`shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && <div className="border-t border-slate-100 px-4 py-4">{children}</div>}
+    </section>
+  );
+}
+
 function SectionHeader({ icon: Icon, n, title, subtitle }) {
   return (
     <div className="mb-4 flex items-center gap-3">
@@ -535,6 +639,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const [notes, setNotes] = useState("");
 
   const [touched, setTouched] = useState(false);
+  const [activePreset, setActivePreset] = useState(null);
+  const [step, setStep] = useState(1); // 1 = Patient & Lab, 2 = Clinical, 3 = Logistics
 
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
 
@@ -558,6 +664,15 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
       return next;
     });
   };
+
+  // Quick-select a whole segment. Toggles off if the group is already fully set.
+  const toggleGroup = (teeth) =>
+    setSelection((prev) => {
+      const allSel = teeth.every((u) => prev[u]);
+      const next = { ...prev };
+      teeth.forEach((u) => (allSel ? delete next[u] : (next[u] = mode)));
+      return next;
+    });
 
   const selectedTeeth = Object.keys(selection)
     .map(Number)
@@ -613,6 +728,21 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     }
   };
 
+  // Stump shade only matters for translucent materials on a prepped tooth.
+  const showStump =
+    HAS_STUMP.includes(category) && AESTHETIC_MATERIALS.includes(material) && !isRefer;
+
+  /* ---------------- quick presets ---------------- */
+  const applyPreset = (p) => {
+    onCategoryChange(p.apply.category);
+    // onCategoryChange sets a default material for the new category; override
+    // it (and the shade defaults) with the preset's own values.
+    if (p.apply.material !== undefined) setMaterial(p.apply.material);
+    if (p.apply.shadeGuide !== undefined) setShadeGuide(p.apply.shadeGuide);
+    if (p.apply.vitaShade !== undefined) setVitaShade(p.apply.vitaShade);
+    setActivePreset(p.label);
+  };
+
   /* ---------------- file handling (simulated) ---------------- */
   const addFiles = (fileList, setter) => {
     const arr = Array.from(fileList).map((f) => ({ name: f.name, size: f.size }));
@@ -658,6 +788,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
     setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter("");
     setScans([]); setPhotos([]); setNotes(""); setTouched(false);
+    setActivePreset(null); setStep(1);
   };
 
   // `opts.share` submits and immediately opens the share panel for the new case.
@@ -703,6 +834,34 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
   const err = (k) => touched && errors[k];
 
+  /* ---------------- per-step status for the accordion ---------------- */
+  const stepErrors = {
+    1: ["patientName", "labId"],
+    2: ["teeth", "material", "implantSystem", "abutmentType", "abutmentDiameter"],
+    3: [],
+  };
+  const stepInvalid = (n) => stepErrors[n].some((k) => errors[k]);
+  const stepComplete = (n) => !stepInvalid(n);
+
+  const stepSummary = {
+    1: [patientName || "No patient", lab?.name].filter(Boolean).join(" · "),
+    2: [
+      `${selectedTeeth.length} ${selectedTeeth.length === 1 ? "tooth" : "teeth"}`,
+      category,
+      material || null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    3: [
+      insertionDate || "No date",
+      deliveryTime !== "Anytime" ? deliveryTime : null,
+      rush ? "Express" : null,
+      scans.length + photos.length > 0 ? `${scans.length + photos.length} file(s)` : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  };
+
   /* ---------------- render ---------------- */
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
@@ -725,23 +884,84 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
         </div>
 
         {/* Scroll body */}
-        <div className="flex-1 space-y-8 overflow-y-auto px-6 py-6">
-          {/* Patient */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Field label="Patient Name" required>
-              <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
-            </Field>
-            <Field label="Patient ID">
-              <input className={inputCls} value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="PT-00000" />
-            </Field>
-            <Field label="Patient WhatsApp" hint="Optional · to share the Rx PDF">
-              <input className={inputCls} value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="+968 90000000" />
-            </Field>
+        <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 px-5 py-4">
+          {/* Quick presets — one tap to pre-fill the common cases */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <Sparkles size={12} className="text-amber-500" /> Quick presets
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {QUICK_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => applyPreset(p)}
+                  className={`rounded-lg border px-3 py-1.5 text-left transition ${
+                    activePreset === p.label
+                      ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200"
+                      : "border-slate-300 bg-white hover:border-blue-400 hover:bg-blue-50/50"
+                  }`}
+                >
+                  <span className={`block text-xs font-bold ${activePreset === p.label ? "text-blue-800" : "text-slate-700"}`}>
+                    {p.label}
+                  </span>
+                  <span className="block text-[10px] text-slate-400">{p.hint}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* 1. Included — what physically goes to the lab with this case */}
-          <section>
-            <SectionHeader icon={PackageCheck} n="1" title="Included" subtitle="Tick everything being sent to the lab with this case" />
+          {/* ---------------- STEP 1 · Patient & Lab ---------------- */}
+          <Step
+            n={1}
+            title="Patient & Lab Details"
+            subtitle="Who the case is for, and which lab receives it"
+            summary={stepSummary[1]}
+            open={step === 1}
+            onToggle={() => setStep(step === 1 ? 0 : 1)}
+            complete={stepComplete(1)}
+            invalid={touched && stepInvalid(1)}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Patient Name" required>
+                <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
+              </Field>
+              <Field label="Patient ID">
+                <input className={inputCls} value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="PT-00000" />
+              </Field>
+              <Field label="Patient WhatsApp" hint="Optional · to share the Rx PDF">
+                <input className={inputCls} value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="+968 90000000" />
+              </Field>
+              <Field label="Select Lab" required>
+                <select className={`${inputCls} ${err("labId") ? "border-rose-400 ring-rose-100" : ""}`} value={labId} onChange={(e) => setLabId(e.target.value)}>
+                  <option value="">Select lab…</option>
+                  {labs.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name} — {l.tat}d TAT · +{l.expressPct ?? 20}% express</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button type="button" onClick={() => setStep(2)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                Next · Clinical <ChevronDown size={15} className="-rotate-90" />
+              </button>
+            </div>
+          </Step>
+
+          {/* ---------------- STEP 2 · Clinical parameters ---------------- */}
+          <Step
+            n={2}
+            title="Clinical Parameters"
+            subtitle="What is included, which teeth, and the restoration spec"
+            summary={stepSummary[2]}
+            open={step === 2}
+            onToggle={() => setStep(step === 2 ? 0 : 2)}
+            complete={stepComplete(2)}
+            invalid={touched && stepInvalid(2)}
+          >
+          {/* Included — what physically goes to the lab with this case */}
+          <section className="mb-6">
+            <SectionHeader icon={PackageCheck} n="a" title="Included" subtitle="Tick everything being sent to the lab with this case" />
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Items sent with the case" hint="Choose as many as apply">
                 <MultiSelect
@@ -762,10 +982,10 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
             </div>
           </section>
 
-          {/* 2. Tooth selection */}
-          <section>
+          {/* Tooth selection */}
+          <section className="mb-6">
             <div className="mb-4 flex items-center justify-between">
-              <SectionHeader icon={ScanLine} n="2" title="Tooth Selection" subtitle="Click teeth to add units, pontic spans, or full arches" />
+              <SectionHeader icon={ScanLine} n="b" title="Tooth Selection" subtitle="Tap teeth, or use a quick-select group" />
               <div className="flex overflow-hidden rounded-lg border border-slate-300">
                 {["FDI", "Universal"].map((nn) => (
                   <button key={nn} type="button" onClick={() => setNotation(nn)} className={`px-3 py-1.5 text-xs font-semibold transition ${notation === nn ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
@@ -774,7 +994,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                 ))}
               </div>
             </div>
-            <ToothChart notation={notation} selection={selection} mode={mode} setMode={setMode} onToggle={toggleTooth} onArch={toggleArch} onClear={() => setSelection({})} />
+            <ToothChart notation={notation} selection={selection} mode={mode} setMode={setMode} onToggle={toggleTooth} onArch={toggleArch} onClear={() => setSelection({})} onGroup={toggleGroup} />
             <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${err("teeth") ? "bg-rose-50 text-rose-600" : "bg-slate-50 text-slate-600"}`}>
               {selectedTeeth.length === 0 ? (
                 err("teeth") ? "Select at least one tooth." : "No teeth selected yet."
@@ -792,9 +1012,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
             </div>
           </section>
 
-          {/* 2. Work order */}
+          {/* Work order */}
           <section>
-            <SectionHeader icon={Layers} n="3" title="Work Order & Materials" subtitle="Restoration category drives the material menu" />
+            <SectionHeader icon={Layers} n="c" title="Work Order & Materials" subtitle="Restoration category drives the material menu" />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Restoration Category" required>
                 <select className={inputCls} value={category} onChange={(e) => onCategoryChange(e.target.value)}>
@@ -889,8 +1109,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                   </Field>
                 </>
               )}
-              {HAS_STUMP.includes(category) && (
-                <Field label="Stump Shade" hint="Ivoclar ND system">
+              {showStump && (
+                <Field label="Stump Shade" hint="Needed for translucent materials">
                   {isRefer ? (
                     <input className={inputCls} value={REFER} disabled readOnly />
                   ) : (
@@ -913,19 +1133,26 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
               )}
             </div>
           </section>
+            <div className="mt-4 flex justify-end">
+              <button type="button" onClick={() => setStep(3)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                Next · Logistics <ChevronDown size={15} className="-rotate-90" />
+              </button>
+            </div>
+          </Step>
 
-          {/* 3. Lab & logistics */}
+          {/* ---------------- STEP 3 · Logistics & attachments ---------------- */}
+          <Step
+            n={3}
+            title="Logistics & Attachments"
+            subtitle="Delivery, express handling, scans and instructions"
+            summary={stepSummary[3]}
+            open={step === 3}
+            onToggle={() => setStep(step === 3 ? 0 : 3)}
+            complete={stepComplete(3)}
+            invalid={false}
+          >
           <section>
-            <SectionHeader icon={Building2} n="4" title="Target Lab & Logistics" subtitle="Turnaround auto-calculated from the lab profile" />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Select Lab" required>
-                <select className={`${inputCls} ${err("labId") ? "border-rose-400 ring-rose-100" : ""}`} value={labId} onChange={(e) => setLabId(e.target.value)}>
-                  <option value="">Select lab…</option>
-                  {labs.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name} — {l.tat}d TAT · +{l.expressPct ?? 20}% express</option>
-                  ))}
-                </select>
-              </Field>
               <Field label="Deliver to Clinic on">
                 <input type="date" className={inputCls} value={insertionDate} onChange={(e) => setInsertionDate(e.target.value)} />
               </Field>
@@ -990,9 +1217,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
             </div>
           </section>
 
-          {/* 4. Attachments & notes */}
-          <section>
-            <SectionHeader icon={Upload} n="5" title="Digital Attachments & Notes" subtitle="Attach STL scans and shade photos (simulated)" />
+          {/* Attachments & notes */}
+          <section className="mt-6">
+            <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach STL scans and shade photos (simulated)" />
             <div className="grid gap-3 sm:grid-cols-2">
               {/* STL scans */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
@@ -1048,42 +1275,73 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
               </Field>
             </div>
           </section>
+          </Step>
         </div>
 
-        {/* Footer */}
-        <div className={`flex items-center justify-between gap-3 border-t px-6 py-4 ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-100 bg-slate-50"}`}>
-          {touched && !isValid ? (
-            <div className="flex items-start gap-1.5 text-xs text-rose-700">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-              <span>
-                <b>Can't submit yet</b> — still needed: {missing.join(", ")}.
+        {/* Sticky summary + action bar — always in reach, never scrolls away */}
+        <div className={`border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
+          {/* live order summary */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-6 py-2 text-[11px]">
+            <span className="flex items-center gap-1 font-semibold text-slate-700">
+              <ScanLine size={12} className="text-slate-400" />
+              {selectedTeeth.length} {selectedTeeth.length === 1 ? "unit" : "units"}
+            </span>
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-600">{category}{material ? ` — ${material}` : ""}</span>
+            {vitaShade && vitaShade !== "N/A" && vitaShade !== REFER && (
+              <>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-600">Shade {vitaShade}</span>
+              </>
+            )}
+            <span className="ml-auto flex items-center gap-3">
+              {rush && (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-700">
+                  <Zap size={10} /> EXPRESS ${fee.total.toLocaleString()}
+                </span>
+              )}
+              <span className={`flex items-center gap-1 font-semibold ${insufficientTime ? "text-rose-600" : "text-slate-700"}`}>
+                <Calendar size={12} className="text-slate-400" />
+                Ready {estReady ? iso(estReady) : "—"}
               </span>
+            </span>
+          </div>
+
+          {/* actions */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
+            {touched && !isValid ? (
+              <div className="flex items-start gap-1.5 text-xs text-rose-700">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                <span>
+                  <b>Can't submit yet</b> — still needed: {missing.join(", ")}.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                <Info size={13} />
+                {isValid ? "Ready to submit to lab queue." : "Complete required fields (*) to submit."}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => submit()}
+                className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
+              >
+                <Check size={15} /> Submit Prescription
+              </button>
+              <button
+                type="button"
+                onClick={() => submit({ share: true })}
+                title="Save the case and immediately share the Rx PDF with the patient"
+                className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
+              >
+                <MessageCircle size={15} /> Submit &amp; Share
+              </button>
             </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-              <Info size={13} />
-              {isValid ? "Ready to submit to lab queue." : "Complete required fields (*) to submit."}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => submit()}
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
-            >
-              <Check size={15} /> Submit Prescription
-            </button>
-            <button
-              type="button"
-              onClick={() => submit({ share: true })}
-              title="Save the case and immediately share the Rx PDF with the patient"
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
-            >
-              <MessageCircle size={15} /> Submit &amp; Share
-            </button>
           </div>
         </div>
       </div>
