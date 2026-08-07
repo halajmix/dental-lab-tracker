@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import {
   X,
   Check,
@@ -19,6 +19,7 @@ import {
   DollarSign,
   MessageCircle,
   PackageCheck,
+  ChevronDown,
 } from "lucide-react";
 import { caseFee } from "./Analytics.jsx";
 
@@ -359,6 +360,71 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400";
 
+/**
+ * Dropdown that allows multiple selections. Behaves like a <select multiple>
+ * but with tick boxes, so items are toggled with a plain click.
+ */
+function MultiSelect({ options, selected, onToggle, placeholder = "Select…" }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    const onEsc = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={boxRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`${inputCls} flex items-center justify-between gap-2 text-left`}
+      >
+        <span className={selected.length ? "truncate text-slate-800" : "text-slate-400"}>
+          {selected.length ? `${selected.length} selected · ${selected.join(", ")}` : placeholder}
+        </span>
+        <ChevronDown size={16} className={`shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+          {options.map((opt) => {
+            const checked = selected.includes(opt);
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => onToggle(opt)}
+                className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition ${
+                  checked ? "bg-blue-50 font-semibold text-blue-800" : "text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                <span
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                    checked ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white"
+                  }`}
+                >
+                  {checked && <Check size={11} strokeWidth={3} />}
+                </span>
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, children, hint, required }) {
   return (
     <label className="block">
@@ -610,42 +676,23 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
           {/* 1. Included — what physically goes to the lab with this case */}
           <section>
             <SectionHeader icon={PackageCheck} n="1" title="Included" subtitle="Tick everything being sent to the lab with this case" />
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {INCLUDED_ITEMS.map((item) => {
-                  const checked = included.includes(item);
-                  return (
-                    <label
-                      key={item}
-                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
-                        checked ? "border-blue-500 bg-blue-50 font-semibold text-blue-800" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleIncluded(item)}
-                        className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      {item}
-                    </label>
-                  );
-                })}
-              </div>
-              <label className="mt-3 block">
-                <span className="mb-1 block text-xs font-medium text-slate-600">Others</span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Items sent with the case" hint="Choose as many as apply">
+                <MultiSelect
+                  options={INCLUDED_ITEMS}
+                  selected={included}
+                  onToggle={toggleIncluded}
+                  placeholder="Select items…"
+                />
+              </Field>
+              <Field label="Others" hint="Anything not listed above">
                 <input
                   className={inputCls}
                   value={includedOther}
                   onChange={(e) => setIncludedOther(e.target.value)}
-                  placeholder="Anything else sent with the case…"
+                  placeholder="Type anything else sent…"
                 />
-              </label>
-              <p className="mt-2 text-[11px] text-slate-500">
-                {includedSummary({ included, includedOther })
-                  ? <>Sending: <span className="font-medium text-slate-700">{includedSummary({ included, includedOther })}</span></>
-                  : "Nothing ticked yet."}
-              </p>
+              </Field>
             </div>
           </section>
 
