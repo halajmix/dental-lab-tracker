@@ -24,6 +24,8 @@ import {
   History as HistoryIcon,
   MessageCircle,
   PackageCheck,
+  Phone,
+  Mail,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary, includedSummary, UNIVERSAL_TO_FDI } from "./PrescriptionForm.jsx";
 import {
@@ -41,6 +43,7 @@ import {
 import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
+import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
 
 /* ------------------------------------------------------------------ */
@@ -61,9 +64,9 @@ const CLINIC = {
 /* ------------------------------------------------------------------ */
 
 const SEED_LABS = [
-  { id: "lab-apex", name: "Apex Dental Lab", contact: "+1 (555) 210-4471", address: "12 Prosthetic Way, Portland OR", tat: 5, expressPct: 20 },
-  { id: "lab-precision", name: "Precision Ceramics", contact: "+1 (555) 883-1120", address: "88 Ceramic Blvd, Seattle WA", tat: 7, expressPct: 25 },
-  { id: "lab-digital", name: "Digital Craft Ortho", contact: "+1 (555) 640-9932", address: "5 Aligner Ave, Austin TX", tat: 4, expressPct: 15 },
+  { id: "lab-apex", name: "Apex Dental Lab", contact: "+1 (555) 210-4471", email: "cases@apexdentallab.com", address: "12 Prosthetic Way, Portland OR", tat: 5, expressPct: 20 },
+  { id: "lab-precision", name: "Precision Ceramics", contact: "+1 (555) 883-1120", email: "orders@precisionceramics.com", address: "88 Ceramic Blvd, Seattle WA", tat: 7, expressPct: 25 },
+  { id: "lab-digital", name: "Digital Craft Ortho", contact: "+1 (555) 640-9932", email: "hello@digitalcraftortho.com", address: "5 Aligner Ave, Austin TX", tat: 4, expressPct: 15 },
 ];
 
 // Build a prescription object for seed cases (teeth as [universal, role] pairs).
@@ -171,8 +174,8 @@ const inputCls =
 
 // Bump when the shape of persisted data changes incompatibly; a mismatch
 // discards the old blob and falls back to seed data instead of crashing.
-// v14: preferred delivery time added to cases.
-const STORAGE_VERSION = 14;
+// v15: labs gained an email address for direct contact.
+const STORAGE_VERSION = 15;
 const STORAGE_KEY = "dentatrack.v" + STORAGE_VERSION;
 const CLINIC_USER = "Dr. Chen (Clinic)";
 
@@ -230,6 +233,7 @@ export default function DentalLabTracker() {
   const [remakeCaseId, setRemakeCaseId] = useState(null);
   const [printCaseId, setPrintCaseId] = useState(null);
   const [autoShare, setAutoShare] = useState(false);
+  const [contactCaseId, setContactCaseId] = useState(null);
   const [dentistTab, setDentistTab] = useState("cases"); // "cases" | "analytics"
 
   /* ---------------- Stage mutation helpers (append audit history) ---------------- */
@@ -367,6 +371,7 @@ export default function DentalLabTracker() {
   const drawerCase = cases.find((c) => c.id === drawerCaseId) || null;
   const remakeCase = cases.find((c) => c.id === remakeCaseId) || null;
   const printCase = cases.find((c) => c.id === printCaseId) || null;
+  const contactCase = cases.find((c) => c.id === contactCaseId) || null;
   const currentRole = isDentist ? "dentist" : "lab";
   const currentUser = isDentist ? CLINIC_USER : `${activeLab?.name ?? "Lab"} Tech`;
 
@@ -437,6 +442,7 @@ export default function DentalLabTracker() {
             onAdvance={(id) => advanceStage(id, CLINIC_USER, "dentist")}
             onOpenCase={setDrawerCaseId}
             onShareRx={(id) => { setAutoShare(true); setPrintCaseId(id); }}
+            onContactLab={setContactCaseId}
             onExportCsv={() => exportCasesCSV(filteredDentistCases, labs, CLINIC.dentist, "dentatrack-clinic-cases.csv")}
             dentistTab={dentistTab}
             setDentistTab={setDentistTab}
@@ -491,6 +497,13 @@ export default function DentalLabTracker() {
         autoShare={autoShare}
         onClose={() => { setPrintCaseId(null); setAutoShare(false); }}
       />
+      <ContactLabModal
+        open={!!contactCase}
+        caseObj={contactCase}
+        lab={contactCase ? labById[contactCase.labId] : null}
+        clinic={CLINIC}
+        onClose={() => setContactCaseId(null)}
+      />
     </div>
   );
 }
@@ -529,6 +542,7 @@ function DentistDashboard({
   onAdvance,
   onOpenCase,
   onShareRx,
+  onContactLab,
   onExportCsv,
   dentistTab,
   setDentistTab,
@@ -632,9 +646,28 @@ function DentistDashboard({
           {labs.map((l) => (
             <div key={l.id} className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-start justify-between">
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800">{l.name}</p>
-                  <p className="text-xs text-slate-500">{l.contact}</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                    {l.contact && l.contact !== "—" && (
+                      <a
+                        href={`tel:${l.contact.replace(/[^\d+]/g, "")}`}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                        title={`Call ${l.name}`}
+                      >
+                        <Phone size={11} /> {l.contact}
+                      </a>
+                    )}
+                    {l.email && (
+                      <a
+                        href={`mailto:${l.email}`}
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 p-1 text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+                        title={`Email ${l.email}`}
+                      >
+                        <Mail size={12} />
+                      </a>
+                    )}
+                  </div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
@@ -718,27 +751,36 @@ function DentistDashboard({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-medium text-slate-800">{c.patientName}</div>
-                    <div className="text-xs text-slate-500">{c.patientId}</div>
-                    {c.prescription && (
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                        <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">
-                          <Layers size={10} /> {c.prescription.category}
+                    {/* Primary line — who and what, scannable at a glance */}
+                    <div className="flex flex-wrap items-baseline gap-x-1.5">
+                      <span className="font-bold text-slate-800">{c.patientName}</span>
+                      {c.prescription?.category && (
+                        <>
+                          <span className="text-slate-300">·</span>
+                          <span className="font-bold text-blue-700">{c.prescription.category}</span>
+                        </>
+                      )}
+                      {c.prescription?.rush && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                          <Zap size={9} /> EXPRESS
                         </span>
-                        {c.prescription.material && <span className="text-slate-400">{c.prescription.material}</span>}
-                        {c.prescription.rush && (
-                          <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
-                            <Zap size={10} /> EXPRESS +${caseFee(c, labs).surcharge.toLocaleString()}
-                          </span>
-                        )}
-                        {toothSummary(c.prescription) && (
-                          <span className="w-full text-slate-400">
-                            Teeth <span className="font-medium text-slate-600">{toothSummary(c.prescription)}</span>
-                            {c.prescription.vitaShade && c.prescription.vitaShade !== "N/A" && <> · Shade {c.prescription.vitaShade}</>}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                      )}
+                    </div>
+                    {/* Secondary line — muted metadata + spec pills */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="text-slate-400">{c.patientId}</span>
+                      {toothSummary(c.prescription) && (
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
+                          Teeth {toothSummary(c.prescription)}
+                        </span>
+                      )}
+                      {c.prescription?.vitaShade && c.prescription.vitaShade !== "N/A" && (
+                        <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
+                          Shade {c.prescription.vitaShade}
+                        </span>
+                      )}
+                      {c.prescription?.material && <span className="text-slate-400">{c.prescription.material}</span>}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{labById[c.labId]?.name ?? "—"}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -767,6 +809,13 @@ function DentistDashboard({
                           <ClipboardCheck size={13} /> Receive
                         </button>
                       )}
+                      <button
+                        onClick={() => onContactLab(c.id)}
+                        className="flex items-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                        title={`Message ${labById[c.labId]?.name ?? "the lab"} about this case`}
+                      >
+                        <Phone size={13} /> Contact Lab
+                      </button>
                       <button
                         onClick={() => onShareRx(c.id)}
                         className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
@@ -987,12 +1036,14 @@ function LabCaseCard({ c, lab, onAdvance, onRevert, onOpenCase, onLogRemake }) {
 function AddLabModal({ open, onClose, onSave }) {
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
+  const [email, setEmail] = useState("");
   const [tat, setTat] = useState(5);
   const [expressPct, setExpressPct] = useState(20);
 
   const reset = () => {
     setName("");
     setContact("");
+    setEmail("");
     setTat(5);
     setExpressPct(20);
   };
@@ -1000,7 +1051,13 @@ function AddLabModal({ open, onClose, onSave }) {
   const submit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onSave({ name: name.trim(), contact: contact.trim() || "—", tat: Number(tat) || 1, expressPct: Number(expressPct) || 0 });
+    onSave({
+      name: name.trim(),
+      contact: contact.trim() || "—",
+      email: email.trim(),
+      tat: Number(tat) || 1,
+      expressPct: Number(expressPct) || 0,
+    });
     reset();
     onClose();
   };
@@ -1011,9 +1068,14 @@ function AddLabModal({ open, onClose, onSave }) {
         <Field label="Lab Name *">
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Summit Prosthetics" autoFocus />
         </Field>
-        <Field label="Contact">
-          <input className={inputCls} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Phone or email" />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Phone">
+            <input className={inputCls} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="+968 90000000" />
+          </Field>
+          <Field label="Email">
+            <input type="email" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="orders@lab.com" />
+          </Field>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Standard TAT (days)">
             <input type="number" min={1} className={inputCls} value={tat} onChange={(e) => setTat(e.target.value)} />
