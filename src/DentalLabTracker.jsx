@@ -936,6 +936,17 @@ function LabCaseCard({ c, lab, onAdvance, onRevert, onOpenCase, onLogRemake }) {
               <span>Files: <span className="font-medium text-slate-700">{c.prescription.files.length} attached</span></span>
             )}
           </div>
+          {c.prescription.implantSystem && (
+            <div className="mt-1.5 border-t border-slate-200 pt-1.5">
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-semibold text-indigo-700">
+                  {c.prescription.implantSystem}
+                </span>
+                <span className="text-slate-600">{c.prescription.abutmentType}</span>
+                <span className="font-semibold text-slate-700">{c.prescription.abutmentDiameter}</span>
+              </span>
+            </div>
+          )}
           {includedSummary(c.prescription) && (
             <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-slate-500">
               <span className="inline-flex items-center gap-1 font-medium text-slate-600">

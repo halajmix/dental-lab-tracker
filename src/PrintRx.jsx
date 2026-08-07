@@ -386,6 +386,13 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
           </div>
           <div>
             <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Specifications</p>
+            {rx?.implantSystem && (
+              <>
+                <Spec label="Implant System" value={rx.implantSystem} />
+                <Spec label="Abutment Type" value={rx.abutmentType} />
+                <Spec label="Abutment / Platform Ø" value={rx.abutmentDiameter} />
+              </>
+            )}
             <Spec label="Stump / Prep Shade" value={rx?.stumpShade} />
           </div>
         </div>

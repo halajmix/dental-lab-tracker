@@ -167,6 +167,44 @@ const PONTIC_DESIGNS = ["Modified Ridge Lap", "Ovate", "Sanitary / Hygienic", "C
 // Preferred time of day for the lab to deliver back to the clinic.
 const DELIVERY_TIMES = ["Anytime", "Morning", "Afternoon", "Before sunset", "Evening"];
 
+// Implant cases: the lab cannot order components without the system + platform.
+const IMPLANT_CATEGORIES = ["Crown - implant", "Bridge - implant"];
+const IMPLANT_SYSTEMS = [
+  "Straumann",
+  "Nobel Biocare",
+  "Astra Tech / Dentsply",
+  "Osstem",
+  "MIS",
+  "Dentium",
+  "MegaGen",
+  "Zimmer Biomet",
+  "BioHorizons",
+  "Neodent",
+  "Implant Direct",
+  "Other — see notes",
+];
+const ABUTMENT_TYPES = [
+  "Stock / Straight",
+  "Stock / Angled",
+  "Custom CAD-CAM",
+  "Ti-Base",
+  "Multi-unit",
+  "Locator / Overdenture",
+];
+const ABUTMENT_DIAMETERS = [
+  "Ø3.0 (Narrow)",
+  "Ø3.3 (Narrow)",
+  "Ø3.5 (Narrow)",
+  "Ø3.75 (Regular)",
+  "Ø4.0 (Regular)",
+  "Ø4.3 (Regular)",
+  "Ø4.5 (Regular)",
+  "Ø4.8 (Wide)",
+  "Ø5.0 (Wide)",
+  "Ø5.5 (Wide)",
+  "Ø6.0 (Extra Wide)",
+];
+
 // Physical items sent to the lab alongside the case.
 const INCLUDED_ITEMS = [
   "Upper impression",
@@ -484,6 +522,11 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
   const [labId, setLabId] = useState("");
   const [deliveryTime, setDeliveryTime] = useState(DELIVERY_TIMES[0]);
+
+  // Implant-only specs (blank so the dentist has to choose deliberately).
+  const [implantSystem, setImplantSystem] = useState("");
+  const [abutmentType, setAbutmentType] = useState("");
+  const [abutmentDiameter, setAbutmentDiameter] = useState("");
   const [rush, setRush] = useState(false);
   const [insertionDate, setInsertionDate] = useState("");
 
@@ -524,6 +567,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const hasPontics = selectedTeeth.some((t) => t.role === "pontic");
   const isRefer = category === REFER_CATEGORY; // spec fields collapse to "Refer to notes"
   const isSplint = SPLINT_CATEGORIES.includes(category); // no material / shade
+  const isImplant = IMPLANT_CATEGORIES.includes(category); // needs system + abutment specs
 
   /* ---------------- TAT auto-calculation ---------------- */
   const lab = labById[labId];
@@ -540,6 +584,13 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   /* ---------------- category change resets dependent spec fields ---------------- */
   const onCategoryChange = (c) => {
     setCategory(c);
+    // Leaving an implant category clears its specs so they can't leak onto a
+    // non-implant case.
+    if (!IMPLANT_CATEGORIES.includes(c)) {
+      setImplantSystem("");
+      setAbutmentType("");
+      setAbutmentDiameter("");
+    }
     if (c === REFER_CATEGORY) {
       // Everything is detailed in the notes → collapse the spec fields.
       setMaterial(REFER);
@@ -576,6 +627,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     teeth: selectedTeeth.length === 0,
     labId: !labId,
     material: !isSplint && !material,
+    implantSystem: isImplant && !implantSystem,
+    abutmentType: isImplant && !abutmentType,
+    abutmentDiameter: isImplant && !abutmentDiameter,
   };
   const isValid = !Object.values(errors).some(Boolean);
 
@@ -586,6 +640,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     teeth: "At least one tooth on the chart",
     labId: "Target lab",
     material: "Material",
+    implantSystem: "Implant system",
+    abutmentType: "Abutment type",
+    abutmentDiameter: "Abutment diameter",
   };
   const missing = Object.entries(errors)
     .filter(([, bad]) => bad)
@@ -599,6 +656,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setPonticDesign(PONTIC_DESIGNS[0]);
     setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
+    setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter("");
     setScans([]); setPhotos([]); setNotes(""); setTouched(false);
   };
 
@@ -617,6 +675,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
       vitaShade,
       stumpShade,
       ponticDesign: BRIDGE_CATEGORIES.includes(category) ? ponticDesign : null,
+      implantSystem: isImplant ? implantSystem : null,
+      abutmentType: isImplant ? abutmentType : null,
+      abutmentDiameter: isImplant ? abutmentDiameter : null,
       rush,
       baseTat,
       effTat,
@@ -754,6 +815,46 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                     </select>
                   )}
                 </Field>
+              )}
+              {isImplant && (
+                <>
+                  <Field label="Implant System" required>
+                    <select
+                      className={`${inputCls} ${err("implantSystem") ? "border-rose-400 ring-rose-100" : ""}`}
+                      value={implantSystem}
+                      onChange={(e) => setImplantSystem(e.target.value)}
+                    >
+                      <option value="">Select system…</option>
+                      {IMPLANT_SYSTEMS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Abutment Type" required>
+                    <select
+                      className={`${inputCls} ${err("abutmentType") ? "border-rose-400 ring-rose-100" : ""}`}
+                      value={abutmentType}
+                      onChange={(e) => setAbutmentType(e.target.value)}
+                    >
+                      <option value="">Select abutment…</option>
+                      {ABUTMENT_TYPES.map((a) => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Abutment / Platform Ø" required>
+                    <select
+                      className={`${inputCls} ${err("abutmentDiameter") ? "border-rose-400 ring-rose-100" : ""}`}
+                      value={abutmentDiameter}
+                      onChange={(e) => setAbutmentDiameter(e.target.value)}
+                    >
+                      <option value="">Select diameter…</option>
+                      {ABUTMENT_DIAMETERS.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
               )}
               {!SPLINT_CATEGORIES.includes(category) && (
                 <>
