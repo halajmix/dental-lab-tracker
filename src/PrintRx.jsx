@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Printer, FileText, Zap, Paperclip, MessageCircle, Loader2, Check, Download } from "lucide-react";
-import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary } from "./PrescriptionForm.jsx";
+import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, includedSummary } from "./PrescriptionForm.jsx";
 
 // Render an on-screen element to a multi-page A4 PDF File (no print dialog).
 // html2canvas + jsPDF are ~700kB, so they're loaded on demand at first share.
@@ -344,6 +344,23 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
               </span>
             )}
           </div>
+        </div>
+
+        {/* what was sent with the case */}
+        <div className="mt-5 rounded-lg border border-slate-200 p-3 print:border-slate-300">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Included with this case</p>
+          {includedSummary(rx) ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {[...(rx?.included ?? []), ...(rx?.includedOther?.trim() ? [rx.includedOther.trim()] : [])].map((item) => (
+                <span key={item} className="flex items-center gap-1.5 text-slate-700">
+                  <span className="flex h-3.5 w-3.5 items-center justify-center border border-slate-500 text-[9px] font-bold leading-none">✓</span>
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">Nothing recorded as sent with this case.</p>
+          )}
         </div>
 
         {/* tooth diagram */}

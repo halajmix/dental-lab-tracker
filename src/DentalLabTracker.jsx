@@ -23,8 +23,9 @@ import {
   ListChecks,
   History as HistoryIcon,
   MessageCircle,
+  PackageCheck,
 } from "lucide-react";
-import PrescriptionForm, { toothSummary, UNIVERSAL_TO_FDI } from "./PrescriptionForm.jsx";
+import PrescriptionForm, { toothSummary, includedSummary, UNIVERSAL_TO_FDI } from "./PrescriptionForm.jsx";
 import {
   STAGES,
   STAGE_INDEX,
@@ -924,6 +925,14 @@ function LabCaseCard({ c, lab, onAdvance, onRevert, onOpenCase, onLogRemake }) {
               <span>Files: <span className="font-medium text-slate-700">{c.prescription.files.length} attached</span></span>
             )}
           </div>
+          {includedSummary(c.prescription) && (
+            <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-slate-500">
+              <span className="inline-flex items-center gap-1 font-medium text-slate-600">
+                <PackageCheck size={11} /> Included:
+              </span>{" "}
+              <span className="font-medium text-slate-700">{includedSummary(c.prescription)}</span>
+            </div>
+          )}
           {c.prescription.notes && (
             <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-slate-500">
               <span className="font-medium text-slate-600">Notes:</span> {c.prescription.notes}

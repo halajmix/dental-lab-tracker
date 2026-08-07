@@ -18,6 +18,7 @@ import {
   ScanLine,
   DollarSign,
   MessageCircle,
+  PackageCheck,
 } from "lucide-react";
 import { caseFee } from "./Analytics.jsx";
 
@@ -121,6 +122,25 @@ const STUMP_SHADES = ["N/A", "ND1", "ND2", "ND3", "ND4", "ND5", "ND6", "ND7", "N
 const REFER = "Refer to notes";
 const REFER_CATEGORY = "Others - refer to notes";
 const PONTIC_DESIGNS = ["Modified Ridge Lap", "Ovate", "Sanitary / Hygienic", "Conical", "Ridge Lap (Full)"];
+
+// Physical items sent to the lab alongside the case.
+const INCLUDED_ITEMS = [
+  "Upper impression",
+  "Lower impression",
+  "Bite registration",
+  "Wax rims",
+  "Verification jig",
+  "Shade photos",
+  "Study model / cast",
+  "Previous prosthesis",
+];
+
+// Human summary of what was sent with the case (used on cards + printout).
+export function includedSummary(prescription) {
+  const inc = prescription?.included ?? [];
+  const other = prescription?.includedOther?.trim();
+  return [...inc, ...(other ? [other] : [])].join(", ");
+}
 
 /* ================================================================== */
 /*  Utilities                                                          */
@@ -333,6 +353,12 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const [patientId, setPatientId] = useState("");
   const [patientPhone, setPatientPhone] = useState("");
 
+  // What is physically going to the lab with this case.
+  const [included, setIncluded] = useState([]);
+  const [includedOther, setIncludedOther] = useState("");
+  const toggleIncluded = (item) =>
+    setIncluded((prev) => (prev.includes(item) ? prev.filter((i) => i !== item) : [...prev, item]));
+
   const [category, setCategory] = useState("Crown / bridge - tooth");
   const [material, setMaterial] = useState(CATEGORIES["Crown / bridge - tooth"].materials[0]);
   const [shadeGuide, setShadeGuide] = useState("Vita Classical");
@@ -451,6 +477,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const reset = () => {
     setNotation("FDI"); setMode("unit"); setSelection({});
     setPatientName(""); setPatientId(""); setPatientPhone("");
+    setIncluded([]); setIncludedOther("");
     setCategory("Crown / bridge - tooth"); setMaterial(CATEGORIES["Crown / bridge - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setPonticDesign(PONTIC_DESIGNS[0]);
@@ -464,6 +491,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     if (!isValid) return;
     const prescription = {
       notation,
+      included,
+      includedOther: includedOther.trim(),
       teeth: selectedTeeth,
       category,
       material,
@@ -531,10 +560,52 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
             </Field>
           </div>
 
-          {/* 1. Tooth selection */}
+          {/* 1. Included — what physically goes to the lab with this case */}
+          <section>
+            <SectionHeader icon={PackageCheck} n="1" title="Included" subtitle="Tick everything being sent to the lab with this case" />
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {INCLUDED_ITEMS.map((item) => {
+                  const checked = included.includes(item);
+                  return (
+                    <label
+                      key={item}
+                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                        checked ? "border-blue-500 bg-blue-50 font-semibold text-blue-800" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleIncluded(item)}
+                        className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      {item}
+                    </label>
+                  );
+                })}
+              </div>
+              <label className="mt-3 block">
+                <span className="mb-1 block text-xs font-medium text-slate-600">Others</span>
+                <input
+                  className={inputCls}
+                  value={includedOther}
+                  onChange={(e) => setIncludedOther(e.target.value)}
+                  placeholder="Anything else sent with the case…"
+                />
+              </label>
+              <p className="mt-2 text-[11px] text-slate-500">
+                {includedSummary({ included, includedOther })
+                  ? <>Sending: <span className="font-medium text-slate-700">{includedSummary({ included, includedOther })}</span></>
+                  : "Nothing ticked yet."}
+              </p>
+            </div>
+          </section>
+
+          {/* 2. Tooth selection */}
           <section>
             <div className="mb-4 flex items-center justify-between">
-              <SectionHeader icon={ScanLine} n="1" title="Tooth Selection" subtitle="Click teeth to add units, pontic spans, or full arches" />
+              <SectionHeader icon={ScanLine} n="2" title="Tooth Selection" subtitle="Click teeth to add units, pontic spans, or full arches" />
               <div className="flex overflow-hidden rounded-lg border border-slate-300">
                 {["FDI", "Universal"].map((nn) => (
                   <button key={nn} type="button" onClick={() => setNotation(nn)} className={`px-3 py-1.5 text-xs font-semibold transition ${notation === nn ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
@@ -558,7 +629,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
           {/* 2. Work order */}
           <section>
-            <SectionHeader icon={Layers} n="2" title="Work Order & Materials" subtitle="Restoration category drives the material menu" />
+            <SectionHeader icon={Layers} n="3" title="Work Order & Materials" subtitle="Restoration category drives the material menu" />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Restoration Category" required>
                 <select className={inputCls} value={category} onChange={(e) => onCategoryChange(e.target.value)}>
@@ -640,7 +711,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
           {/* 3. Lab & logistics */}
           <section>
-            <SectionHeader icon={Building2} n="3" title="Target Lab & Logistics" subtitle="Turnaround auto-calculated from the lab profile" />
+            <SectionHeader icon={Building2} n="4" title="Target Lab & Logistics" subtitle="Turnaround auto-calculated from the lab profile" />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Select Lab" required>
                 <select className={`${inputCls} ${err("labId") ? "border-rose-400 ring-rose-100" : ""}`} value={labId} onChange={(e) => setLabId(e.target.value)}>
@@ -709,7 +780,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
           {/* 4. Attachments & notes */}
           <section>
-            <SectionHeader icon={Upload} n="4" title="Digital Attachments & Notes" subtitle="Attach STL scans and shade photos (simulated)" />
+            <SectionHeader icon={Upload} n="5" title="Digital Attachments & Notes" subtitle="Attach STL scans and shade photos (simulated)" />
             <div className="grid gap-3 sm:grid-cols-2">
               {/* STL scans */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
