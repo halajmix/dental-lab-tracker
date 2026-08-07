@@ -10,6 +10,7 @@ import { QualityBreakdown } from "./Remake.jsx";
 const BASE_PRICE = {
   "Crown / bridge - tooth": 420,
   "Crown / bridge - implant": 950,
+  Veneer: 480,
   "Removable denture": 680,
   "Orthodontics splint": 300,
   "Single layer splint - soft": 180,

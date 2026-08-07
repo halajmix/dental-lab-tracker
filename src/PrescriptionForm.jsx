@@ -64,6 +64,15 @@ const CATEGORIES = {
   "Crown / bridge - implant": {
     materials: ["Zirconia", "E.max", "PFM", "PMMA", "Zirconia with metal bar"],
   },
+  Veneer: {
+    materials: [
+      "Lithium Disilicate (E.max)",
+      "Feldspathic Porcelain",
+      "Layered Zirconia",
+      "Composite",
+      "PMMA Provisional",
+    ],
+  },
   "Removable denture": {
     materials: [
       "Cobalt-Chrome RPD Framework",
@@ -86,8 +95,9 @@ const CATEGORIES = {
 
 // Crown/bridge categories where pontic design is relevant (when pontics selected).
 const BRIDGE_CATEGORIES = ["Crown / bridge - tooth", "Crown / bridge - implant"];
-// Only natural-tooth crowns/bridges have a prepared die → a stump shade.
-const HAS_STUMP = ["Crown / bridge - tooth"];
+// Tooth-borne preps have a die → a stump shade. Veneers especially: they are
+// thin and translucent, so the underlying stump colour drives the final result.
+const HAS_STUMP = ["Crown / bridge - tooth", "Veneer"];
 // Splints are clear/acrylic appliances → no tooth shade or shade guide.
 const SPLINT_CATEGORIES = [
   "Orthodontics splint",
