@@ -64,15 +64,6 @@ const CATEGORIES = {
   "Crown / bridge - implant": {
     materials: ["Zirconia", "E.max", "PFM", "PMMA", "Zirconia with metal bar"],
   },
-  Veneer: {
-    materials: [
-      "Lithium Disilicate (E.max)",
-      "Feldspathic Porcelain",
-      "Layered Zirconia",
-      "Composite",
-      "PMMA Provisional",
-    ],
-  },
   "Removable denture": {
     materials: [
       "Cobalt-Chrome RPD Framework",
@@ -95,9 +86,8 @@ const CATEGORIES = {
 
 // Crown/bridge categories where pontic design is relevant (when pontics selected).
 const BRIDGE_CATEGORIES = ["Crown / bridge - tooth", "Crown / bridge - implant"];
-// Tooth-borne preps have a die → a stump shade. Veneers especially: they are
-// thin and translucent, so the underlying stump colour drives the final result.
-const HAS_STUMP = ["Crown / bridge - tooth", "Veneer"];
+// Only natural-tooth crowns/bridges have a prepared die → a stump shade.
+const HAS_STUMP = ["Crown / bridge - tooth"];
 // Splints are clear/acrylic appliances → no tooth shade or shade guide.
 const SPLINT_CATEGORIES = [
   "Orthodontics splint",
@@ -168,8 +158,9 @@ const fmtSize = (b) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` :
 export function toothSummary(prescription) {
   if (!prescription?.teeth?.length) return "";
   const n = prescription.notation;
+  const suffix = { pontic: "(p)", veneer: "(v)" };
   const parts = prescription.teeth.map(
-    (t) => `${n === "FDI" ? t.fdi : t.universal}${t.role === "pontic" ? "(p)" : ""}`
+    (t) => `${n === "FDI" ? t.fdi : t.universal}${suffix[t.role] ?? ""}`
   );
   return parts.join(", ");
 }
@@ -192,16 +183,18 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
   ];
 
   const isSel = (u) => !!selection[u];
+  // A bridge span only joins crowns and pontics — a veneer is a standalone unit.
+  const isBridgeUnit = (u) => selection[u] === "unit" || selection[u] === "pontic";
 
   // Contiguous selected spans (per row) → draw a connector bar behind them.
   const spans = [];
   rows.forEach((row) => {
     let start = null;
     row.teeth.forEach((u, i) => {
-      const sel = isSel(u);
+      const sel = isBridgeUnit(u);
       if (sel && start === null) start = i;
       const atEnd = i === row.teeth.length - 1;
-      const next = !atEnd && isSel(row.teeth[i + 1]);
+      const next = !atEnd && isBridgeUnit(row.teeth[i + 1]);
       if (sel && (atEnd || !next)) {
         if (i > start) spans.push({ y: row.y, x1: colX(start), x2: colX(i) + TOOTH_W });
         start = null;
@@ -219,6 +212,7 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
         <div className="flex overflow-hidden rounded-lg border border-slate-300">
           {[
             { k: "unit", txt: "Unit / Crown", on: "bg-blue-600 text-white" },
+            { k: "veneer", txt: "Veneer", on: "bg-teal-600 text-white" },
             { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white" },
           ].map((m) => (
             <button
@@ -264,10 +258,12 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
 
           {rows.map((row) =>
             row.teeth.map((u, i) => {
-              const role = selection[u]; // undefined | 'unit' | 'pontic'
+              const role = selection[u]; // undefined | 'unit' | 'veneer' | 'pontic'
               const x = colX(i);
-              const fill = role === "unit" ? "#2563eb" : role === "pontic" ? "#f59e0b" : "#f8fafc";
-              const stroke = role === "unit" ? "#1d4ed8" : role === "pontic" ? "#d97706" : "#cbd5e1";
+              const fill =
+                role === "unit" ? "#2563eb" : role === "veneer" ? "#0d9488" : role === "pontic" ? "#f59e0b" : "#f8fafc";
+              const stroke =
+                role === "unit" ? "#1d4ed8" : role === "veneer" ? "#0f766e" : role === "pontic" ? "#d97706" : "#cbd5e1";
               const textFill = role ? "#ffffff" : "#475569";
               const tt = toothType(u);
               // crown height varies slightly by type for a chart-like feel
@@ -307,6 +303,7 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
       {/* Legend */}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-blue-600" /> Unit / Crown</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-teal-600" /> Veneer</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-amber-600 bg-amber-500" /> Pontic</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-blue-500/20" /> Bridge span</span>
         <span className="ml-auto font-medium text-slate-600">{notation} notation</span>
@@ -631,7 +628,12 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
               ) : (
                 <span>
                   <span className="font-semibold">{selectedTeeth.length} unit{selectedTeeth.length > 1 ? "s" : ""}:</span>{" "}
-                  {selectedTeeth.map((t) => `${notation === "FDI" ? t.fdi : t.universal}${t.role === "pontic" ? " (pontic)" : ""}`).join(", ")}
+                  {selectedTeeth
+                    .map((t) => {
+                      const n = notation === "FDI" ? t.fdi : t.universal;
+                      return `${n}${t.role === "pontic" ? " (pontic)" : t.role === "veneer" ? " (veneer)" : ""}`;
+                    })
+                    .join(", ")}
                 </span>
               )}
             </div>

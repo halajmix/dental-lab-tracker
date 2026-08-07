@@ -121,7 +121,8 @@ function ToothDiagram({ prescription }) {
     <div className="flex justify-center gap-[2px]">
       {teeth.map((u) => {
         const role = roleOf[u];
-        const fill = role === "unit" ? "#1e40af" : role === "pontic" ? "#b45309" : "#ffffff";
+        const fill =
+          role === "unit" ? "#1e40af" : role === "veneer" ? "#0f766e" : role === "pontic" ? "#b45309" : "#ffffff";
         const color = role ? "#ffffff" : "#334155";
         return (
           <div
