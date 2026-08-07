@@ -50,7 +50,7 @@ const label = (u, notation) => (notation === "FDI" ? UNIVERSAL_TO_FDI[u] : u);
 
 // Restoration categories → material / specification menus.
 const CATEGORIES = {
-  "Crown / bridge - tooth": {
+  "Crown - tooth": {
     materials: [
       "Monolithic Zirconia",
       "Layered Zirconia",
@@ -61,8 +61,38 @@ const CATEGORIES = {
       "PMMA Provisional",
     ],
   },
-  "Crown / bridge - implant": {
+  "Crown - implant": {
+    materials: ["Zirconia", "E.max", "PFM", "PMMA"],
+  },
+  "Bridge - tooth (conventional)": {
+    materials: [
+      "Monolithic Zirconia",
+      "Layered Zirconia",
+      "Lithium Disilicate (E.max)",
+      "PFM (Porcelain-Fused-to-Metal)",
+      "Full Gold / Precious",
+      "PMMA Provisional",
+    ],
+  },
+  "Bridge - tooth (Resin Bonded)": {
+    materials: [
+      "Monolithic Zirconia",
+      "Lithium Disilicate (E.max)",
+      "PFM (metal wing)",
+      "Cast Metal Wing",
+    ],
+  },
+  "Bridge - implant": {
     materials: ["Zirconia", "E.max", "PFM", "PMMA", "Zirconia with metal bar"],
+  },
+  Veneer: {
+    materials: [
+      "Lithium Disilicate (E.max)",
+      "Feldspathic Porcelain",
+      "Layered Zirconia",
+      "Composite",
+      "PMMA Provisional",
+    ],
   },
   "Removable denture": {
     materials: [
@@ -84,10 +114,20 @@ const CATEGORIES = {
   "Others - refer to notes": { materials: ["Refer to notes"] },
 };
 
-// Crown/bridge categories where pontic design is relevant (when pontics selected).
-const BRIDGE_CATEGORIES = ["Crown / bridge - tooth", "Crown / bridge - implant"];
-// Only natural-tooth crowns/bridges have a prepared die → a stump shade.
-const HAS_STUMP = ["Crown / bridge - tooth"];
+// Bridges always carry a pontic, so pontic design is always shown for these.
+const BRIDGE_CATEGORIES = [
+  "Bridge - tooth (conventional)",
+  "Bridge - tooth (Resin Bonded)",
+  "Bridge - implant",
+];
+// Only natural-tooth preps have a die → a stump shade (implants do not).
+// Veneers included: they are thin and translucent, so the prep colour shows through.
+const HAS_STUMP = [
+  "Crown - tooth",
+  "Bridge - tooth (conventional)",
+  "Bridge - tooth (Resin Bonded)",
+  "Veneer",
+];
 // Splints are clear/acrylic appliances → no tooth shade or shade guide.
 const SPLINT_CATEGORIES = [
   "Orthodontics splint",
@@ -366,8 +406,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const toggleIncluded = (item) =>
     setIncluded((prev) => (prev.includes(item) ? prev.filter((i) => i !== item) : [...prev, item]));
 
-  const [category, setCategory] = useState("Crown / bridge - tooth");
-  const [material, setMaterial] = useState(CATEGORIES["Crown / bridge - tooth"].materials[0]);
+  const [category, setCategory] = useState("Crown - tooth");
+  const [material, setMaterial] = useState(CATEGORIES["Crown - tooth"].materials[0]);
   const [shadeGuide, setShadeGuide] = useState("Vita Classical");
   const [vitaShade, setVitaShade] = useState("A2");
   const [stumpShade, setStumpShade] = useState("N/A");
@@ -485,7 +525,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     setNotation("FDI"); setMode("unit"); setSelection({});
     setPatientName(""); setPatientId(""); setPatientPhone("");
     setIncluded([]); setIncludedOther("");
-    setCategory("Crown / bridge - tooth"); setMaterial(CATEGORIES["Crown / bridge - tooth"].materials[0]);
+    setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setPonticDesign(PONTIC_DESIGNS[0]);
     setLabId(""); setRush(false); setInsertionDate("");
@@ -506,7 +546,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
       shadeGuide,
       vitaShade,
       stumpShade,
-      ponticDesign: BRIDGE_CATEGORIES.includes(category) && hasPontics ? ponticDesign : null,
+      ponticDesign: BRIDGE_CATEGORIES.includes(category) ? ponticDesign : null,
       rush,
       baseTat,
       effTat,
@@ -709,7 +749,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                   )}
                 </Field>
               )}
-              {BRIDGE_CATEGORIES.includes(category) && hasPontics && (
+              {BRIDGE_CATEGORIES.includes(category) && (
                 <Field label="Pontic Design" hint="Applied to pontic units">
                   <select className={inputCls} value={ponticDesign} onChange={(e) => setPonticDesign(e.target.value)}>
                     {PONTIC_DESIGNS.map((s) => (

@@ -106,17 +106,17 @@ function makeSeedCases() {
   });
   return [
     base("C-1042", "Sarah Mitchell", "PT-88213", "lab-apex", "Apex Dental Lab", 5, STAGE_INDEX.WORK_IN_PROGRESS,
-      seedRx("FDI", [[8, "unit"], [9, "unit"]], "Crown / bridge - tooth", "Lithium Disilicate (E.max)", "A2")),
+      seedRx("FDI", [[8, "unit"], [9, "unit"]], "Crown - tooth", "Lithium Disilicate (E.max)", "A2")),
     // ≤48h away, still in lab → red alert
     base("C-1043", "James Okafor", "PT-88220", "lab-precision", "Precision Ceramics", 1, STAGE_INDEX.WORK_IN_PROGRESS,
-      seedRx("FDI", [[30, "unit"]], "Crown / bridge - tooth", "Monolithic Zirconia", "A3", { rush: true, notes: "Deep chamfer, tight contacts." })),
+      seedRx("FDI", [[30, "unit"]], "Crown - tooth", "Monolithic Zirconia", "A3", { rush: true, notes: "Deep chamfer, tight contacts." })),
     // work complete but appointment is today → dentist needs to receive (alert)
     base("C-1044", "Elena Rodríguez", "PT-88231", "lab-apex", "Apex Dental Lab", 0, STAGE_INDEX.WORK_COMPLETE,
-      seedRx("FDI", [[3, "unit"], [4, "unit"], [5, "unit"]], "Crown / bridge - implant", "Zirconia", "B1")),
+      seedRx("FDI", [[3, "unit"], [4, "unit"], [5, "unit"]], "Crown - implant", "Zirconia", "B1")),
     base("C-1045", "Toshiro Yamada", "PT-88240", "lab-digital", "Digital Craft Ortho", 9, STAGE_INDEX.STILL_AT_CLINIC,
       seedRx("Universal", [], "Orthodontics splint", "", "N/A", { shadeGuide: "N/A", notes: "Vacuum-formed retainer." })),
     base("C-1046", "Grace Bennett", "PT-88255", "lab-precision", "Precision Ceramics", -2, STAGE_INDEX.CLINIC_RECEIVED,
-      seedRx("FDI", [[13, "unit"], [12, "pontic"], [11, "unit"]], "Crown / bridge - tooth", "PFM (Porcelain-Fused-to-Metal)", "A3.5", { ponticDesign: "Modified Ridge Lap" }),
+      seedRx("FDI", [[13, "unit"], [12, "pontic"], [11, "unit"]], "Bridge - tooth (conventional)", "PFM (Porcelain-Fused-to-Metal)", "A3.5", { ponticDesign: "Modified Ridge Lap" }),
       {
         handover: { type: "Patient Picked Up", pickupDate: daysFromNow(-2), staffNotes: "Collected by patient at front desk.", confirmed: true },
         remake: { classification: "laboratory", reason: "Porcelain fracture", cost: 120, replacementDate: daysFromNow(6), loggedAt: new Date().toISOString() },
@@ -169,8 +169,8 @@ const inputCls =
 
 // Bump when the shape of persisted data changes incompatibly; a mismatch
 // discards the old blob and falls back to seed data instead of crashing.
-// v12: removed the fake demo patient phone (caused "invalid number" in WhatsApp).
-const STORAGE_VERSION = 12;
+// v13: crown/bridge categories split into 5 + Veneer added.
+const STORAGE_VERSION = 13;
 const STORAGE_KEY = "dentatrack.v" + STORAGE_VERSION;
 const CLINIC_USER = "Dr. Chen (Clinic)";
 
