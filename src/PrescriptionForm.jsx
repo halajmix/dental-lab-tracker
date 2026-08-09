@@ -20,6 +20,7 @@ import {
   MessageCircle,
   PackageCheck,
   ChevronDown,
+  Plus,
 } from "lucide-react";
 import { caseFee } from "./Analytics.jsx";
 
@@ -581,6 +582,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const [patientName, setPatientName] = useState("");
   const [patientId, setPatientId] = useState("");
   const [patientPhone, setPatientPhone] = useState("");
+  const [showPatientExtras, setShowPatientExtras] = useState(false);
 
   // What is physically going to the lab with this case.
   const [included, setIncluded] = useState([]);
@@ -739,7 +741,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
   const reset = () => {
     setNotation("FDI"); setMode("unit"); setSelection({});
-    setPatientName(""); setPatientId(""); setPatientPhone("");
+    setPatientName(""); setPatientId(""); setPatientPhone(""); setShowPatientExtras(false);
     setIncluded([]); setIncludedOther("");
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
@@ -859,12 +861,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
               <Field label="Patient Name" required>
                 <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
               </Field>
-              <Field label="Patient ID">
-                <input className={inputCls} value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="PT-00000" />
-              </Field>
-              <Field label="Patient WhatsApp" hint="Optional · to share the Rx PDF">
-                <input className={inputCls} value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="+968 90000000" />
-              </Field>
               <Field label="Select Lab" required>
                 <select className={`${inputCls} ${err("labId") ? "border-rose-400 ring-rose-100" : ""}`} value={labId} onChange={(e) => setLabId(e.target.value)}>
                   <option value="">Select lab…</option>
@@ -874,6 +870,34 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                 </select>
               </Field>
             </div>
+
+            {/* Patient ID / WhatsApp are optional and tucked away by default so
+                the form reads as two fields, not four. */}
+            {showPatientExtras ? (
+              <div className="mt-3 grid gap-3 border-t border-dashed border-slate-200 pt-3 sm:grid-cols-2">
+                <Field label="Patient ID">
+                  <input className={inputCls} value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="PT-00000" />
+                </Field>
+                <Field label="Patient WhatsApp" hint="Optional · to share the Rx PDF">
+                  <input className={inputCls} value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="+968 90000000" />
+                </Field>
+                <button
+                  type="button"
+                  onClick={() => setShowPatientExtras(false)}
+                  className="flex w-fit items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-600 sm:col-span-2"
+                >
+                  <ChevronDown size={13} className="rotate-180" /> Hide
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowPatientExtras(true)}
+                className="mt-3 flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
+              >
+                <Plus size={13} /> Add patient ID or WhatsApp <span className="font-normal text-slate-400">(optional)</span>
+              </button>
+            )}
             <div className="mt-4 flex justify-end">
               <button type="button" onClick={() => setStep(2)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
                 Next · Clinical <ChevronDown size={15} className="-rotate-90" />
