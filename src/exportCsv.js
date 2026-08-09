@@ -46,7 +46,10 @@ function rowFor(c, labName, dentist) {
  */
 export function exportCasesCSV(cases, labs, dentist = "Dr. Chen", filename = "dentatrack-cases.csv") {
   const labName = (id) => labs.find((l) => l.id === id)?.name ?? "—";
-  const lines = [HEADERS, ...cases.map((c) => rowFor(c, labName(c.labId), dentist))];
+  // `dentist` may be a fixed string, or a per-case resolver (labs can serve
+  // more than one clinic, so a single fixed name would misattribute rows).
+  const dentistFor = typeof dentist === "function" ? dentist : () => dentist;
+  const lines = [HEADERS, ...cases.map((c) => rowFor(c, labName(c.labId), dentistFor(c)))];
   const csv = lines.map((row) => row.map(cell).join(",")).join("\r\n");
 
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });

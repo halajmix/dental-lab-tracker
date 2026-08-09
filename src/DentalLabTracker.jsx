@@ -10,7 +10,6 @@ import {
   Home,
   Clock,
   FlaskConical,
-  RefreshCw,
   FileText,
   Zap,
   Layers,
@@ -26,8 +25,9 @@ import {
   PackageCheck,
   Phone,
   Mail,
+  LogOut,
 } from "lucide-react";
-import PrescriptionForm, { toothSummary, includedSummary, UNIVERSAL_TO_FDI } from "./PrescriptionForm.jsx";
+import PrescriptionForm, { toothSummary, includedSummary } from "./PrescriptionForm.jsx";
 import {
   STAGES,
   STAGE_INDEX,
@@ -38,98 +38,13 @@ import {
   AppointmentBadge,
   CaseDrawer,
   isUrgent,
-  buildHistory,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
-
-/* ------------------------------------------------------------------ */
-/*  Clinic profile (used by the printable prescription + CSV)          */
-/* ------------------------------------------------------------------ */
-
-const CLINIC = {
-  name: "Muscat Smile Dental Clinic",
-  address: "Al Khuwair, Muscat, Oman",
-  contact: "+968 2400 0000 · care@muscatsmile.om",
-  license: "OM-DC-4471",
-  dentist: "Dr. A. Chen, BDS",
-  dentistLicense: "OM-DDS-88213",
-};
-
-/* ------------------------------------------------------------------ */
-/*  Seed data — stage semantics + audit history come from the engine   */
-/* ------------------------------------------------------------------ */
-
-const SEED_LABS = [
-  { id: "lab-apex", name: "Apex Dental Lab", contact: "+1 (555) 210-4471", email: "cases@apexdentallab.com", address: "12 Prosthetic Way, Portland OR", tat: 5, expressPct: 20 },
-  { id: "lab-precision", name: "Precision Ceramics", contact: "+1 (555) 883-1120", email: "orders@precisionceramics.com", address: "88 Ceramic Blvd, Seattle WA", tat: 7, expressPct: 25 },
-  { id: "lab-digital", name: "Digital Craft Ortho", contact: "+1 (555) 640-9932", email: "hello@digitalcraftortho.com", address: "5 Aligner Ave, Austin TX", tat: 4, expressPct: 15 },
-];
-
-// Build a prescription object for seed cases (teeth as [universal, role] pairs).
-const seedRx = (notation, teeth, category, material, vitaShade, opts = {}) => ({
-  notation,
-  teeth: teeth.map(([u, role]) => ({ universal: u, fdi: UNIVERSAL_TO_FDI[u], role })),
-  category,
-  material,
-  shadeGuide: opts.shadeGuide ?? "Vita Classical",
-  vitaShade,
-  stumpShade: opts.stump ?? "N/A",
-  ponticDesign: opts.ponticDesign ?? null,
-  rush: opts.rush ?? false,
-  files: opts.files ?? [],
-  notes: opts.notes ?? "",
-});
-
-// Appointment dates are computed relative to "now" so the ≤48h alert logic
-// is always demonstrable regardless of the wall clock.
-const daysFromNow = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-};
-
-function makeSeedCases() {
-  const base = (id, patientName, patientId, labId, labName, apptOffset, stageIndex, prescription, extra = {}) => ({
-    id,
-    patientName,
-    patientId,
-    patientPhone: extra.patientPhone ?? "",
-    labId,
-    appointmentDate: daysFromNow(apptOffset),
-    deliveryTime: extra.deliveryTime ?? "Anytime",
-    createdDate: daysFromNow(-4),
-    stageIndex,
-    handover: extra.handover ?? null,
-    remake: extra.remake ?? null,
-    prescription,
-    history: buildHistory(stageIndex, labName),
-  });
-  return [
-    base("C-1042", "Sarah Mitchell", "PT-88213", "lab-apex", "Apex Dental Lab", 5, STAGE_INDEX.WORK_IN_PROGRESS,
-      seedRx("FDI", [[8, "unit"], [9, "unit"]], "Crown - tooth", "Lithium Disilicate (E.max)", "A2")),
-    // ≤48h away, still in lab → red alert
-    base("C-1043", "James Okafor", "PT-88220", "lab-precision", "Precision Ceramics", 1, STAGE_INDEX.WORK_IN_PROGRESS,
-      seedRx("FDI", [[30, "unit"]], "Crown - tooth", "Monolithic Zirconia", "A3", { rush: true, notes: "Deep chamfer, tight contacts." }),
-      { deliveryTime: "Morning" }),
-    // work complete but appointment is today → dentist needs to receive (alert)
-    base("C-1044", "Elena Rodríguez", "PT-88231", "lab-apex", "Apex Dental Lab", 0, STAGE_INDEX.WORK_COMPLETE,
-      seedRx("FDI", [[3, "unit"], [4, "unit"], [5, "unit"]], "Crown - implant", "Zirconia", "B1")),
-    base("C-1045", "Toshiro Yamada", "PT-88240", "lab-digital", "Digital Craft Ortho", 9, STAGE_INDEX.STILL_AT_CLINIC,
-      seedRx("Universal", [], "Orthodontics splint", "", "N/A", { shadeGuide: "N/A", notes: "Vacuum-formed retainer." })),
-    base("C-1046", "Grace Bennett", "PT-88255", "lab-precision", "Precision Ceramics", -2, STAGE_INDEX.CLINIC_RECEIVED,
-      seedRx("FDI", [[13, "unit"], [12, "pontic"], [11, "unit"]], "Bridge - tooth (conventional)", "PFM (Porcelain-Fused-to-Metal)", "A3.5", { ponticDesign: "Modified Ridge Lap" }),
-      {
-        handover: { type: "Patient Picked Up", pickupDate: daysFromNow(-2), staffNotes: "Collected by patient at front desk.", confirmed: true },
-        remake: { classification: "laboratory", reason: "Porcelain fracture", cost: 120, replacementDate: daysFromNow(6), loggedAt: new Date().toISOString() },
-      }),
-  ];
-}
-
-const SEED_CASES = makeSeedCases();
+import { fetchLabs, insertLab, fetchCases, insertCase, updateCase, subscribeCases, fetchClinicsByIds, caseFromRow } from "./lib/data.js";
 
 /* ------------------------------------------------------------------ */
 /*  Small shared UI pieces                                             */
@@ -169,52 +84,74 @@ const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 
 /* ------------------------------------------------------------------ */
-/*  Persistence — localStorage-backed state                            */
+/*  Main component — data now lives in Supabase, scoped per account    */
+/*  by RLS (a clinic sees only its cases, a lab sees only its own).    */
 /* ------------------------------------------------------------------ */
 
-// Bump when the shape of persisted data changes incompatibly; a mismatch
-// discards the old blob and falls back to seed data instead of crashing.
-// v15: labs gained an email address for direct contact.
-const STORAGE_VERSION = 15;
-const STORAGE_KEY = "dentatrack.v" + STORAGE_VERSION;
-const CLINIC_USER = "Dr. Chen (Clinic)";
+export default function DentalLabTracker({ auth }) {
+  const { profile, clinic, lab, signOut } = auth;
+  const isDentist = profile.role === "dentist";
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.version !== STORAGE_VERSION) return null;
-    return parsed;
-  } catch {
-    return null; // corrupt / unavailable storage → seed data
-  }
-}
+  const [labs, setLabs] = useState([]);
+  const [cases, setCases] = useState([]);
+  const [clinicsById, setClinicsById] = useState({});
+  const [loadingData, setLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-/* ------------------------------------------------------------------ */
-/*  Main component                                                     */
-/* ------------------------------------------------------------------ */
-
-export default function DentalLabTracker() {
-  // Lazy-init from localStorage once, falling back to seed data.
-  const persisted = loadState();
-  const [labs, setLabs] = useState(persisted?.labs ?? SEED_LABS);
-  const [cases, setCases] = useState(persisted?.cases ?? SEED_CASES);
-
-  // Persist on every change to labs or cases.
+  // Initial load, re-run if the signed-in org changes.
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ version: STORAGE_VERSION, labs, cases })
-      );
-    } catch {
-      /* storage full or blocked — non-fatal, app keeps working in-memory */
-    }
-  }, [labs, cases]);
+    let cancelled = false;
+    setLoadingData(true);
+    Promise.all([fetchLabs(), fetchCases()])
+      .then(([labsData, casesData]) => {
+        if (cancelled) return;
+        setLabs(labsData);
+        setCases(casesData);
+        setLoadError("");
+      })
+      .catch((err) => !cancelled && setLoadError(err.message))
+      .finally(() => !cancelled && setLoadingData(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
 
-  // View: "dentist" or a specific lab id.
-  const [view, setView] = useState("dentist");
+  // Realtime — the other side of a case (dentist <-> lab) sees changes live.
+  useEffect(() => {
+    const scope = isDentist ? { clinicId: clinic?.id } : { labId: lab?.id };
+    if (!scope.clinicId && !scope.labId) return;
+    const unsubscribe = subscribeCases(scope, (payload) => {
+      setCases((prev) => {
+        if (payload.eventType === "DELETE") {
+          return prev.filter((c) => c.id !== payload.old.id);
+        }
+        const updated = caseFromRow(payload.new);
+        const idx = prev.findIndex((c) => c.id === updated.id);
+        if (idx === -1) return [updated, ...prev];
+        const next = [...prev];
+        next[idx] = updated;
+        return next;
+      });
+    });
+    return unsubscribe;
+  }, [isDentist, clinic?.id, lab?.id]);
+
+  // A lab may serve several clinics — fetch the ordering clinic's letterhead
+  // (for Print Rx / CSV attribution) the first time a case from it is seen.
+  useEffect(() => {
+    const ids = [...new Set(cases.map((c) => c.clinicId).filter(Boolean))];
+    const missing = ids.filter((id) => !clinicsById[id]);
+    if (missing.length === 0) return;
+    fetchClinicsByIds(missing)
+      .then((rows) => {
+        setClinicsById((prev) => {
+          const next = { ...prev };
+          for (const c of rows) next[c.id] = c;
+          return next;
+        });
+      })
+      .catch((err) => console.error("Failed to load clinic info", err));
+  }, [cases]);
 
   // Modals
   const [showLabModal, setShowLabModal] = useState(false);
@@ -236,7 +173,10 @@ export default function DentalLabTracker() {
   const [contactCaseId, setContactCaseId] = useState(null);
   const [dentistTab, setDentistTab] = useState("cases"); // "cases" | "analytics"
 
-  /* ---------------- Stage mutation helpers (append audit history) ---------------- */
+  const currentRole = isDentist ? "dentist" : "lab";
+  const currentUser = profile.name || (isDentist ? clinic?.dentist : lab?.name) || "Unknown";
+
+  /* ---------------- Stage mutation helpers (append audit history, then persist) ---------------- */
 
   const logEntry = (action, toStage, by, role, label) => ({
     at: new Date().toISOString(),
@@ -247,91 +187,82 @@ export default function DentalLabTracker() {
     role,
   });
 
-  const advanceStage = (caseId, by, role) =>
-    setCases((prev) =>
-      prev.map((c) => {
-        if (c.id !== caseId) return c;
-        const next = c.stageIndex + 1;
-        if (next > LAST_STAGE) return c;
-        return { ...c, stageIndex: next, history: [...(c.history ?? []), logEntry("advance", next, by, role)] };
-      })
-    );
+  const persist = async (caseId, patch) => {
+    setCases((prev) => prev.map((c) => (c.id === caseId ? { ...c, ...patch } : c)));
+    try {
+      await updateCase(caseId, patch);
+    } catch (err) {
+      console.error("Failed to save case update", err);
+      alert("Couldn't save that change — " + err.message);
+    }
+  };
 
-  const revertStage = (caseId, by, role) =>
-    setCases((prev) =>
-      prev.map((c) => {
-        if (c.id !== caseId) return c;
-        const prevIdx = c.stageIndex - 1;
-        if (prevIdx < 0) return c;
-        // Reverting out of Clinic Received discards any handover record.
-        const clearHandover = c.stageIndex === LAST_STAGE ? { handover: null } : {};
-        return { ...c, stageIndex: prevIdx, ...clearHandover, history: [...(c.history ?? []), logEntry("revert", prevIdx, by, role)] };
-      })
-    );
+  const advanceStage = (caseId, by, role) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    const next = c.stageIndex + 1;
+    if (next > LAST_STAGE) return;
+    persist(caseId, { stageIndex: next, history: [...(c.history ?? []), logEntry("advance", next, by, role)] });
+  };
 
-  const saveHandover = (caseId, data, by) =>
-    setCases((prev) =>
-      prev.map((c) => {
-        if (c.id !== caseId) return c;
-        const label = `${data.type}${data.confirmed ? " (confirmed)" : ""}`;
-        return { ...c, handover: { ...data }, history: [...(c.history ?? []), logEntry("handover", LAST_STAGE, by, "dentist", label)] };
-      })
-    );
+  const revertStage = (caseId, by, role) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    const prevIdx = c.stageIndex - 1;
+    if (prevIdx < 0) return;
+    // Reverting out of Clinic Received discards any handover record.
+    const clearHandover = c.stageIndex === LAST_STAGE ? { handover: null } : {};
+    persist(caseId, { stageIndex: prevIdx, ...clearHandover, history: [...(c.history ?? []), logEntry("revert", prevIdx, by, role)] });
+  };
 
-  const logRemake = (caseId, data, by) =>
-    setCases((prev) =>
-      prev.map((c) => {
-        if (c.id !== caseId) return c;
-        const cls = data.classification === "clinical" ? "Clinical" : "Laboratory";
-        const label = `Remake · ${cls}: ${data.reason}`;
-        return { ...c, remake: { ...data }, history: [...(c.history ?? []), logEntry("remake", c.stageIndex, by, currentRole, label)] };
-      })
-    );
+  const saveHandover = (caseId, data, by) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    const label = `${data.type}${data.confirmed ? " (confirmed)" : ""}`;
+    persist(caseId, { handover: { ...data }, history: [...(c.history ?? []), logEntry("handover", LAST_STAGE, by, "dentist", label)] });
+  };
+
+  const logRemake = (caseId, data, by) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    const cls = data.classification === "clinical" ? "Clinical" : "Laboratory";
+    const label = `Remake · ${cls}: ${data.reason}`;
+    persist(caseId, { remake: { ...data }, history: [...(c.history ?? []), logEntry("remake", c.stageIndex, by, currentRole, label)] });
+  };
 
   /* ---------------- Add lab / add case ---------------- */
 
-  const addLab = (data) => {
-    const id = `lab-${data.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 20)}-${Date.now().toString().slice(-4)}`;
-    setLabs((p) => [...p, { id, ...data }]);
-  };
-
-  const addCase = (data, opts = {}) => {
-    // Highest existing C-#### + 1, so ids stay unique across reloads.
-    const maxNum = cases
-      .map((c) => parseInt(c.id.replace(/\D/g, ""), 10))
-      .filter((n) => !isNaN(n))
-      .reduce((m, n) => Math.max(m, n), 1046);
-    const id = `C-${maxNum + 1}`;
-    setCases((p) => [
-      {
-        id,
-        createdDate: new Date().toISOString().slice(0, 10),
-        stageIndex: STAGE_INDEX.STILL_AT_CLINIC, // Rx submitted, work still at clinic (20%)
-        handover: null,
-        remake: null,
-        history: [logEntry("created", STAGE_INDEX.STILL_AT_CLINIC, CLINIC_USER, "dentist")],
-        ...data,
-      },
-      ...p,
-    ]);
-    // "Submit & Share" → jump straight into the share flow for the new case.
-    if (opts.share) {
-      setAutoShare(true);
-      setPrintCaseId(id);
-    }
-  };
-
-  // Restore seed data and clear persisted state (dev / demo escape hatch).
-  const resetDemoData = () => {
-    if (!window.confirm("Reset to demo data? This clears all saved labs and cases.")) return;
+  const addLab = async (data) => {
     try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
+      const saved = await insertLab(clinic.id, data);
+      setLabs((p) => [...p, saved]);
+    } catch (err) {
+      console.error(err);
+      alert("Couldn't save the lab — " + err.message);
     }
-    setLabs(SEED_LABS);
-    setCases(makeSeedCases());
-    setView("dentist");
+  };
+
+  const addCase = async (data, opts = {}) => {
+    const newCaseData = {
+      ...data,
+      createdDate: new Date().toISOString().slice(0, 10),
+      stageIndex: STAGE_INDEX.STILL_AT_CLINIC, // Rx submitted, work still at clinic (20%)
+      handover: null,
+      remake: null,
+      history: [logEntry("created", STAGE_INDEX.STILL_AT_CLINIC, currentUser, "dentist")],
+    };
+    try {
+      const saved = await insertCase(clinic.id, newCaseData);
+      setCases((p) => [saved, ...p]);
+      // "Submit & Share" → jump straight into the share flow for the new case.
+      if (opts.share) {
+        setAutoShare(true);
+        setPrintCaseId(saved.id);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Couldn't save the case — " + err.message);
+    }
   };
 
   /* ---------------- Derived lists ---------------- */
@@ -359,21 +290,16 @@ export default function DentalLabTracker() {
     });
   }, [cases, labFilter, statusFilter, query]);
 
-  const labQueue = useMemo(
-    () => (view !== "dentist" ? cases.filter((c) => c.labId === view) : []),
-    [cases, view]
-  );
+  // RLS already scopes `cases` to this lab's own queue when role === "lab".
+  const labQueue = useMemo(() => (!isDentist && lab ? cases.filter((c) => c.labId === lab.id) : []), [cases, isDentist, lab]);
 
-  const isDentist = view === "dentist";
-  const activeLab = !isDentist ? labById[view] : null;
-
-  // Lifecycle drawer context (role + acting user depend on the active view).
+  // Lifecycle drawer context (role + acting user depend on the active account).
   const drawerCase = cases.find((c) => c.id === drawerCaseId) || null;
   const remakeCase = cases.find((c) => c.id === remakeCaseId) || null;
   const printCase = cases.find((c) => c.id === printCaseId) || null;
   const contactCase = cases.find((c) => c.id === contactCaseId) || null;
-  const currentRole = isDentist ? "dentist" : "lab";
-  const currentUser = isDentist ? CLINIC_USER : `${activeLab?.name ?? "Lab"} Tech`;
+  const printClinic = printCase ? clinicsById[printCase.clinicId] ?? clinic : null;
+  const contactClinic = contactCase ? clinicsById[contactCase.clinicId] ?? clinic : null;
 
   /* ================================================================ */
   /*  Render                                                          */
@@ -381,7 +307,7 @@ export default function DentalLabTracker() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
-      {/* ------------------------- Header / Role Switcher ------------------------- */}
+      {/* ------------------------- Header / Identity ------------------------- */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2.5">
@@ -394,36 +320,32 @@ export default function DentalLabTracker() {
             </div>
           </div>
 
-          {/* Role Switcher */}
-          <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-slate-100 p-1">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+              {isDentist ? <Stethoscope size={13} className="text-blue-600" /> : <Building2 size={13} className="text-blue-600" />}
+              {isDentist ? clinic?.name : lab?.name}
+              <span className="text-slate-400">· {currentUser}</span>
+            </div>
             <button
-              onClick={() => setView("dentist")}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                isDentist ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              }`}
+              onClick={signOut}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50 hover:text-rose-600"
+              title="Sign out"
             >
-              <Stethoscope size={14} />
-              Dentist Dashboard
+              <LogOut size={14} /> Sign out
             </button>
-            <div className="mx-0.5 hidden h-5 w-px bg-slate-300 sm:block" />
-            {labs.map((l) => (
-              <button
-                key={l.id}
-                onClick={() => setView(l.id)}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  view === l.id ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <Building2 size={14} />
-                {l.name}
-              </button>
-            ))}
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
-        {isDentist ? (
+        {loadError && (
+          <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+            Couldn't load your data: {loadError}
+          </div>
+        )}
+        {loadingData ? (
+          <div className="flex items-center justify-center py-24 text-sm text-slate-400">Loading…</div>
+        ) : isDentist ? (
           <DentistDashboard
             labs={labs}
             labById={labById}
@@ -432,48 +354,49 @@ export default function DentalLabTracker() {
             totalCases={cases.length}
             onAddLab={() => setShowLabModal(true)}
             onAddCase={() => setShowCaseModal(true)}
-            onResetDemo={resetDemoData}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             labFilter={labFilter}
             setLabFilter={setLabFilter}
             query={query}
             setQuery={setQuery}
-            onAdvance={(id) => advanceStage(id, CLINIC_USER, "dentist")}
+            onAdvance={(id) => advanceStage(id, currentUser, "dentist")}
             onOpenCase={setDrawerCaseId}
             onShareRx={(id) => { setAutoShare(true); setPrintCaseId(id); }}
             onContactLab={setContactCaseId}
-            onExportCsv={() => exportCasesCSV(filteredDentistCases, labs, CLINIC.dentist, "dentatrack-clinic-cases.csv")}
+            onExportCsv={() => exportCasesCSV(filteredDentistCases, labs, clinic?.dentist, "dentatrack-clinic-cases.csv")}
             dentistTab={dentistTab}
             setDentistTab={setDentistTab}
           />
         ) : (
           <LabDashboard
-            lab={activeLab}
+            lab={lab}
             queue={labQueue}
-            onAdvance={(id) => advanceStage(id, `${activeLab.name} Tech`, "lab")}
-            onRevert={(id) => revertStage(id, `${activeLab.name} Tech`, "lab")}
+            onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
+            onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
             onOpenCase={setDrawerCaseId}
             onLogRemake={setRemakeCaseId}
-            onExportCsv={() => exportCasesCSV(labQueue, labs, CLINIC.dentist, `dentatrack-${activeLab.id}-cases.csv`)}
+            onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
           />
         )}
       </main>
 
       {/* ------------------------- Modals ------------------------- */}
-      <AddLabModal open={showLabModal} onClose={() => setShowLabModal(false)} onSave={addLab} />
-      <PrescriptionForm
-        open={showCaseModal}
-        onClose={() => setShowCaseModal(false)}
-        onSave={addCase}
-        labs={labs}
-      />
+      {isDentist && <AddLabModal open={showLabModal} onClose={() => setShowLabModal(false)} onSave={addLab} />}
+      {isDentist && (
+        <PrescriptionForm
+          open={showCaseModal}
+          onClose={() => setShowCaseModal(false)}
+          onSave={addCase}
+          labs={labs}
+        />
+      )}
 
       {/* ------------------- Case lifecycle drawer ------------------- */}
       <CaseDrawer
         open={!!drawerCase}
         caseObj={drawerCase}
-        role={isDentist ? "dentist" : "lab"}
+        role={currentRole}
         onClose={() => setDrawerCaseId(null)}
         onAdvance={() => drawerCase && advanceStage(drawerCase.id, currentUser, currentRole)}
         onRevert={() => drawerCase && revertStage(drawerCase.id, currentUser, currentRole)}
@@ -492,18 +415,20 @@ export default function DentalLabTracker() {
       <PrintRx
         open={!!printCase}
         caseObj={printCase}
-        clinic={CLINIC}
+        clinic={printClinic}
         lab={printCase ? labById[printCase.labId] : null}
         autoShare={autoShare}
         onClose={() => { setPrintCaseId(null); setAutoShare(false); }}
       />
-      <ContactLabModal
-        open={!!contactCase}
-        caseObj={contactCase}
-        lab={contactCase ? labById[contactCase.labId] : null}
-        clinic={CLINIC}
-        onClose={() => setContactCaseId(null)}
-      />
+      {isDentist && (
+        <ContactLabModal
+          open={!!contactCase}
+          caseObj={contactCase}
+          lab={contactCase ? labById[contactCase.labId] : null}
+          clinic={contactClinic}
+          onClose={() => setContactCaseId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -532,7 +457,6 @@ function DentistDashboard({
   totalCases,
   onAddLab,
   onAddCase,
-  onResetDemo,
   statusFilter,
   setStatusFilter,
   labFilter,
@@ -559,19 +483,12 @@ function DentistDashboard({
           <h2 className="text-lg font-bold text-slate-800">Dentist Dashboard</h2>
           <p className="flex items-center gap-1.5 text-sm text-slate-500">
             Cases originating from your clinic · {totalCases} total
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600" title="Data is saved to this browser">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> saved locally
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600" title="Live-synced with your lab partners">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> synced
             </span>
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={onResetDemo}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50 hover:text-rose-600"
-            title="Restore demo data and clear saved state"
-          >
-            <RefreshCw size={15} /> Reset
-          </button>
           <button
             onClick={onAddLab}
             className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"

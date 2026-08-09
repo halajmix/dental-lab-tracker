@@ -1,0 +1,625 @@
+import React, { useState } from "react";
+import { Mail, Lock, LogIn, UserPlus, Stethoscope, Building2, Loader2, ArrowLeft, CheckCircle2, KeyRound } from "lucide-react";
+import { supabase } from "./lib/supabaseClient.js";
+import { useAuth } from "./lib/useAuth.js";
+
+const inputCls =
+  "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Shell({ children }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex items-center justify-center gap-2.5">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white">
+            <Stethoscope size={20} />
+          </div>
+          <div>
+            <h1 className="text-base font-bold leading-tight text-slate-800">DentaTrack</h1>
+            <p className="text-[11px] leading-tight text-slate-500">Lab Case Tracking · Lifecycle Engine</p>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ErrorBanner({ message }) {
+  if (!message) return null;
+  return (
+    <div className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-200">
+      {message}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Login / Signup                                                     */
+/* ------------------------------------------------------------------ */
+
+function LoginScreen({ onSwitch, onForgot }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setBusy(false);
+    if (error) setError(error.message);
+  };
+
+  return (
+    <Shell>
+      <h2 className="mb-1 text-lg font-bold text-slate-800">Log in</h2>
+      <p className="mb-5 text-xs text-slate-500">Access your clinic or lab dashboard.</p>
+      <ErrorBanner message={error} />
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Email">
+          <div className="relative">
+            <Mail size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} pl-9`} placeholder="you@clinic.com" />
+          </div>
+        </Field>
+        <Field label="Password">
+          <div className="relative">
+            <Lock size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className={`${inputCls} pl-9`} placeholder="••••••••" />
+          </div>
+        </Field>
+        <div className="-mt-2 text-right">
+          <button type="button" onClick={onForgot} className="text-xs font-semibold text-blue-600 hover:underline">
+            Forgot password?
+          </button>
+        </div>
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <LogIn size={16} />}
+          Log in
+        </button>
+      </form>
+      <p className="mt-5 text-center text-xs text-slate-500">
+        Don't have an account?{" "}
+        <button onClick={onSwitch} className="font-semibold text-blue-600 hover:underline">
+          Register your clinic or lab
+        </button>
+      </p>
+    </Shell>
+  );
+}
+
+function ForgotPasswordScreen({ onBack }) {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin,
+    });
+    setBusy(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setSent(true);
+  };
+
+  if (sent) {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center py-4 text-center">
+          <CheckCircle2 size={36} className="mb-3 text-emerald-500" />
+          <h2 className="mb-1 text-lg font-bold text-slate-800">Check your email</h2>
+          <p className="mb-5 text-sm text-slate-500">
+            If an account exists for <span className="font-semibold text-slate-700">{email}</span>, we sent a password reset link. Click it to set a new password.
+          </p>
+          <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:underline">
+            <ArrowLeft size={14} /> Back to log in
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
+      <button onClick={onBack} className="mb-4 flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700">
+        <ArrowLeft size={13} /> Back to log in
+      </button>
+      <h2 className="mb-1 text-lg font-bold text-slate-800">Reset your password</h2>
+      <p className="mb-5 text-xs text-slate-500">We'll email you a link to set a new one.</p>
+      <ErrorBanner message={error} />
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Email">
+          <div className="relative">
+            <Mail size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} pl-9`} placeholder="you@clinic.com" />
+          </div>
+        </Field>
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+          Send reset link
+        </button>
+      </form>
+    </Shell>
+  );
+}
+
+function ResetPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (password !== confirm) {
+      setError("Passwords don't match.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const { error } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <Shell>
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-800">
+        <KeyRound size={18} className="text-blue-600" /> Set a new password
+      </h2>
+      <p className="mb-5 text-xs text-slate-500">Choose a new password for your account.</p>
+      <ErrorBanner message={error} />
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="New password">
+          <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="At least 6 characters" />
+        </Field>
+        <Field label="Confirm new password">
+          <input type="password" required minLength={6} value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} placeholder="Re-enter password" />
+        </Field>
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+          Update password
+        </button>
+      </form>
+    </Shell>
+  );
+}
+
+function SignupScreen({ onSwitch }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    setBusy(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    // If the project requires email confirmation, no session comes back yet —
+    // the user completes org setup (Onboarding) after they confirm and log in.
+    if (!data.session) {
+      setAwaitingConfirm(true);
+    }
+    // If a session DID come back, useAuth's onAuthStateChange fires on its
+    // own and AuthGate will drop straight into Onboarding — nothing to do here.
+  };
+
+  if (awaitingConfirm) {
+    return (
+      <Shell>
+        <div className="flex flex-col items-center py-4 text-center">
+          <CheckCircle2 size={36} className="mb-3 text-emerald-500" />
+          <h2 className="mb-1 text-lg font-bold text-slate-800">Check your email</h2>
+          <p className="mb-5 text-sm text-slate-500">
+            We sent a confirmation link to <span className="font-semibold text-slate-700">{email}</span>. Click it, then come back and log in.
+          </p>
+          <button onClick={onSwitch} className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:underline">
+            <ArrowLeft size={14} /> Back to log in
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
+      <h2 className="mb-1 text-lg font-bold text-slate-800">Create an account</h2>
+      <p className="mb-5 text-xs text-slate-500">You'll choose Dentist or Lab next.</p>
+      <ErrorBanner message={error} />
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Email">
+          <div className="relative">
+            <Mail size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} pl-9`} placeholder="you@clinic.com" />
+          </div>
+        </Field>
+        <Field label="Password">
+          <div className="relative">
+            <Lock size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className={`${inputCls} pl-9`} placeholder="At least 6 characters" />
+          </div>
+        </Field>
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+          Continue
+        </button>
+      </form>
+      <p className="mt-5 text-center text-xs text-slate-500">
+        Already have an account?{" "}
+        <button onClick={onSwitch} className="font-semibold text-blue-600 hover:underline">
+          Log in
+        </button>
+      </p>
+    </Shell>
+  );
+}
+
+function AuthScreen() {
+  const [mode, setMode] = useState("login"); // "login" | "signup" | "forgot"
+  if (mode === "signup") return <SignupScreen onSwitch={() => setMode("login")} />;
+  if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
+  return <LoginScreen onSwitch={() => setMode("signup")} onForgot={() => setMode("forgot")} />;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Onboarding — runs once a session exists but no profile row does    */
+/* ------------------------------------------------------------------ */
+
+function DentistOnboarding({ userId, onDone, onBack }) {
+  const [clinicName, setClinicName] = useState("");
+  const [dentistName, setDentistName] = useState("");
+  const [contact, setContact] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { data: newClinic, error: clinicErr } = await supabase
+      .from("clinics")
+      .insert({ owner_id: userId, name: clinicName.trim(), dentist: dentistName.trim(), contact: contact.trim() })
+      .select()
+      .single();
+    if (clinicErr) {
+      setBusy(false);
+      setError(clinicErr.message);
+      return;
+    }
+    const { error: profErr } = await supabase
+      .from("profiles")
+      .insert({ id: userId, role: "dentist", name: (name || dentistName).trim(), clinic_id: newClinic.id });
+    setBusy(false);
+    if (profErr) {
+      setError(profErr.message);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <Shell>
+      <button onClick={onBack} className="mb-4 flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700">
+        <ArrowLeft size={13} /> Back
+      </button>
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-800">
+        <Stethoscope size={18} className="text-blue-600" /> Set up your clinic
+      </h2>
+      <p className="mb-5 text-xs text-slate-500">This creates your clinic's private workspace.</p>
+      <ErrorBanner message={error} />
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Clinic name *">
+          <input required value={clinicName} onChange={(e) => setClinicName(e.target.value)} className={inputCls} placeholder="Muscat Smile Dental Clinic" />
+        </Field>
+        <Field label="Dentist name *">
+          <input required value={dentistName} onChange={(e) => setDentistName(e.target.value)} className={inputCls} placeholder="Dr. A. Chen, BDS" />
+        </Field>
+        <Field label="Your display name">
+          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Defaults to dentist name" />
+        </Field>
+        <Field label="Clinic contact">
+          <input value={contact} onChange={(e) => setContact(e.target.value)} className={inputCls} placeholder="+968 2400 0000 · care@clinic.com" />
+        </Field>
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+          Create clinic workspace
+        </button>
+      </form>
+    </Shell>
+  );
+}
+
+function LabOnboarding({ userId, userEmail, onDone, onBack }) {
+  const [checked, setChecked] = useState(false);
+  const [claimable, setClaimable] = useState(null); // lab row found by email, unclaimed
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [showNewForm, setShowNewForm] = useState(false);
+
+  // New-lab form fields
+  const [name, setName] = useState("");
+  const [contact, setContact] = useState("");
+  const [email, setEmail] = useState(userEmail || "");
+  const [tat, setTat] = useState(5);
+  const [expressPct, setExpressPct] = useState(20);
+  const [displayName, setDisplayName] = useState("");
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("labs")
+        .select("*")
+        .is("owner_id", null)
+        .ilike("email", (userEmail || "").trim())
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) {
+        setClaimable(data ?? null);
+        setChecked(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userEmail]);
+
+  const claim = async () => {
+    setBusy(true);
+    setError("");
+    const { error: labErr } = await supabase.from("labs").update({ owner_id: userId }).eq("id", claimable.id);
+    if (labErr) {
+      setBusy(false);
+      setError(labErr.message);
+      return;
+    }
+    const { error: profErr } = await supabase
+      .from("profiles")
+      .insert({ id: userId, role: "lab", name: displayName.trim() || "Lab Tech", lab_id: claimable.id });
+    setBusy(false);
+    if (profErr) {
+      setError(profErr.message);
+      return;
+    }
+    onDone();
+  };
+
+  const createNew = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { data: newLab, error: labErr } = await supabase
+      .from("labs")
+      .insert({
+        owner_id: userId,
+        name: name.trim(),
+        contact: contact.trim(),
+        email: email.trim(),
+        tat: Number(tat) || 1,
+        express_pct: Number(expressPct) || 0,
+      })
+      .select()
+      .single();
+    if (labErr) {
+      setBusy(false);
+      setError(labErr.message);
+      return;
+    }
+    const { error: profErr } = await supabase
+      .from("profiles")
+      .insert({ id: userId, role: "lab", name: (displayName || name).trim(), lab_id: newLab.id });
+    setBusy(false);
+    if (profErr) {
+      setError(profErr.message);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <Shell>
+      <button onClick={onBack} className="mb-4 flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700">
+        <ArrowLeft size={13} /> Back
+      </button>
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-800">
+        <Building2 size={18} className="text-blue-600" /> Set up your lab
+      </h2>
+      <ErrorBanner message={error} />
+
+      {!checked && (
+        <div className="flex items-center justify-center py-8 text-slate-400">
+          <Loader2 size={20} className="animate-spin" />
+        </div>
+      )}
+
+      {checked && claimable && !showNewForm && (
+        <div>
+          <p className="mb-4 text-xs text-slate-500">
+            A dental clinic already added a lab profile using your email — claim it to link your account instead of starting from scratch.
+          </p>
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <p className="font-bold text-slate-800">{claimable.name}</p>
+            <p className="text-xs text-slate-500">{claimable.contact || "No phone on file"} · {claimable.email || "No email"}</p>
+            <p className="mt-1 text-xs text-slate-500">TAT {claimable.tat}d · Express +{claimable.express_pct}%</p>
+          </div>
+          <Field label="Your display name">
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Lead Technician" />
+          </Field>
+          <button
+            onClick={claim}
+            disabled={busy}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+            Claim this lab profile
+          </button>
+          <button onClick={() => setShowNewForm(true)} className="mt-3 w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-700">
+            Not us — register a new lab instead
+          </button>
+        </div>
+      )}
+
+      {checked && (!claimable || showNewForm) && (
+        <form onSubmit={createNew} className="space-y-4">
+          {!claimable && <p className="mb-1 text-xs text-slate-500">No existing profile found for your email — let's register your lab.</p>}
+          <Field label="Lab name *">
+            <input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Apex Dental Lab" />
+          </Field>
+          <Field label="Your display name">
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="Defaults to lab name" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Phone">
+              <input value={contact} onChange={(e) => setContact(e.target.value)} className={inputCls} placeholder="+1 555 000 0000" />
+            </Field>
+            <Field label="Email">
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Standard TAT (days)">
+              <input type="number" min={1} value={tat} onChange={(e) => setTat(e.target.value)} className={inputCls} />
+            </Field>
+            <Field label="Express surcharge (%)">
+              <input type="number" min={0} value={expressPct} onChange={(e) => setExpressPct(e.target.value)} className={inputCls} />
+            </Field>
+          </div>
+          <button
+            type="submit"
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+            Create lab workspace
+          </button>
+          {claimable && (
+            <button type="button" onClick={() => setShowNewForm(false)} className="w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-700">
+              Back to claiming {claimable.name}
+            </button>
+          )}
+        </form>
+      )}
+    </Shell>
+  );
+}
+
+function Onboarding({ session, onDone }) {
+  const [role, setRole] = useState(null); // null | "dentist" | "lab"
+
+  if (role === "dentist") return <DentistOnboarding userId={session.user.id} onDone={onDone} onBack={() => setRole(null)} />;
+  if (role === "lab") return <LabOnboarding userId={session.user.id} userEmail={session.user.email} onDone={onDone} onBack={() => setRole(null)} />;
+
+  return (
+    <Shell>
+      <h2 className="mb-1 text-lg font-bold text-slate-800">One more step</h2>
+      <p className="mb-5 text-xs text-slate-500">Are you a dental clinic or a laboratory?</p>
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={() => setRole("dentist")}
+          className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 p-5 text-center hover:border-blue-400 hover:bg-blue-50"
+        >
+          <Stethoscope size={24} className="text-blue-600" />
+          <span className="text-sm font-bold text-slate-800">Dentist / Clinic</span>
+          <span className="text-[11px] text-slate-500">Create cases, track lab work</span>
+        </button>
+        <button
+          onClick={() => setRole("lab")}
+          className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 p-5 text-center hover:border-blue-400 hover:bg-blue-50"
+        >
+          <Building2 size={24} className="text-blue-600" />
+          <span className="text-sm font-bold text-slate-800">Laboratory</span>
+          <span className="text-[11px] text-slate-500">Receive & fulfill cases</span>
+        </button>
+      </div>
+    </Shell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Top-level gate                                                     */
+/* ------------------------------------------------------------------ */
+
+export function AuthGate({ children }) {
+  const auth = useAuth();
+
+  if (auth.loading || auth.session === undefined) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <Loader2 size={24} className="animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  if (!auth.session) return <AuthScreen />;
+
+  // A password-reset link signs the user in with a temporary session — force
+  // the "set new password" screen before letting them into the app itself.
+  if (auth.recovery) {
+    return <ResetPasswordScreen onDone={auth.clearRecovery} />;
+  }
+
+  if (auth.profile === null) {
+    return <Onboarding session={auth.session} onDone={auth.refreshProfile} />;
+  }
+
+  if (auth.profile === undefined) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <Loader2 size={24} className="animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  return children(auth);
+}
