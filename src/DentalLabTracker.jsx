@@ -458,7 +458,7 @@ export default function DentalLabTracker({ auth }) {
   /* ================================================================ */
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
+    <div className="min-h-screen bg-slate-100 text-slate-800">
       {/* ------------------------- Header / Identity ------------------------- */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
