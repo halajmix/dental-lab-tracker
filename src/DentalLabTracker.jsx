@@ -823,78 +823,100 @@ function DentistDashboard({
 /*  Laboratory Dashboard                                               */
 /* ------------------------------------------------------------------ */
 
+// Soft-tinted active state per tab — "Completed" reads as a calm green,
+// "Incoming" a fresh sky blue, "In Production" mid-blue, so the active tab
+// is unmistakable without relying on color alone (the label is always there).
+const QUEUE_TAB_DEFS = [
+  { key: "incoming", label: "Incoming", activeCls: "bg-sky-100 text-sky-700 ring-sky-200" },
+  { key: "in_production", label: "In Production", activeCls: "bg-blue-100 text-blue-700 ring-blue-200" },
+  { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
+];
+
 function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake, onExportCsv }) {
+  const [queueTab, setQueueTab] = useState("incoming");
+
   if (!lab) return null;
 
-  const incoming = queue.filter((c) => c.stageIndex === STAGE_INDEX.STILL_AT_CLINIC).length;
-  const inProduction = queue.filter((c) => c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex < STAGE_INDEX.WORK_COMPLETE).length;
-  const completed = queue.filter((c) => c.stageIndex >= STAGE_INDEX.WORK_COMPLETE).length;
+  const inIncoming = (c) => c.stageIndex === STAGE_INDEX.STILL_AT_CLINIC;
+  const inProduction = (c) => c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex < STAGE_INDEX.WORK_COMPLETE;
+  const inCompleted = (c) => c.stageIndex >= STAGE_INDEX.WORK_COMPLETE;
+  const BUCKET = { incoming: inIncoming, in_production: inProduction, completed: inCompleted };
+
+  const tabs = QUEUE_TAB_DEFS.map((t) => ({ ...t, count: queue.filter(BUCKET[t.key]).length }));
+  const visibleQueue = queue.filter(BUCKET[queueTab]);
+  const activeLabel = tabs.find((t) => t.key === queueTab)?.label ?? "";
 
   // This lab's own SLA snapshot.
   const { perLab } = computeAnalytics(queue, [lab]);
   const sla = perLab[0];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Lab info sub-header */}
+      <div>
+        <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
+          <Building2 size={18} className="text-blue-600" /> {lab.name}
+        </h2>
+        <p className="text-sm text-slate-500">
+          Production Queue · {lab.contact} · {lab.tat}-day standard TAT · +{lab.expressPct ?? 20}% express
+        </p>
+      </div>
+
+      {/* Queue tabs + Export, in one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
-            <Building2 size={18} className="text-blue-600" /> {lab.name}
-          </h2>
-          <p className="text-sm text-slate-500">
-            Production Queue · {lab.contact} · {lab.tat}-day standard TAT · +{lab.expressPct ?? 20}% express
-          </p>
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setQueueTab(t.key)}
+              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold ring-1 ring-inset transition ${
+                queueTab === t.key ? t.activeCls : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              {t.label}
+              <span className={`rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${queueTab === t.key ? "bg-white/60" : "bg-slate-100 text-slate-500"}`}>
+                {t.count}
+              </span>
+            </button>
+          ))}
         </div>
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg bg-sky-50 px-3 py-1.5 text-center">
-            <p className="text-[11px] font-medium text-sky-500">Incoming</p>
-            <p className="text-lg font-bold text-sky-700 tabular-nums">{incoming}</p>
-          </div>
-          <div className="rounded-lg bg-blue-50 px-3 py-1.5 text-center">
-            <p className="text-[11px] font-medium text-blue-500">In Production</p>
-            <p className="text-lg font-bold text-blue-700 tabular-nums">{inProduction}</p>
-          </div>
-          <div className="rounded-lg bg-emerald-50 px-3 py-1.5 text-center">
-            <p className="text-[11px] font-medium text-emerald-500">Completed</p>
-            <p className="text-lg font-bold text-emerald-700 tabular-nums">{completed}</p>
-          </div>
-          <button
-            onClick={onExportCsv}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-          >
-            <Download size={15} /> Export CSV
-          </button>
-        </div>
+        <button
+          onClick={onExportCsv}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          <Download size={15} /> Export CSV
+        </button>
       </div>
 
       {/* Lab SLA snapshot */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <p className="text-[11px] font-medium text-slate-500">Actual TAT</p>
           <p className="mt-0.5 text-lg font-bold text-slate-800">{sla.actualTat != null ? `${sla.actualTat.toFixed(1)}d` : "—"} <span className="text-xs font-medium text-slate-400">/ {sla.promisedTat}d</span></p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <p className="text-[11px] font-medium text-slate-500">On-Time Rate</p>
           <p className="mt-0.5 text-lg font-bold text-slate-800">{sla.onTimeRate == null ? "—" : `${Math.round(sla.onTimeRate * 100)}%`}</p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <p className="text-[11px] font-medium text-slate-500">Remake Rate</p>
           <p className="mt-0.5 text-lg font-bold text-slate-800">{Math.round(sla.remakeRate * 100)}% <span className="text-xs font-medium text-slate-400">({sla.remakes})</span></p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <p className="text-[11px] font-medium text-slate-500">Quality Score</p>
           <p className="mt-0.5 text-lg font-bold" style={{ color: sla.qualityScore >= 85 ? "#16a34a" : sla.qualityScore >= 70 ? "#d97706" : "#dc2626" }}>{sla.qualityScore}</p>
         </div>
       </div>
 
-      {queue.length === 0 ? (
+      {/* Case list — compact rows, not cards, so several fit without scrolling */}
+      {visibleQueue.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm text-slate-400">
-          No cases assigned to {lab.name} yet.
+          No {activeLabel.toLowerCase()} cases right now.
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {queue.map((c) => (
-            <LabCaseCard key={c.id} c={c} lab={lab} onAdvance={onAdvance} onRevert={onRevert} onOpenCase={onOpenCase} onLogRemake={onLogRemake} />
+        <div className="space-y-2.5">
+          {visibleQueue.map((c) => (
+            <LabCaseCard key={c.id} c={c} onAdvance={onAdvance} onRevert={onRevert} onOpenCase={onOpenCase} onLogRemake={onLogRemake} />
           ))}
         </div>
       )}
@@ -924,24 +946,24 @@ function CaseStageDots({ stageIndex }) {
         return (
           <div key={s.key} className="relative flex flex-1 flex-col items-center">
             {i > 0 && (
-              <div className="absolute left-0 right-1/2 top-4 h-1 rounded-full" style={{ background: leftFilled ? STAGES[i - 1].color : "#e2e8f0" }} />
+              <div className="absolute left-0 right-1/2 top-3 h-1 rounded-full" style={{ background: leftFilled ? STAGES[i - 1].color : "#e2e8f0" }} />
             )}
             {i < STAGES.length - 1 && (
-              <div className="absolute left-1/2 right-0 top-4 h-1 rounded-full" style={{ background: rightFilled ? s.color : "#e2e8f0" }} />
+              <div className="absolute left-1/2 right-0 top-3 h-1 rounded-full" style={{ background: rightFilled ? s.color : "#e2e8f0" }} />
             )}
             <div
               className="relative z-10 flex shrink-0 items-center justify-center rounded-full transition-all"
               style={
                 current
-                  ? { width: 34, height: 34, background: s.color, color: "#fff", boxShadow: `0 0 0 5px ${s.color}26` }
+                  ? { width: 28, height: 28, background: s.color, color: "#fff", boxShadow: `0 0 0 4px ${s.color}26` }
                   : done
-                  ? { width: 28, height: 28, background: s.color, color: "#fff" }
-                  : { width: 28, height: 28, background: "#fff", color: "#94a3b8", border: "2px solid #e2e8f0" }
+                  ? { width: 22, height: 22, background: s.color, color: "#fff" }
+                  : { width: 22, height: 22, background: "#fff", color: "#94a3b8", border: "2px solid #e2e8f0" }
               }
             >
-              <Icon size={current ? 17 : 14} />
+              <Icon size={current ? 14 : 11} />
             </div>
-            <span className={`mt-1.5 text-center text-[10px] font-bold leading-tight ${current ? "text-slate-800" : done ? "text-slate-400" : "text-slate-300"}`}>
+            <span className={`mt-1 text-center text-[10px] font-bold leading-tight ${current ? "text-slate-800" : done ? "text-slate-400" : "text-slate-300"}`}>
               {STAGE_SHORT_LABEL[i]}
             </span>
           </div>
@@ -1001,12 +1023,12 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake }) {
   const urgent = isUrgent(c);
 
   return (
-    <div className={`rounded-2xl border bg-white p-5 shadow-sm ${urgent ? "border-rose-300" : "border-slate-200"}`}>
+    <div className={`rounded-2xl border bg-white p-4 shadow-sm ${urgent ? "border-rose-300" : "border-slate-200"}`}>
       {/* Identity — case ID chunked for fast, error-free reading against a paper ticket */}
-      <div className="mb-4 flex items-start justify-between gap-2">
+      <div className="mb-2.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-mono text-xl font-black tracking-wide text-slate-800">{formatCaseId(c.id)}</p>
-          <p className="mt-0.5 truncate text-base font-semibold text-slate-600">{c.patientName}</p>
+          <p className="font-mono text-lg font-black leading-tight tracking-wide text-slate-800">{formatCaseId(c.id)}</p>
+          <p className="truncate text-sm font-semibold text-slate-600">{c.patientName}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {urgent && <AppointmentBadge caseObj={c} />}
@@ -1026,58 +1048,58 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake }) {
         </div>
       </div>
 
-      {/* Critical info — the 3 things a tech needs at a glance, large & high-contrast */}
+      {/* Critical info — Material / Teeth / Shade in one subtly shaded row, not a wall of text */}
       {c.prescription && (
-        <div className="mb-4 grid grid-cols-3 gap-2">
-          <div className="rounded-xl bg-indigo-50 p-3 text-center ring-1 ring-inset ring-indigo-100">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-400">Material</p>
-            <p className="mt-0.5 text-sm font-black leading-tight text-indigo-800">{c.prescription.material || "—"}</p>
-          </div>
-          <div className="rounded-xl bg-blue-50 p-3 text-center ring-1 ring-inset ring-blue-100">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-blue-400">Teeth</p>
-            <p className="mt-0.5 text-lg font-black leading-tight text-blue-800">{toothSummary(c.prescription) || "—"}</p>
-          </div>
-          <div className="rounded-xl bg-violet-50 p-3 text-center ring-1 ring-inset ring-violet-100">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-violet-400">Shade</p>
-            <p className="mt-0.5 text-lg font-black leading-tight text-violet-800">
+        <div className="mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg bg-slate-50 px-3.5 py-2.5 text-sm ring-1 ring-inset ring-slate-100">
+          <span>
+            <span className="font-medium text-slate-400">Material </span>
+            <span className="font-bold text-slate-700">{c.prescription.material || "—"}</span>
+          </span>
+          <span>
+            <span className="font-medium text-slate-400">Teeth </span>
+            <span className="font-bold text-slate-700">{toothSummary(c.prescription) || "—"}</span>
+          </span>
+          <span>
+            <span className="font-medium text-slate-400">Shade </span>
+            <span className="font-bold text-slate-700">
               {c.prescription.vitaShade && c.prescription.vitaShade !== "N/A" ? c.prescription.vitaShade : "—"}
-            </p>
-          </div>
+            </span>
+          </span>
         </div>
       )}
 
       {c.prescription?.rush && (
-        <div className="mb-4 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700 ring-1 ring-inset ring-amber-100">
-          <Zap size={14} /> EXPRESS · deliver {c.appointmentDate || "—"}
+        <div className="mb-2.5 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-100">
+          <Zap size={12} /> EXPRESS · deliver {c.appointmentDate || "—"}
           {c.deliveryTime && c.deliveryTime !== "Anytime" && ` · ${c.deliveryTime}`}
         </div>
       )}
 
       {/* Visual progress — 5 dots, current step highlighted, no percentages or paragraphs */}
-      <div className="mb-5">
+      <div className="mb-3">
         <CaseStageDots stageIndex={idx} />
       </div>
 
-      {/* ONE massive primary action — this is the only button a tech should need to reach for */}
+      {/* ONE prominent primary action — this is the only button a tech should need to reach for */}
       {next ? (
         canAdvance ? (
           <button
             onClick={() => onAdvance(c.id)}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl py-5 text-lg font-black text-white shadow-md transition active:scale-[0.98]"
+            className="flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-base font-black text-white shadow-md transition active:scale-[0.98]"
             style={{ background: next.color }}
           >
-            {React.createElement(next.icon, { size: 22 })}
+            {React.createElement(next.icon, { size: 18 })}
             Move to {next.label}
-            <ChevronRight size={22} />
+            <ChevronRight size={18} />
           </button>
         ) : (
-          <div className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-5 text-base font-bold text-slate-400">
-            <Clock size={18} /> Waiting on {waitingOn}
+          <div className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 py-3.5 text-sm font-bold text-slate-400">
+            <Clock size={15} /> Waiting on {waitingOn}
           </div>
         )
       ) : (
-        <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-50 py-5 text-lg font-black text-emerald-600">
-          {React.createElement(cur.icon, { size: 22 })} Complete — Clinic Received
+        <div className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-50 py-3.5 text-base font-black text-emerald-600">
+          {React.createElement(cur.icon, { size: 18 })} Complete — Clinic Received
         </div>
       )}
     </div>
