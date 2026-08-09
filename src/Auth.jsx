@@ -6,6 +6,12 @@ import { useAuth } from "./lib/useAuth.js";
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 
+// window.location.origin alone drops the "/dental-lab-tracker/" sub-path GitHub
+// Pages serves this app from, which 404s ("There isn't a GitHub Pages site
+// here"). import.meta.env.BASE_URL is "/dental-lab-tracker/" in prod builds
+// and "/" in dev (see vite.config.js), so this always lands on a real page.
+const authRedirectUrl = () => window.location.origin + import.meta.env.BASE_URL;
+
 function Field({ label, children }) {
   return (
     <label className="block">
@@ -115,7 +121,7 @@ function ForgotPasswordScreen({ onBack }) {
     setBusy(true);
     setError("");
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: window.location.origin,
+      redirectTo: authRedirectUrl(),
     });
     setBusy(false);
     if (error) {
@@ -231,7 +237,11 @@ function SignupScreen({ onSwitch }) {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { emailRedirectTo: authRedirectUrl() },
+    });
     setBusy(false);
     if (error) {
       setError(error.message);
