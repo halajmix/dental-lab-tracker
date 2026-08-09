@@ -10,38 +10,35 @@ import {
   FlaskConical,
   FileText,
   Zap,
-  Layers,
   AlertTriangle,
   CheckCheck,
   BarChart3,
   Download,
   RefreshCcw,
-  History as HistoryIcon,
   MessageCircle,
-  PackageCheck,
   Phone,
   Mail,
   LogOut,
   Settings,
   CircleUser,
   ChevronDown,
+  ChevronRight,
   MoreVertical,
   Plus,
   Eye,
+  Undo2,
 } from "lucide-react";
-import PrescriptionForm, { toothSummary, includedSummary } from "./PrescriptionForm.jsx";
+import PrescriptionForm, { toothSummary } from "./PrescriptionForm.jsx";
 import {
   STAGES,
   STAGE_INDEX,
   LAST_STAGE,
   StatusPill,
-  ProgressBar,
-  ProgressTracker,
   AppointmentBadge,
   CaseDrawer,
   isUrgent,
 } from "./LifecycleEngine.jsx";
-import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
+import { AnalyticsDashboard, computeAnalytics } from "./Analytics.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import ContactLabModal from "./ContactLab.jsx";
@@ -905,105 +902,184 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
   );
 }
 
-function LabCaseCard({ c, lab, onAdvance, onRevert, onOpenCase, onLogRemake }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="mb-3 flex items-start justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-slate-800">{c.id}</span>
-            <StatusPill caseObj={c} />
-            <AppointmentBadge caseObj={c} />
-            {c.remake && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
-                <RefreshCcw size={10} /> Remake
-              </span>
-            )}
-          </div>
-          <p className="mt-0.5 text-sm text-slate-600">
-            {c.patientName} <span className="text-slate-400">· {c.patientId}</span>
-          </p>
-          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
-            <Clock size={11} /> Deliver {c.appointmentDate}
-            {c.deliveryTime && c.deliveryTime !== "Anytime" && (
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">{c.deliveryTime}</span>
-            )}
-          </p>
-        </div>
-        <button
-          onClick={() => onOpenCase(c.id)}
-          className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-50"
-          title="Open lifecycle & history"
-        >
-          <HistoryIcon size={12} /> History
-        </button>
-      </div>
+// "C-MSKDPDIE3H" -> "MSKD-PDIE-3H" — chunked into 4s so a case ID can be
+// read aloud or matched against a paper ticket without losing your place.
+function formatCaseId(id) {
+  const raw = String(id).replace(/^C-/, "");
+  return raw.match(/.{1,4}/g)?.join("-") ?? raw;
+}
 
-      {c.prescription && (
-        <div className="mb-3 rounded-lg bg-slate-50 p-2.5 text-xs ring-1 ring-inset ring-slate-100">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 font-semibold text-blue-700">
-              <Layers size={10} /> {c.prescription.category}
+const STAGE_SHORT_LABEL = ["Clinic", "Transit", "In Progress", "Complete", "Received"];
+
+/** Minimal 5-dot lifecycle indicator — replaces the old percentage + text stepper. */
+function CaseStageDots({ stageIndex }) {
+  return (
+    <div className="flex">
+      {STAGES.map((s, i) => {
+        const done = i < stageIndex;
+        const current = i === stageIndex;
+        const Icon = s.icon;
+        const leftFilled = i <= stageIndex;
+        const rightFilled = i < stageIndex;
+        return (
+          <div key={s.key} className="relative flex flex-1 flex-col items-center">
+            {i > 0 && (
+              <div className="absolute left-0 right-1/2 top-4 h-1 rounded-full" style={{ background: leftFilled ? STAGES[i - 1].color : "#e2e8f0" }} />
+            )}
+            {i < STAGES.length - 1 && (
+              <div className="absolute left-1/2 right-0 top-4 h-1 rounded-full" style={{ background: rightFilled ? s.color : "#e2e8f0" }} />
+            )}
+            <div
+              className="relative z-10 flex shrink-0 items-center justify-center rounded-full transition-all"
+              style={
+                current
+                  ? { width: 34, height: 34, background: s.color, color: "#fff", boxShadow: `0 0 0 5px ${s.color}26` }
+                  : done
+                  ? { width: 28, height: 28, background: s.color, color: "#fff" }
+                  : { width: 28, height: 28, background: "#fff", color: "#94a3b8", border: "2px solid #e2e8f0" }
+              }
+            >
+              <Icon size={current ? 17 : 14} />
+            </div>
+            <span className={`mt-1.5 text-center text-[10px] font-bold leading-tight ${current ? "text-slate-800" : done ? "text-slate-400" : "text-slate-300"}`}>
+              {STAGE_SHORT_LABEL[i]}
             </span>
-            {c.prescription.material && <span className="font-medium text-slate-700">{c.prescription.material}</span>}
-            {c.prescription.rush && (
-              <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
-                <Zap size={10} /> EXPRESS +${caseFee(c, lab ? [lab] : []).surcharge.toLocaleString()}
-              </span>
-            )}
           </div>
-          <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-slate-500">
-            <span>Teeth: <span className="font-medium text-slate-700">{toothSummary(c.prescription)}</span></span>
-            {c.prescription.vitaShade && c.prescription.vitaShade !== "N/A" && (
-              <span>Shade: <span className="font-medium text-slate-700">{c.prescription.vitaShade}</span></span>
-            )}
-            {c.prescription.stumpShade && c.prescription.stumpShade !== "N/A" && (
-              <span>Stump: <span className="font-medium text-slate-700">{c.prescription.stumpShade}</span></span>
-            )}
-            {c.prescription.files?.length > 0 && (
-              <span>Files: <span className="font-medium text-slate-700">{c.prescription.files.length} attached</span></span>
-            )}
-          </div>
-          {c.prescription.implantSystem && (
-            <div className="mt-1.5 border-t border-slate-200 pt-1.5">
-              <span className="inline-flex flex-wrap items-center gap-1.5">
-                <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-semibold text-indigo-700">
-                  {c.prescription.implantSystem}
-                </span>
-                <span className="text-slate-600">{c.prescription.abutmentType}</span>
-                <span className="font-semibold text-slate-700">{c.prescription.abutmentDiameter}</span>
-              </span>
-            </div>
-          )}
-          {includedSummary(c.prescription) && (
-            <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-slate-500">
-              <span className="inline-flex items-center gap-1 font-medium text-slate-600">
-                <PackageCheck size={11} /> Included:
-              </span>{" "}
-              <span className="font-medium text-slate-700">{includedSummary(c.prescription)}</span>
-            </div>
-          )}
-          {c.prescription.notes && (
-            <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-slate-500">
-              <span className="font-medium text-slate-600">Notes:</span> {c.prescription.notes}
-            </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * "···" options menu — Revert and Log Remake are real but easy-to-misclick
+ * actions on a busy bench, so they live here instead of next to the one
+ * button a tech is meant to actually reach for.
+ */
+function CaseCardOptionsMenu({ c, canRevert, revertLabel, onRevert, onLogRemake, onOpenCase }) {
+  const { open, setOpen, ref } = useDropdown();
+  const item = (onClick, icon, label, extraCls = "") => (
+    <button
+      onClick={() => { setOpen(false); onClick(); }}
+      className={`flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 ${extraCls}`}
+    >
+      {icon} {label}
+    </button>
+  );
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        title="More options"
+      >
+        <MoreVertical size={18} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-10 z-20 w-52 rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl">
+          {item(() => onOpenCase(c.id), <Eye size={14} />, "View Details")}
+          {canRevert && item(onRevert, <Undo2 size={14} />, revertLabel)}
+          {item(
+            () => onLogRemake(c.id),
+            <RefreshCcw size={14} className={c.remake ? "text-rose-600" : ""} />,
+            c.remake ? "Update Remake" : "Log Remake",
+            c.remake ? "text-rose-700" : ""
           )}
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Interactive stage controller — single-click advance/revert for the lab */}
-      <ProgressTracker caseObj={c} role="lab" onAdvance={() => onAdvance(c.id)} onRevert={() => onRevert(c.id)} />
+function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake }) {
+  const idx = c.stageIndex;
+  const cur = STAGES[idx];
+  const next = STAGES[idx + 1];
+  const canAdvance = !!next && next.actor === "lab";
+  const canRevert = idx > 0 && cur.actor === "lab";
+  const waitingOn = next && !canAdvance ? (next.actor === "lab" ? "Lab" : "Clinic") : null;
+  const urgent = isUrgent(c);
 
-      <div className="mt-3 flex justify-end border-t border-slate-100 pt-3">
-        <button
-          onClick={() => onLogRemake(c.id)}
-          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
-            c.remake ? "bg-rose-100 text-rose-700 hover:bg-rose-200" : "border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
-          }`}
-        >
-          <RefreshCcw size={13} /> {c.remake ? "Update Remake" : "Log Remake"}
-        </button>
+  return (
+    <div className={`rounded-2xl border bg-white p-5 shadow-sm ${urgent ? "border-rose-300" : "border-slate-200"}`}>
+      {/* Identity — case ID chunked for fast, error-free reading against a paper ticket */}
+      <div className="mb-4 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-mono text-xl font-black tracking-wide text-slate-800">{formatCaseId(c.id)}</p>
+          <p className="mt-0.5 truncate text-base font-semibold text-slate-600">{c.patientName}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {urgent && <AppointmentBadge caseObj={c} />}
+          {c.remake && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">
+              <RefreshCcw size={11} /> Remake
+            </span>
+          )}
+          <CaseCardOptionsMenu
+            c={c}
+            canRevert={canRevert}
+            revertLabel={canRevert ? `Revert to ${STAGES[idx - 1].label}` : ""}
+            onRevert={() => onRevert(c.id)}
+            onLogRemake={onLogRemake}
+            onOpenCase={onOpenCase}
+          />
+        </div>
       </div>
+
+      {/* Critical info — the 3 things a tech needs at a glance, large & high-contrast */}
+      {c.prescription && (
+        <div className="mb-4 grid grid-cols-3 gap-2">
+          <div className="rounded-xl bg-indigo-50 p-3 text-center ring-1 ring-inset ring-indigo-100">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-400">Material</p>
+            <p className="mt-0.5 text-sm font-black leading-tight text-indigo-800">{c.prescription.material || "—"}</p>
+          </div>
+          <div className="rounded-xl bg-blue-50 p-3 text-center ring-1 ring-inset ring-blue-100">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-blue-400">Teeth</p>
+            <p className="mt-0.5 text-lg font-black leading-tight text-blue-800">{toothSummary(c.prescription) || "—"}</p>
+          </div>
+          <div className="rounded-xl bg-violet-50 p-3 text-center ring-1 ring-inset ring-violet-100">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-violet-400">Shade</p>
+            <p className="mt-0.5 text-lg font-black leading-tight text-violet-800">
+              {c.prescription.vitaShade && c.prescription.vitaShade !== "N/A" ? c.prescription.vitaShade : "—"}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {c.prescription?.rush && (
+        <div className="mb-4 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700 ring-1 ring-inset ring-amber-100">
+          <Zap size={14} /> EXPRESS · deliver {c.appointmentDate || "—"}
+          {c.deliveryTime && c.deliveryTime !== "Anytime" && ` · ${c.deliveryTime}`}
+        </div>
+      )}
+
+      {/* Visual progress — 5 dots, current step highlighted, no percentages or paragraphs */}
+      <div className="mb-5">
+        <CaseStageDots stageIndex={idx} />
+      </div>
+
+      {/* ONE massive primary action — this is the only button a tech should need to reach for */}
+      {next ? (
+        canAdvance ? (
+          <button
+            onClick={() => onAdvance(c.id)}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl py-5 text-lg font-black text-white shadow-md transition active:scale-[0.98]"
+            style={{ background: next.color }}
+          >
+            {React.createElement(next.icon, { size: 22 })}
+            Move to {next.label}
+            <ChevronRight size={22} />
+          </button>
+        ) : (
+          <div className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-5 text-base font-bold text-slate-400">
+            <Clock size={18} /> Waiting on {waitingOn}
+          </div>
+        )
+      ) : (
+        <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-50 py-5 text-lg font-black text-emerald-600">
+          {React.createElement(cur.icon, { size: 22 })} Complete — Clinic Received
+        </div>
+      )}
     </div>
   );
 }
