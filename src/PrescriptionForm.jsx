@@ -215,35 +215,6 @@ const AESTHETIC_MATERIALS = [
   "Composite",
 ];
 
-// One-tap starting points for the most common chairside prescriptions.
-const QUICK_PRESETS = [
-  {
-    label: "E.max Crown",
-    hint: "Standard anterior/posterior single unit",
-    apply: { category: "Crown - tooth", material: "Lithium Disilicate (E.max)", shadeGuide: "Vita Classical", vitaShade: "A2" },
-  },
-  {
-    label: "Zirconia Posterior",
-    hint: "Monolithic full-contour",
-    apply: { category: "Crown - tooth", material: "Monolithic Zirconia", shadeGuide: "Vita Classical", vitaShade: "A3" },
-  },
-  {
-    label: "PFM Bridge",
-    hint: "Conventional tooth-borne",
-    apply: { category: "Bridge - tooth (conventional)", material: "PFM (Porcelain-Fused-to-Metal)", shadeGuide: "Vita Classical", vitaShade: "A3" },
-  },
-  {
-    label: "Implant Crown",
-    hint: "Screw-retained zirconia",
-    apply: { category: "Crown - implant", material: "Zirconia", shadeGuide: "Vita Classical", vitaShade: "A2" },
-  },
-  {
-    label: "Ortho Splint",
-    hint: "Retainer / appliance",
-    apply: { category: "Orthodontics splint" },
-  },
-];
-
 // Quick-select tooth groups (Universal numbers).
 const TOOTH_GROUPS = [
   { label: "Max. Anterior", teeth: [6, 7, 8, 9, 10, 11] },
@@ -639,7 +610,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const [notes, setNotes] = useState("");
 
   const [touched, setTouched] = useState(false);
-  const [activePreset, setActivePreset] = useState(null);
   const [step, setStep] = useState(1); // 1 = Patient & Lab, 2 = Clinical, 3 = Logistics
 
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
@@ -732,17 +702,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const showStump =
     HAS_STUMP.includes(category) && AESTHETIC_MATERIALS.includes(material) && !isRefer;
 
-  /* ---------------- quick presets ---------------- */
-  const applyPreset = (p) => {
-    onCategoryChange(p.apply.category);
-    // onCategoryChange sets a default material for the new category; override
-    // it (and the shade defaults) with the preset's own values.
-    if (p.apply.material !== undefined) setMaterial(p.apply.material);
-    if (p.apply.shadeGuide !== undefined) setShadeGuide(p.apply.shadeGuide);
-    if (p.apply.vitaShade !== undefined) setVitaShade(p.apply.vitaShade);
-    setActivePreset(p.label);
-  };
-
   /* ---------------- file handling (simulated) ---------------- */
   const addFiles = (fileList, setter) => {
     const arr = Array.from(fileList).map((f) => ({ name: f.name, size: f.size }));
@@ -788,7 +747,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
     setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter("");
     setScans([]); setPhotos([]); setNotes(""); setTouched(false);
-    setActivePreset(null); setStep(1);
+    setStep(1);
   };
 
   // `opts.share` submits and immediately opens the share panel for the new case.
@@ -885,32 +844,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
         {/* Scroll body */}
         <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 px-5 py-4">
-          {/* Quick presets — one tap to pre-fill the common cases */}
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              <Sparkles size={12} className="text-amber-500" /> Quick presets
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {QUICK_PRESETS.map((p) => (
-                <button
-                  key={p.label}
-                  type="button"
-                  onClick={() => applyPreset(p)}
-                  className={`rounded-lg border px-3 py-1.5 text-left transition ${
-                    activePreset === p.label
-                      ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200"
-                      : "border-slate-300 bg-white hover:border-blue-400 hover:bg-blue-50/50"
-                  }`}
-                >
-                  <span className={`block text-xs font-bold ${activePreset === p.label ? "text-blue-800" : "text-slate-700"}`}>
-                    {p.label}
-                  </span>
-                  <span className="block text-[10px] text-slate-400">{p.hint}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* ---------------- STEP 1 · Patient & Lab ---------------- */}
           <Step
             n={1}
