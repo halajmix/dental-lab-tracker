@@ -73,18 +73,6 @@ function Modal({ open, onClose, title, icon: Icon, wide, children }) {
   );
 }
 
-function Field({ label, children }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-const inputCls =
-  "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
-
 /**
  * Right-hand slide-over used for admin/settings actions that don't belong
  * cluttering the main, data-first dashboard (lab directory, SLA reports).
@@ -565,7 +553,7 @@ export default function DentalLabTracker({ auth }) {
                   <Building2 size={13} /> Registered Labs ({labs.length})
                 </h4>
                 <button
-                  onClick={() => setShowLabModal(true)}
+                  onClick={() => { setShowLabModal(true); setShowSettings(false); }}
                   className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
                 >
                   <Plus size={13} /> Add Lab
@@ -1024,12 +1012,18 @@ function LabCaseCard({ c, lab, onAdvance, onRevert, onOpenCase, onLogRemake }) {
 /*  Add-Lab modal                                                      */
 /* ------------------------------------------------------------------ */
 
+// Light, borderless input — sits on a soft gray fill until focused, when it
+// lifts to white with a colored ring. Used only by AddLabModal's lighter style.
+const lightInputCls =
+  "w-full rounded-xl border border-transparent bg-gray-50 px-3.5 py-2.5 text-sm text-slate-800 outline-none transition focus:bg-white focus:ring-2 focus:ring-blue-500";
+
 function AddLabModal({ open, onClose, onSave }) {
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [email, setEmail] = useState("");
   const [tat, setTat] = useState(5);
   const [expressPct, setExpressPct] = useState(20);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const reset = () => {
     setName("");
@@ -1037,6 +1031,7 @@ function AddLabModal({ open, onClose, onSave }) {
     setEmail("");
     setTat(5);
     setExpressPct(20);
+    setShowAdvanced(false);
   };
 
   const submit = (e) => {
@@ -1054,32 +1049,73 @@ function AddLabModal({ open, onClose, onSave }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Register New Laboratory" icon={Building2}>
+    <Modal open={open} onClose={onClose} title="Add Laboratory">
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Lab Name *">
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Summit Prosthetics" autoFocus />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Phone">
-            <input className={inputCls} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="+968 90000000" />
-          </Field>
-          <Field label="Email">
-            <input type="email" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="orders@lab.com" />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Standard TAT (days)">
-            <input type="number" min={1} className={inputCls} value={tat} onChange={(e) => setTat(e.target.value)} />
-          </Field>
-          <Field label="Express surcharge (%)">
-            <input type="number" min={0} className={inputCls} value={expressPct} onChange={(e) => setExpressPct(e.target.value)} />
-          </Field>
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-semibold text-slate-700">Laboratory Name</span>
+          <input
+            className={`${lightInputCls} py-3.5 text-base font-medium placeholder:font-normal`}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Summit Prosthetics"
+            autoFocus
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-semibold text-slate-700">Phone Number</span>
+          <input
+            className={lightInputCls}
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+            placeholder="+968 9000 0000"
+            inputMode="tel"
+          />
+        </label>
+
+        {showAdvanced ? (
+          <div className="space-y-3.5 rounded-xl border border-dashed border-gray-200 p-3.5">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-slate-500">Email</span>
+              <input type="email" className={lightInputCls} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="orders@lab.com" />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-slate-500">Default Turnaround (Days)</span>
+                <input type="number" min={1} className={lightInputCls} value={tat} onChange={(e) => setTat(e.target.value)} />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-slate-500">Express Surcharge (%)</span>
+                <input type="number" min={0} className={lightInputCls} value={expressPct} onChange={(e) => setExpressPct(e.target.value)} />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(false)}
+              className="flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-600"
+            >
+              <ChevronDown size={13} className="rotate-180" /> Hide advanced settings
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(true)}
+            className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:underline"
+          >
+            <ChevronDown size={14} /> Show advanced settings
+            <span className="font-normal text-slate-400">(email, turnaround, express fee)</span>
+          </button>
+        )}
+
+        <div className="flex items-center justify-between pt-2">
+          <button type="button" onClick={onClose} className="text-sm font-semibold text-slate-500 hover:text-slate-700">
             Cancel
           </button>
-          <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+          <button
+            type="submit"
+            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/30 transition hover:bg-blue-700"
+          >
             Save Lab
           </button>
         </div>
