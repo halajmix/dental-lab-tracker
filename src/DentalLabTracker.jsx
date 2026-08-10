@@ -563,7 +563,7 @@ export default function DentalLabTracker({ auth }) {
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-semibold text-slate-800">{l.name}</p>
                       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
-                        <Clock size={11} /> {l.tat}d TAT
+                        <Clock size={11} /> {l.tat}d Turn around time
                       </span>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -858,7 +858,7 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
           <Building2 size={18} className="text-blue-600" /> {lab.name}
         </h2>
         <p className="text-sm text-slate-500">
-          Production Queue · {lab.contact} · {lab.tat}-day standard TAT · +{lab.expressPct ?? 20}% express
+          Production Queue · {lab.contact} · {lab.tat}-day standard turn around time · +{lab.expressPct ?? 20}% express
         </p>
       </div>
 
@@ -891,7 +891,7 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
       {/* Lab SLA snapshot */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-          <p className="text-[11px] font-medium text-slate-500">Actual TAT</p>
+          <p className="text-[11px] font-medium text-slate-500">Actual Turn around time</p>
           <p className="mt-0.5 text-lg font-bold text-slate-800">{sla.actualTat != null ? `${sla.actualTat.toFixed(1)}d` : "—"} <span className="text-xs font-medium text-slate-400">/ {sla.promisedTat}d</span></p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">

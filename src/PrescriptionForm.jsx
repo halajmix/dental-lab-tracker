@@ -865,7 +865,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                 <select className={`${inputCls} ${err("labId") ? "border-rose-400 ring-rose-100" : ""}`} value={labId} onChange={(e) => setLabId(e.target.value)}>
                   <option value="">Select lab…</option>
                   {labs.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name} — {l.tat}d TAT · +{l.expressPct ?? 20}% express</option>
+                    <option key={l.id} value={l.id}>{l.name} — {l.tat}d turn around time · +{l.expressPct ?? 20}% express</option>
                   ))}
                 </select>
               </Field>

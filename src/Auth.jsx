@@ -501,7 +501,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
           <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
             <p className="font-bold text-slate-800">{claimable.name}</p>
             <p className="text-xs text-slate-500">{claimable.contact || "No phone on file"} · {claimable.email || "No email"}</p>
-            <p className="mt-1 text-xs text-slate-500">TAT {claimable.tat}d · Express +{claimable.express_pct}%</p>
+            <p className="mt-1 text-xs text-slate-500">Turn around time {claimable.tat}d · Express +{claimable.express_pct}%</p>
           </div>
           <Field label="Your display name">
             <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Lead Technician" />
@@ -538,7 +538,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Standard TAT (days)">
+            <Field label="Standard Turn around time (days)">
               <input type="number" min={1} value={tat} onChange={(e) => setTat(e.target.value)} className={inputCls} />
             </Field>
             <Field label="Express surcharge (%)">
