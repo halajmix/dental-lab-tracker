@@ -931,7 +931,7 @@ function formatCaseId(id) {
   return raw.match(/.{1,4}/g)?.join("-") ?? raw;
 }
 
-const STAGE_SHORT_LABEL = ["Clinic", "Transit", "In Progress", "Complete", "Received"];
+const STAGE_SHORT_LABEL = ["Clinic", "Lab received", "In Progress", "Complete", "Clinic received"];
 
 /** Minimal 5-dot lifecycle indicator — replaces the old percentage + text stepper. */
 function CaseStageDots({ stageIndex }) {
@@ -1080,26 +1080,28 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake }) {
         <CaseStageDots stageIndex={idx} />
       </div>
 
-      {/* ONE prominent primary action — this is the only button a tech should need to reach for */}
+      {/* ONE primary action — tidy and right-aligned rather than a full-width banner */}
       {next ? (
         canAdvance ? (
-          <button
-            onClick={() => onAdvance(c.id)}
-            className="flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-base font-black text-white shadow-md transition active:scale-[0.98]"
-            style={{ background: next.color }}
-          >
-            {React.createElement(next.icon, { size: 18 })}
-            Move to {next.label}
-            <ChevronRight size={18} />
-          </button>
+          <div className="flex justify-end">
+            <button
+              onClick={() => onAdvance(c.id)}
+              className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold text-white shadow-sm transition active:scale-[0.98]"
+              style={{ background: next.color }}
+              title={`Move to ${next.label}`}
+            >
+              Next
+              <ChevronRight size={15} />
+            </button>
+          </div>
         ) : (
-          <div className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 py-3.5 text-sm font-bold text-slate-400">
-            <Clock size={15} /> Waiting on {waitingOn}
+          <div className="flex items-center justify-end gap-1.5 text-xs font-semibold text-slate-400">
+            <Clock size={13} /> Waiting on {waitingOn}
           </div>
         )
       ) : (
-        <div className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-50 py-3.5 text-base font-black text-emerald-600">
-          {React.createElement(cur.icon, { size: 18 })} Complete — Clinic Received
+        <div className="flex items-center justify-end gap-1.5 text-xs font-bold text-emerald-600">
+          {React.createElement(cur.icon, { size: 14 })} Complete
         </div>
       )}
     </div>
