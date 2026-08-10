@@ -189,3 +189,38 @@ create policy "cases_delete_own_clinic" on cases for delete
 /* ------------------------------------------------------------------ */
 
 alter publication supabase_realtime add table cases;
+
+/* ------------------------------------------------------------------ */
+/*  Phase 6 — Super Admin (read-only, platform-wide)                   */
+/*  A third profile role with no clinic_id/lab_id of its own. Never    */
+/*  self-serve — the Onboarding role-picker still only offers          */
+/*  dentist/lab; an admin profile is only ever created by hand (see    */
+/*  the app README / operator notes for the exact steps). Grants       */
+/*  read-only SELECT across every clinic/case (labs are already        */
+/*  readable by any authenticated user via labs_select_all, so no      */
+/*  extra policy is needed there) — no insert/update/delete, so a      */
+/*  compromised or mistaken admin session can't mutate tenant data.    */
+/* ------------------------------------------------------------------ */
+
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('dentist', 'lab', 'admin'));
+
+create or replace function is_admin()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select exists (select 1 from profiles where id = auth.uid() and role = 'admin');
+$$;
+
+drop policy if exists "clinics_select_admin" on clinics;
+create policy "clinics_select_admin" on clinics for select
+  using (is_admin());
+
+drop policy if exists "cases_select_admin" on cases;
+create policy "cases_select_admin" on cases for select
+  using (is_admin());
+
+drop policy if exists "profiles_select_admin" on profiles;
+create policy "profiles_select_admin" on profiles for select
+  using (is_admin());

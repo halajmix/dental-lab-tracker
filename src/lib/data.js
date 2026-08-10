@@ -54,6 +54,15 @@ export async function fetchClinicsByIds(ids) {
   return data.map(clinicFromRow);
 }
 
+// Unfiltered — relies entirely on RLS. A normal user's "clinics_select"
+// policy only ever matches their own clinic, so this only returns
+// everything for a role='admin' profile (see clinics_select_admin).
+export async function fetchAllClinics() {
+  const { data, error } = await supabase.from("clinics").select("*").order("created_at", { ascending: false });
+  if (error) throw error;
+  return data.map(clinicFromRow);
+}
+
 const caseToRow = (data) => ({
   patient_name: data.patientName,
   patient_id: data.patientId,
