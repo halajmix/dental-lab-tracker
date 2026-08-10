@@ -188,7 +188,20 @@ create policy "cases_delete_own_clinic" on cases for delete
 /*  Realtime — broadcast row changes on cases so both sides sync live  */
 /* ------------------------------------------------------------------ */
 
-alter publication supabase_realtime add table cases;
+-- Unlike everything else in this file, "alter publication ... add table"
+-- has no "if not exists" form, so a plain re-run errors once it's already
+-- been added once (and, worse, that error rolls back the ENTIRE script as
+-- one transaction — so nothing after this point would apply either).
+-- Guard it explicitly so the whole file stays safe to re-run top to bottom.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'cases'
+  ) then
+    alter publication supabase_realtime add table cases;
+  end if;
+end $$;
 
 /* ------------------------------------------------------------------ */
 /*  Phase 6 — Super Admin (read-only, platform-wide)                   */
