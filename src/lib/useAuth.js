@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { supabase } from "./supabaseClient.js";
+import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
 import { clinicFromRow, labFromRow } from "./data.js";
 
 /**
@@ -16,8 +16,10 @@ export function useAuth() {
   // True once Supabase reports a PASSWORD_RECOVERY event (user clicked a
   // "reset password" email link) — the recovery link signs them in with a
   // temporary session, so we must gate the app behind a "set new password"
-  // screen rather than dropping them straight into the dashboard.
-  const [recovery, setRecovery] = useState(false);
+  // screen rather than dropping them straight into the dashboard. Seeded
+  // from recoveryDetectedEarly in case the event already fired before this
+  // component ever mounted (see supabaseClient.js for why that happens).
+  const [recovery, setRecovery] = useState(recoveryDetectedEarly);
 
   const loadProfile = useCallback(async (userId) => {
     const { data: prof } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
