@@ -33,7 +33,7 @@ import {
   UserCog,
   Camera,
 } from "lucide-react";
-import PrescriptionForm, { toothSummary, CATEGORY_NAMES } from "./PrescriptionForm.jsx";
+import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES } from "./PrescriptionForm.jsx";
 import {
   STAGES,
   STAGE_INDEX,
@@ -316,6 +316,60 @@ function ProfileSettingsModal({ open, onClose, auth }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Full prescription read-out for the case drawer — what the dentist ordered
+ * and sent. This is the lab's primary reference for a case (the compact lab
+ * card only surfaces Material/Teeth/Shade), and doubles as the dentist's own
+ * record of what was submitted.
+ */
+function CaseRxDetails({ c }) {
+  const p = c.prescription;
+  if (!p?.category) return <p className="text-sm text-slate-400">No prescription details on this case.</p>;
+
+  const row = (label, value) =>
+    value ? (
+      <div className="flex items-start justify-between gap-3 py-1.5">
+        <span className="shrink-0 text-xs font-medium text-slate-400">{label}</span>
+        <span className="text-right text-sm font-semibold text-slate-700">{value}</span>
+      </div>
+    ) : null;
+
+  const shade =
+    p.vitaShade && p.vitaShade !== "N/A"
+      ? `${p.vitaShade}${p.shadeGuide && p.shadeGuide !== "N/A" ? ` (${p.shadeGuide})` : ""}`
+      : null;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-2">
+      {p.rush && (
+        <div className="my-1.5 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-100">
+          <Zap size={12} /> EXPRESS ORDER
+        </div>
+      )}
+      <div className="divide-y divide-slate-100">
+        {row("Procedure", p.category)}
+        {row("Material", p.material !== "Refer to notes" ? p.material : null)}
+        {row("Teeth", toothSummary(p))}
+        {row("Shade", shade)}
+        {row("Stump shade", p.stumpShade && p.stumpShade !== "N/A" ? p.stumpShade : null)}
+        {row("Pontic design", p.ponticDesign && toothSummary(p).includes("(p)") ? p.ponticDesign : null)}
+        {row("Implant system", p.implantSystem)}
+        {row("Abutment", p.implantSystem ? `${p.abutmentType ?? ""} ${p.abutmentDiameter ?? ""}`.trim() : null)}
+        {row("Deliver by", c.appointmentDate ? `${c.appointmentDate}${c.deliveryTime && c.deliveryTime !== "Anytime" ? ` · ${c.deliveryTime}` : ""}` : null)}
+        {row("Included", includedSummary(p))}
+        {row("Files", p.files?.length ? `${p.files.length} attached` : null)}
+        {row("Patient ID", c.patientId !== "PT-NEW" ? c.patientId : null)}
+      </div>
+      {p.notes && (
+        <div className="mb-2 mt-1.5 rounded-lg bg-white px-3 py-2 text-sm text-slate-600 ring-1 ring-inset ring-slate-100">
+          <span className="mr-1 text-xs font-semibold text-slate-400">Notes:</span>
+          {p.notes}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -795,6 +849,7 @@ export default function DentalLabTracker({ auth }) {
         caseObj={drawerCase}
         role={currentRole}
         authorName={currentUser}
+        rxDetails={drawerCase ? <CaseRxDetails c={drawerCase} /> : null}
         onClose={() => setDrawerCaseId(null)}
         onAdvance={() => drawerCase && advanceStage(drawerCase.id, currentUser, currentRole)}
         onRevert={() => drawerCase && revertStage(drawerCase.id, currentUser, currentRole)}

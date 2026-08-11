@@ -436,7 +436,7 @@ const ACTION_META = {
   remake: { icon: RefreshCcw, tint: "text-rose-600 bg-rose-100" },
 };
 
-export function CaseDrawer({ open, caseObj, role, authorName, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint }) {
+export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint }) {
   return (
     <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
       <div className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -465,6 +465,14 @@ export function CaseDrawer({ open, caseObj, role, authorName, onClose, onAdvance
 
             {/* body */}
             <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+              {/* the dentist's full work order — the lab's primary reference */}
+              {rxDetails && (
+                <section>
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Prescription</h4>
+                  {rxDetails}
+                </section>
+              )}
+
               {/* progress */}
               <section>
                 <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Lifecycle Progress</h4>
