@@ -17,7 +17,10 @@ import {
   Clock,
   Printer,
   RefreshCcw,
+  Send,
+  MessageSquare,
 } from "lucide-react";
+import { fetchCaseNotes, insertCaseNote } from "./lib/data.js";
 
 /* ================================================================== */
 /*  Lifecycle model — THE single source of truth for case progress    */
@@ -340,6 +343,88 @@ export function HandoverTerminal({ caseObj, role, onSave }) {
 }
 
 /* ================================================================== */
+/*  Case notes — a small shared thread between the clinic and lab on   */
+/*  this one case, separate from the lifecycle audit history below.    */
+/* ================================================================== */
+
+function CaseNotes({ caseId, role, authorName }) {
+  const [notes, setNotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const otherSide = role === "dentist" ? "lab" : "clinic";
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchCaseNotes(caseId)
+      .then((n) => !cancelled && setNotes(n))
+      .catch((err) => !cancelled && setError(err.message))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [caseId]);
+
+  const send = async () => {
+    const trimmed = body.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setError("");
+    try {
+      const note = await insertCaseNote(caseId, role, authorName, trimmed);
+      setNotes((prev) => [...prev, note]);
+      setBody("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="max-h-52 space-y-2 overflow-y-auto p-3">
+        {loading && <p className="text-xs text-slate-400">Loading notes…</p>}
+        {!loading && notes.length === 0 && (
+          <p className="text-xs text-slate-400">No notes yet — leave one for the {otherSide} below.</p>
+        )}
+        {notes.map((n) => (
+          <div key={n.id} className={`rounded-lg px-3 py-2 text-sm ${n.authorRole === role ? "ml-6 bg-blue-50" : "mr-6 bg-slate-50"}`}>
+            <p className="text-slate-700">{n.body}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-400">
+              <span className={`rounded px-1 font-medium ${n.authorRole === "lab" ? "bg-blue-100 text-blue-600" : "bg-violet-100 text-violet-600"}`}>
+                {n.authorRole}
+              </span>
+              {n.authorName} · {fmtDateTime(n.createdAt)}
+            </p>
+          </div>
+        ))}
+      </div>
+      {error && <p className="border-t border-rose-100 bg-rose-50 px-3 py-1.5 text-[11px] text-rose-600">{error}</p>}
+      <div className="flex items-center gap-2 border-t border-slate-100 p-2.5">
+        <input
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder={`Note for the ${otherSide}…`}
+          className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+        />
+        <button
+          onClick={send}
+          disabled={sending || !body.trim()}
+          className="flex shrink-0 items-center justify-center rounded-lg bg-blue-600 p-2 text-white transition hover:bg-blue-700 disabled:opacity-40"
+          title="Send note"
+        >
+          <Send size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  Case lifecycle drawer (progress + handover + audit history)        */
 /* ================================================================== */
 
@@ -351,7 +436,7 @@ const ACTION_META = {
   remake: { icon: RefreshCcw, tint: "text-rose-600 bg-rose-100" },
 };
 
-export function CaseDrawer({ open, caseObj, role, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint }) {
+export function CaseDrawer({ open, caseObj, role, authorName, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint }) {
   return (
     <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
       <div className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -393,6 +478,14 @@ export function CaseDrawer({ open, caseObj, role, onClose, onAdvance, onRevert, 
                   <HandoverTerminal caseObj={caseObj} role={role} onSave={onSaveHandover} />
                 </section>
               )}
+
+              {/* shared notes between clinic and lab */}
+              <section>
+                <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  <MessageSquare size={13} /> Notes
+                </h4>
+                <CaseNotes caseId={caseObj.id} role={role} authorName={authorName} />
+              </section>
 
               {/* audit history */}
               <section>

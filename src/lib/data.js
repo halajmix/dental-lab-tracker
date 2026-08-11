@@ -159,6 +159,66 @@ export async function updateCase(id, patch) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Profile self-service (name / phone / avatar — never email, that's   */
+/*  the auth.users login identity, not a profile field)                 */
+/* ------------------------------------------------------------------ */
+
+export async function updateProfile(userId, { name, phone, avatarUrl }) {
+  const patch = {};
+  if (name !== undefined) patch.name = name;
+  if (phone !== undefined) patch.phone = phone;
+  if (avatarUrl !== undefined) patch.avatar_url = avatarUrl;
+  const { error } = await supabase.from("profiles").update(patch).eq("id", userId);
+  if (error) throw error;
+}
+
+// Uploads to <userId>/avatar.<ext> (upsert, so re-uploading just replaces the
+// same object) and returns a cache-busted public URL — the bucket is public,
+// but storage RLS still only lets a user write inside their own folder.
+export async function uploadAvatar(userId, file) {
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${userId}/avatar.${ext}`;
+  const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+  if (uploadError) throw uploadError;
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  return `${data.publicUrl}?t=${Date.now()}`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Case notes — a small shared thread between the clinic and lab on    */
+/*  one case, separate from the lifecycle audit history.                */
+/* ------------------------------------------------------------------ */
+
+const caseNoteFromRow = (r) => ({
+  id: r.id,
+  caseId: r.case_id,
+  authorRole: r.author_role,
+  authorName: r.author_name,
+  body: r.body,
+  createdAt: r.created_at,
+});
+
+export async function fetchCaseNotes(caseId) {
+  const { data, error } = await supabase
+    .from("case_notes")
+    .select("*")
+    .eq("case_id", caseId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data.map(caseNoteFromRow);
+}
+
+export async function insertCaseNote(caseId, authorRole, authorName, body) {
+  const { data, error } = await supabase
+    .from("case_notes")
+    .insert({ case_id: caseId, author_role: authorRole, author_name: authorName, body })
+    .select()
+    .single();
+  if (error) throw error;
+  return caseNoteFromRow(data);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Realtime — keeps dentist + lab views in sync without a refresh      */
 /* ------------------------------------------------------------------ */
 

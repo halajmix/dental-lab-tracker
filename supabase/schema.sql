@@ -248,3 +248,74 @@ create policy "profiles_select_admin" on profiles for select
 /* ------------------------------------------------------------------ */
 
 alter table cases add column if not exists invoice_number text default '';
+
+/* ------------------------------------------------------------------ */
+/*  Phase 8 — Profile settings (avatar, phone) + per-case notes        */
+/*  Name/phone/avatar are self-service (profiles_update_own already    */
+/*  covers writes — id = auth.uid()); email is intentionally never     */
+/*  editable here since it's the auth.users login identity, not a      */
+/*  profile field. Case notes are a small shared thread visible to     */
+/*  both sides of a case (the clinic that owns it and the lab it's     */
+/*  assigned to), for back-and-forth that doesn't belong in the        */
+/*  lifecycle audit history.                                           */
+/* ------------------------------------------------------------------ */
+
+alter table profiles add column if not exists avatar_url text default '';
+alter table profiles add column if not exists phone text default '';
+
+-- Avatar storage: one public bucket, each user can only write inside
+-- their own "<user id>/…" folder (checked via the path's first segment).
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+drop policy if exists "avatars_public_read" on storage.objects;
+create policy "avatars_public_read" on storage.objects for select
+  using (bucket_id = 'avatars');
+
+drop policy if exists "avatars_owner_write" on storage.objects;
+create policy "avatars_owner_write" on storage.objects for insert
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "avatars_owner_update" on storage.objects;
+create policy "avatars_owner_update" on storage.objects for update
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "avatars_owner_delete" on storage.objects;
+create policy "avatars_owner_delete" on storage.objects for delete
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create table if not exists case_notes (
+  id uuid primary key default gen_random_uuid(),
+  case_id text not null references cases(id) on delete cascade,
+  author_role text not null check (author_role in ('dentist', 'lab')),
+  author_name text not null default '',
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists case_notes_case_id_idx on case_notes (case_id);
+
+alter table case_notes enable row level security;
+
+-- Same visibility rule as the case itself: either side of the case can
+-- read and post — the clinic that owns it, or the lab it's assigned to.
+drop policy if exists "case_notes_select" on case_notes;
+create policy "case_notes_select" on case_notes for select
+  using (
+    exists (
+      select 1 from cases c
+      where c.id = case_notes.case_id
+        and (c.clinic_id = my_clinic_id() or c.lab_id = my_lab_id())
+    )
+  );
+
+drop policy if exists "case_notes_insert" on case_notes;
+create policy "case_notes_insert" on case_notes for insert
+  with check (
+    exists (
+      select 1 from cases c
+      where c.id = case_notes.case_id
+        and (c.clinic_id = my_clinic_id() or c.lab_id = my_lab_id())
+    )
+  );

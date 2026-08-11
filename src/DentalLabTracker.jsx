@@ -30,6 +30,8 @@ import {
   Receipt,
   Pencil,
   Check,
+  UserCog,
+  Camera,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary } from "./PrescriptionForm.jsx";
 import {
@@ -46,7 +48,18 @@ import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
-import { fetchLabs, insertLab, fetchCases, insertCase, updateCase, subscribeCases, fetchClinicsByIds, caseFromRow } from "./lib/data.js";
+import {
+  fetchLabs,
+  insertLab,
+  fetchCases,
+  insertCase,
+  updateCase,
+  subscribeCases,
+  fetchClinicsByIds,
+  caseFromRow,
+  updateProfile,
+  uploadAvatar,
+} from "./lib/data.js";
 
 /* ------------------------------------------------------------------ */
 /*  Small shared UI pieces                                             */
@@ -119,7 +132,14 @@ function useDropdown() {
 }
 
 /** Header identity — org + user, with Sign out tucked behind a dropdown. */
-function ProfileMenu({ isDentist, clinic, lab, currentUser, onSignOut }) {
+function Avatar({ url, size = 20 }) {
+  if (url) {
+    return <img src={url} alt="" className="rounded-full object-cover" style={{ width: size, height: size }} />;
+  }
+  return <CircleUser size={size} className="text-slate-400" />;
+}
+
+function ProfileMenu({ isDentist, clinic, lab, currentUser, avatarUrl, onSignOut, onOpenProfile }) {
   const { open, setOpen, ref } = useDropdown();
   const orgName = isDentist ? clinic?.name : lab?.name;
   return (
@@ -128,7 +148,7 @@ function ProfileMenu({ isDentist, clinic, lab, currentUser, onSignOut }) {
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
       >
-        <CircleUser size={20} className="text-slate-400" />
+        <Avatar url={avatarUrl} size={20} />
         <span className="hidden text-left sm:block">
           <span className="block leading-tight text-slate-800">{currentUser}</span>
           <span className="block text-[11px] font-normal leading-tight text-slate-400">{orgName}</span>
@@ -137,13 +157,22 @@ function ProfileMenu({ isDentist, clinic, lab, currentUser, onSignOut }) {
       </button>
       {open && (
         <div className="absolute right-0 z-20 mt-1.5 w-56 rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl">
-          <div className="border-b border-slate-100 px-3.5 py-2.5">
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-              {isDentist ? <Stethoscope size={13} className="text-blue-600" /> : <Building2 size={13} className="text-blue-600" />}
-              {orgName}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-400">{currentUser} · {isDentist ? "Dentist" : "Lab"}</p>
+          <div className="flex items-center gap-2.5 border-b border-slate-100 px-3.5 py-2.5">
+            <Avatar url={avatarUrl} size={30} />
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                {isDentist ? <Stethoscope size={13} className="text-blue-600" /> : <Building2 size={13} className="text-blue-600" />}
+                <span className="truncate">{orgName}</span>
+              </p>
+              <p className="mt-0.5 truncate text-xs text-slate-400">{currentUser} · {isDentist ? "Dentist" : "Lab"}</p>
+            </div>
           </div>
+          <button
+            onClick={() => { setOpen(false); onOpenProfile(); }}
+            className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            <UserCog size={14} /> Profile settings
+          </button>
           <button
             onClick={onSignOut}
             className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-rose-600"
@@ -153,6 +182,135 @@ function ProfileMenu({ isDentist, clinic, lab, currentUser, onSignOut }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Self-service profile — photo, name, phone. Email is deliberately
+ * read-only: it's the auth.users login identity, not something either
+ * role should be able to drift away from what they actually sign in with.
+ */
+function ProfileSettingsModal({ open, onClose, auth }) {
+  const { session, profile, refreshProfile } = auth;
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName(profile?.name ?? "");
+    setPhone(profile?.phone ?? "");
+    setAvatarUrl(profile?.avatar_url ?? "");
+    setError("");
+  }, [open, profile]);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    try {
+      const url = await uploadAvatar(session.user.id, file);
+      setAvatarUrl(url);
+    } catch (err) {
+      setError("Couldn't upload that photo — " + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await updateProfile(session.user.id, { name: name.trim(), phone: phone.replace(/\D/g, "").slice(0, 8), avatarUrl });
+      await refreshProfile();
+      onClose();
+    } catch (err) {
+      setError("Couldn't save — " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Profile Settings" icon={UserCog}>
+      <div className="space-y-4">
+        {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
+
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200"
+            title="Change photo"
+          >
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <CircleUser size={34} className="absolute inset-0 m-auto text-slate-300" />
+            )}
+            <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 opacity-0 transition group-hover:bg-slate-900/50 group-hover:opacity-100">
+              <Camera size={18} className="text-white" />
+            </span>
+          </button>
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+          <div className="text-xs text-slate-500">
+            <p className="font-medium text-slate-700">{uploading ? "Uploading…" : "Profile photo"}</p>
+            <p>JPG or PNG works best.</p>
+          </div>
+        </div>
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600">Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} className={lightInputCls} placeholder="Your name" />
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600">Email</span>
+          <input
+            value={session?.user?.email ?? ""}
+            disabled
+            className={`${lightInputCls} cursor-not-allowed text-slate-400`}
+            title="Email is your login and can't be changed here"
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600">Phone (Oman)</span>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 rounded-xl bg-gray-50 px-3.5 py-2.5 text-sm font-medium text-slate-500">+968</span>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 8))}
+              className={lightInputCls}
+              placeholder="9XXXXXXX"
+              inputMode="numeric"
+            />
+          </div>
+        </label>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="text-sm font-semibold text-slate-500 hover:text-slate-700">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving || uploading}
+            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/30 transition hover:bg-blue-700 disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -309,6 +467,8 @@ export default function DentalLabTracker({ auth }) {
   // Admin actions (lab directory, SLA analytics) live off the main dashboard.
   const [showSettings, setShowSettings] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  // Self-service profile (photo/name/phone) — available to both roles.
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
 
   // Filters (dentist view)
   const [statusFilter, setStatusFilter] = useState("all");
@@ -487,7 +647,15 @@ export default function DentalLabTracker({ auth }) {
                 <Settings size={18} />
               </button>
             )}
-            <ProfileMenu isDentist={isDentist} clinic={clinic} lab={lab} currentUser={currentUser} onSignOut={signOut} />
+            <ProfileMenu
+              isDentist={isDentist}
+              clinic={clinic}
+              lab={lab}
+              currentUser={currentUser}
+              avatarUrl={profile.avatar_url}
+              onSignOut={signOut}
+              onOpenProfile={() => setShowProfileSettings(true)}
+            />
             {isDentist && (
               <button
                 onClick={() => setShowCaseModal(true)}
@@ -539,6 +707,7 @@ export default function DentalLabTracker({ auth }) {
       </main>
 
       {/* ------------------------- Modals ------------------------- */}
+      <ProfileSettingsModal open={showProfileSettings} onClose={() => setShowProfileSettings(false)} auth={auth} />
       {isDentist && <AddLabModal open={showLabModal} onClose={() => setShowLabModal(false)} onSave={addLab} />}
       {isDentist && (
         <PrescriptionForm
@@ -614,6 +783,7 @@ export default function DentalLabTracker({ auth }) {
         open={!!drawerCase}
         caseObj={drawerCase}
         role={currentRole}
+        authorName={currentUser}
         onClose={() => setDrawerCaseId(null)}
         onAdvance={() => drawerCase && advanceStage(drawerCase.id, currentUser, currentRole)}
         onRevert={() => drawerCase && revertStage(drawerCase.id, currentUser, currentRole)}
