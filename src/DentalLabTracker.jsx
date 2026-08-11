@@ -981,6 +981,17 @@ function DentistDashboard({
                   </td>
                   <td className="px-4 py-3.5 align-top">
                     <StatusPill caseObj={c} />
+                    {/* Lab's invoice number — appears once the lab enters one */}
+                    {c.invoiceNumber && (
+                      <div className="mt-1">
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                          title="Invoice number from the lab"
+                        >
+                          <Check size={11} /> {c.invoiceNumber}
+                        </span>
+                      </div>
+                    )}
                     {c.handover?.confirmed && (
                       <div className="mt-1">
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
