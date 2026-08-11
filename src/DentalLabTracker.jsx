@@ -27,6 +27,9 @@ import {
   Plus,
   Eye,
   Undo2,
+  Receipt,
+  Pencil,
+  Check,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary } from "./PrescriptionForm.jsx";
 import {
@@ -363,6 +366,11 @@ export default function DentalLabTracker({ auth }) {
     persist(caseId, { stageIndex: prevIdx, ...clearHandover, history: [...(c.history ?? []), logEntry("revert", prevIdx, by, role)] });
   };
 
+  // Lab's own internal billing/job reference for a case — no history entry,
+  // this isn't a lifecycle event, just a label the lab attaches for its
+  // own accounting.
+  const setInvoiceNumber = (caseId, invoiceNumber) => persist(caseId, { invoiceNumber });
+
   const saveHandover = (caseId, data, by) => {
     const c = cases.find((x) => x.id === caseId);
     if (!c) return;
@@ -524,6 +532,7 @@ export default function DentalLabTracker({ auth }) {
             onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
             onOpenCase={setDrawerCaseId}
             onLogRemake={setRemakeCaseId}
+            onSetInvoiceNumber={setInvoiceNumber}
             onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
           />
         )}
@@ -832,7 +841,7 @@ const QUEUE_TAB_DEFS = [
   { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
 ];
 
-function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake, onExportCsv }) {
+function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onExportCsv }) {
   const [queueTab, setQueueTab] = useState("incoming");
 
   if (!lab) return null;
@@ -916,19 +925,20 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
       ) : (
         <div className="space-y-2.5">
           {visibleQueue.map((c) => (
-            <LabCaseCard key={c.id} c={c} onAdvance={onAdvance} onRevert={onRevert} onOpenCase={onOpenCase} onLogRemake={onLogRemake} />
+            <LabCaseCard
+              key={c.id}
+              c={c}
+              onAdvance={onAdvance}
+              onRevert={onRevert}
+              onOpenCase={onOpenCase}
+              onLogRemake={onLogRemake}
+              onSetInvoiceNumber={onSetInvoiceNumber}
+            />
           ))}
         </div>
       )}
     </div>
   );
-}
-
-// "C-MSKDPDIE3H" -> "MSKD-PDIE-3H" — chunked into 4s so a case ID can be
-// read aloud or matched against a paper ticket without losing your place.
-function formatCaseId(id) {
-  const raw = String(id).replace(/^C-/, "");
-  return raw.match(/.{1,4}/g)?.join("-") ?? raw;
 }
 
 const STAGE_SHORT_LABEL = ["Clinic", "Lab received", "In Progress", "Complete", "Clinic received"];
@@ -1013,7 +1023,74 @@ function CaseCardOptionsMenu({ c, canRevert, revertLabel, onRevert, onLogRemake,
   );
 }
 
-function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake }) {
+/**
+ * The lab's own internal billing/job reference for a case — click to edit,
+ * Enter/blur saves, Escape cancels. Distinct from the system case id: this
+ * is a free-text number the lab assigns itself, never the dentist.
+ */
+function InvoiceNumberField({ value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed !== (value || "")) onSave(trimmed);
+  };
+
+  const cancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") cancel();
+          }}
+          placeholder="e.g. INV-1042"
+          className="w-32 rounded-lg border border-blue-300 px-2 py-1 font-mono text-base font-black tracking-wide text-slate-800 outline-none ring-2 ring-blue-100"
+        />
+        <button onMouseDown={(e) => e.preventDefault()} onClick={commit} className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-50" title="Save">
+          <Check size={16} />
+        </button>
+      </div>
+    );
+  }
+
+  return value ? (
+    <button
+      onClick={() => setEditing(true)}
+      className="group flex items-center gap-1.5 text-left"
+      title="Click to edit invoice number"
+    >
+      <Receipt size={15} className="shrink-0 text-slate-400" />
+      <span className="font-mono text-lg font-black leading-tight tracking-wide text-slate-800">{value}</span>
+      <Pencil size={12} className="text-slate-300 opacity-0 transition group-hover:opacity-100" />
+    </button>
+  ) : (
+    <button
+      onClick={() => setEditing(true)}
+      className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:underline"
+    >
+      <Receipt size={14} /> Add invoice #
+    </button>
+  );
+}
+
+function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -1024,10 +1101,11 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake }) {
 
   return (
     <div className={`rounded-2xl border bg-white p-4 shadow-sm ${urgent ? "border-rose-300" : "border-slate-200"}`}>
-      {/* Identity — case ID chunked for fast, error-free reading against a paper ticket */}
+      {/* Identity — the lab's own invoice number, not the system case id
+          (still available via View Details for cross-referencing with the clinic) */}
       <div className="mb-2.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-mono text-lg font-black leading-tight tracking-wide text-slate-800">{formatCaseId(c.id)}</p>
+          <InvoiceNumberField value={c.invoiceNumber} onSave={(v) => onSetInvoiceNumber(c.id, v)} />
           <p className="truncate text-sm font-semibold text-slate-600">{c.patientName}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">

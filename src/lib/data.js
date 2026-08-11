@@ -35,6 +35,9 @@ export const caseFromRow = (r) => ({
   remake: r.remake ?? null,
   prescription: r.prescription ?? {},
   history: r.history ?? [],
+  // The lab's own internal billing/job reference — set by the lab, never
+  // the dentist. Defaults to "" until the lab fills it in.
+  invoiceNumber: r.invoice_number ?? "",
 });
 
 export const clinicFromRow = (r) => ({
@@ -142,6 +145,7 @@ const PATCH_KEY_MAP = {
   handover: "handover",
   remake: "remake",
   history: "history",
+  invoiceNumber: "invoice_number",
 };
 
 export async function updateCase(id, patch) {

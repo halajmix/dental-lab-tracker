@@ -237,3 +237,14 @@ create policy "cases_select_admin" on cases for select
 drop policy if exists "profiles_select_admin" on profiles;
 create policy "profiles_select_admin" on profiles for select
   using (is_admin());
+
+/* ------------------------------------------------------------------ */
+/*  Phase 7 — Lab invoice number                                       */
+/*  A lab's own internal billing/job reference for a case — distinct   */
+/*  from the system-generated case id and never set by the dentist.    */
+/*  No new RLS policy needed: the existing "cases_update" policy       */
+/*  already lets a case's assigned lab (lab_id = my_lab_id()) update   */
+/*  any column on its own cases, invoice_number included.              */
+/* ------------------------------------------------------------------ */
+
+alter table cases add column if not exists invoice_number text default '';
