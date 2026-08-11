@@ -33,7 +33,7 @@ import {
   UserCog,
   Camera,
 } from "lucide-react";
-import PrescriptionForm, { toothSummary } from "./PrescriptionForm.jsx";
+import PrescriptionForm, { toothSummary, CATEGORY_NAMES } from "./PrescriptionForm.jsx";
 import {
   STAGES,
   STAGE_INDEX,
@@ -59,6 +59,7 @@ import {
   caseFromRow,
   updateProfile,
   uploadAvatar,
+  updateLab,
 } from "./lib/data.js";
 
 /* ------------------------------------------------------------------ */
@@ -397,7 +398,7 @@ function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvanc
 /* ------------------------------------------------------------------ */
 
 export default function DentalLabTracker({ auth }) {
-  const { profile, clinic, lab, signOut } = auth;
+  const { profile, clinic, lab, signOut, refreshProfile } = auth;
   const isDentist = profile.role === "dentist";
 
   const [labs, setLabs] = useState([]);
@@ -638,15 +639,13 @@ export default function DentalLabTracker({ auth }) {
           </div>
 
           <div className="flex items-center gap-2">
-            {isDentist && (
-              <button
-                onClick={() => setShowSettings(true)}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                title="Settings"
-              >
-                <Settings size={18} />
-              </button>
-            )}
+            <button
+              onClick={() => setShowSettings(true)}
+              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              title="Settings"
+            >
+              <Settings size={18} />
+            </button>
             <ProfileMenu
               isDentist={isDentist}
               clinic={clinic}
@@ -776,6 +775,14 @@ export default function DentalLabTracker({ auth }) {
         <Modal open={showAnalytics} onClose={() => setShowAnalytics(false)} title="SLA Analytics" icon={BarChart3} wide>
           <AnalyticsDashboard cases={cases} labs={labs} />
         </Modal>
+      )}
+      {!isDentist && lab && (
+        <LabSettingsDrawer
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          lab={lab}
+          onSaved={refreshProfile}
+        />
       )}
 
       {/* ------------------- Case lifecycle drawer ------------------- */}
@@ -1031,14 +1038,12 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
 
   return (
     <div className="space-y-5">
-      {/* Lab info sub-header */}
+      {/* Lab info sub-header — contact/turnaround/express details live in Settings now */}
       <div>
         <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
           <Building2 size={18} className="text-blue-600" /> {lab.name}
         </h2>
-        <p className="text-sm text-slate-500">
-          Production Queue · {lab.contact} · {lab.tat}-day standard turn around time · +{lab.expressPct ?? 20}% express
-        </p>
+        <p className="text-sm text-slate-500">Production Queue</p>
       </div>
 
       {/* Queue tabs + Export, in one row */}
@@ -1469,5 +1474,122 @@ function AddLabModal({ open, onClose, onSave }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Lab Settings — contact/turnaround/express info (moved off the      */
+/*  dashboard header) plus a per-procedure turnaround time list. Each  */
+/*  procedure mirrors the Rx form's category dropdown; a blank value   */
+/*  falls back to the lab's standard turnaround.                       */
+/* ------------------------------------------------------------------ */
+
+function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
+  const [contact, setContact] = useState("");
+  const [tat, setTat] = useState(5);
+  const [expressPct, setExpressPct] = useState(20);
+  const [procTats, setProcTats] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setContact(lab.contact ?? "");
+    setTat(lab.tat ?? 5);
+    setExpressPct(lab.expressPct ?? 20);
+    setProcTats(lab.procedureTats ?? {});
+    setError("");
+  }, [open, lab]);
+
+  const setProc = (name, value) => {
+    setProcTats((prev) => {
+      const next = { ...prev };
+      const n = Number(value);
+      if (!value || !n || n < 1) delete next[name];
+      else next[name] = n;
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await updateLab(lab.id, {
+        contact: contact.trim(),
+        tat: Math.max(1, Number(tat) || 1),
+        expressPct: Math.max(0, Number(expressPct) || 0),
+        procedureTats: procTats,
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError("Couldn't save — " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SlideOver open={open} onClose={onClose} title="Lab Settings" icon={Settings}>
+      <div className="space-y-6">
+        {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
+
+        <div>
+          <h4 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Lab Info</h4>
+          <div className="space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600">Phone</span>
+              <input value={contact} onChange={(e) => setContact(e.target.value)} className={lightInputCls} placeholder="+968 9000 0000" />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600">Standard turn around (days)</span>
+                <input type="number" min={1} value={tat} onChange={(e) => setTat(e.target.value)} className={lightInputCls} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-600">Express surcharge (%)</span>
+                <input type="number" min={0} value={expressPct} onChange={(e) => setExpressPct(e.target.value)} className={lightInputCls} />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-100 pt-4">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Turn around time per procedure</h4>
+          <p className="mb-3 text-[11px] text-slate-400">
+            Days for each procedure. Leave blank to use your standard ({Number(tat) || 1}d). Dentists see these when scheduling.
+          </p>
+          <div className="space-y-1.5">
+            {CATEGORY_NAMES.map((name) => (
+              <div key={name} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{name}</span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    value={procTats[name] ?? ""}
+                    onChange={(e) => setProc(name, e.target.value)}
+                    placeholder={String(Number(tat) || 1)}
+                    className="w-16 rounded-lg border border-transparent bg-gray-50 px-2 py-1.5 text-center text-sm text-slate-800 outline-none transition focus:bg-white focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-slate-400">d</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 -mx-5 border-t border-slate-100 bg-white px-5 py-3">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="w-full rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/30 transition hover:bg-blue-700 disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Save Settings"}
+          </button>
+        </div>
+      </div>
+    </SlideOver>
   );
 }

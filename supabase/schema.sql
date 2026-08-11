@@ -285,6 +285,12 @@ drop policy if exists "avatars_owner_delete" on storage.objects;
 create policy "avatars_owner_delete" on storage.objects for delete
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
+-- Per-procedure turnaround times, keyed by the Rx form's restoration
+-- category names (e.g. {"Crown - tooth": 4, "Veneer": 6}). Empty object =
+-- every procedure falls back to the lab's standard `tat`. Writable by the
+-- lab owner via the existing labs_update_owner_or_creator policy.
+alter table labs add column if not exists procedure_tats jsonb not null default '{}'::jsonb;
+
 create table if not exists case_notes (
   id uuid primary key default gen_random_uuid(),
   case_id text not null references cases(id) on delete cascade,

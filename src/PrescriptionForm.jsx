@@ -138,7 +138,9 @@ const SPLINT_CATEGORIES = [
   "Double layer splint - outer hard, inner soft",
   "Michigan splint",
 ];
-const CATEGORY_NAMES = Object.keys(CATEGORIES);
+// Exported: the lab-side Settings uses this same list so per-procedure
+// turnaround times always stay in sync with the Rx form's categories.
+export const CATEGORY_NAMES = Object.keys(CATEGORIES);
 
 // Shade guides (systems) → their shade tabs. The form picks a guide, then a shade.
 const SHADE_GUIDES = {
@@ -658,7 +660,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
   /* ---------------- TAT auto-calculation ---------------- */
   const lab = labById[labId];
-  const baseTat = lab?.tat ?? 0;
+  // Procedure-specific turnaround (set by the lab in its Settings) wins over
+  // the lab's standard TAT when one exists for the selected category.
+  const baseTat = Number(lab?.procedureTats?.[category]) || (lab?.tat ?? 0);
   const effTat = rush ? Math.max(1, Math.ceil(baseTat / 2)) : baseTat;
   const today = new Date();
   const estReady = lab ? addDays(today, effTat) : null;
