@@ -472,7 +472,7 @@ export default function DentalLabTracker({ auth }) {
               <FlaskConical size={18} />
             </div>
             <div>
-              <h1 className="text-sm font-bold leading-tight text-slate-800">DentaTrack</h1>
+              <h1 className="text-sm font-bold leading-tight text-slate-800">Dr-Crown</h1>
               <p className="text-[11px] leading-tight text-slate-500">{isDentist ? clinic?.name : lab?.name}</p>
             </div>
           </div>

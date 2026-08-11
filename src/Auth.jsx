@@ -30,7 +30,7 @@ function Shell({ children }) {
             <Stethoscope size={20} />
           </div>
           <div>
-            <h1 className="text-base font-bold leading-tight text-slate-800">DentaTrack</h1>
+            <h1 className="text-base font-bold leading-tight text-slate-800">Dr-Crown</h1>
             <p className="text-[11px] leading-tight text-slate-500">Lab Case Tracking · Lifecycle Engine</p>
           </div>
         </div>

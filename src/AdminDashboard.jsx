@@ -71,7 +71,7 @@ export default function AdminDashboard({ auth }) {
               <FlaskConical size={18} />
             </div>
             <div>
-              <h1 className="text-sm font-bold leading-tight text-slate-800">DentaTrack</h1>
+              <h1 className="text-sm font-bold leading-tight text-slate-800">Dr-Crown</h1>
               <p className="flex items-center gap-1 text-[11px] leading-tight text-violet-600">
                 <ShieldCheck size={11} /> Super Admin
               </p>
@@ -116,7 +116,7 @@ export default function AdminDashboard({ auth }) {
           <>
             <div>
               <h2 className="text-lg font-bold text-slate-800">Platform Overview</h2>
-              <p className="text-sm text-slate-500">Every clinic and lab on DentaTrack, at a glance.</p>
+              <p className="text-sm text-slate-500">Every clinic and lab on Dr-Crown, at a glance.</p>
             </div>
 
             {/* Top-level totals */}
