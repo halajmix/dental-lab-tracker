@@ -258,6 +258,26 @@ create policy "profiles_select_admin" on profiles for select
 
 alter table cases add column if not exists invoice_number text default '';
 
+-- Once an invoice number is set (pushed to the clinic) it is LOCKED —
+-- enforced here at the DB level so no client can change or clear it,
+-- not just hidden in the UI. Setting it the first time (from empty/null)
+-- is allowed; any later change raises.
+create or replace function lock_invoice_number()
+returns trigger as $$
+begin
+  if coalesce(old.invoice_number, '') <> ''
+     and new.invoice_number is distinct from old.invoice_number then
+    raise exception 'Invoice number is locked once set';
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists cases_lock_invoice_number on cases;
+create trigger cases_lock_invoice_number
+  before update on cases
+  for each row execute function lock_invoice_number();
+
 /* ------------------------------------------------------------------ */
 /*  Phase 8 — Profile settings (avatar, phone) + per-case notes        */
 /*  Name/phone/avatar are self-service (profiles_update_own already    */
