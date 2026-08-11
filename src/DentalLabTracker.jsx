@@ -201,13 +201,17 @@ function ProfileSettingsModal({ open, onClose, auth }) {
   const [error, setError] = useState("");
   const fileInputRef = useRef(null);
 
+  // Initialize ONLY on open — `profile` gets a new identity on every auth
+  // event (token refresh, tab focus), which would wipe unsaved edits if it
+  // were a dependency here. Same bug class as LabSettingsDrawer's form.
   useEffect(() => {
     if (!open) return;
     setName(profile?.name ?? "");
     setPhone(profile?.phone ?? "");
     setAvatarUrl(profile?.avatar_url ?? "");
     setError("");
-  }, [open, profile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -1492,6 +1496,10 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Initialize ONLY on open — not on every `lab` identity change. Supabase
+  // re-emits auth events (token refresh, tab focus) which reload the profile
+  // and recreate `lab`; with `lab` in the deps this effect would wipe the
+  // user's unsaved edits mid-typing (found live: saved {} over real input).
   useEffect(() => {
     if (!open) return;
     setContact(lab.contact ?? "");
@@ -1499,7 +1507,8 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
     setExpressPct(lab.expressPct ?? 20);
     setProcTats(lab.procedureTats ?? {});
     setError("");
-  }, [open, lab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const setProc = (name, value) => {
     setProcTats((prev) => {
