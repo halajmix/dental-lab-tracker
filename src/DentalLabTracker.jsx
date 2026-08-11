@@ -1542,8 +1542,6 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
   return (
     <SlideOver open={open} onClose={onClose} title="Lab Settings" icon={Settings}>
       <div className="space-y-6">
-        {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
-
         <div>
           <h4 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Lab Info</h4>
           <div className="space-y-3">
@@ -1590,6 +1588,8 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
         </div>
 
         <div className="sticky bottom-0 -mx-5 border-t border-slate-100 bg-white px-5 py-3">
+          {/* Error lives in the sticky footer so it can't be scrolled out of view */}
+          {error && <div className="mb-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
           <button
             onClick={save}
             disabled={saving}

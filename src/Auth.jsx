@@ -428,18 +428,21 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
   const claim = async () => {
     setBusy(true);
     setError("");
-    const { error: labErr } = await supabase.from("labs").update({ owner_id: userId }).eq("id", claimable.id);
-    if (labErr) {
-      setBusy(false);
-      setError(labErr.message);
-      return;
-    }
+    // Profile FIRST: the labs update policy passes via "id = my_lab_id()",
+    // which only works once profiles.lab_id points at this lab. The old
+    // order (lab first) made the owner_id update a silent 0-row RLS no-op.
     const { error: profErr } = await supabase
       .from("profiles")
       .insert({ id: userId, role: "lab", name: displayName.trim() || "Lab Tech", lab_id: claimable.id });
-    setBusy(false);
     if (profErr) {
+      setBusy(false);
       setError(profErr.message);
+      return;
+    }
+    const { error: labErr } = await supabase.from("labs").update({ owner_id: userId }).eq("id", claimable.id);
+    setBusy(false);
+    if (labErr) {
+      setError(labErr.message);
       return;
     }
     onDone();

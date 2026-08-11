@@ -161,9 +161,18 @@ drop policy if exists "labs_insert_authenticated" on labs;
 create policy "labs_insert_authenticated" on labs for insert
   with check (auth.uid() is not null);
 
+-- "id = my_lab_id()" lets a claimed lab's own staff update their lab row
+-- (settings, per-procedure TATs). Without it, the original claim flow's
+-- owner_id update was a silent 0-row no-op: at claim time owner_id was
+-- still null and the lab user has no clinic, so neither branch matched.
 drop policy if exists "labs_update_owner_or_creator" on labs;
 create policy "labs_update_owner_or_creator" on labs for update
-  using (owner_id = auth.uid() or created_by_clinic_id = my_clinic_id());
+  using (owner_id = auth.uid() or created_by_clinic_id = my_clinic_id() or id = my_lab_id());
+
+-- Backfill owner_id for labs claimed before the policy fix above existed.
+update labs set owner_id = p.id
+from profiles p
+where p.lab_id = labs.id and labs.owner_id is null and p.role = 'lab';
 
 -- cases: strict isolation — a clinic sees only its own cases, a lab sees
 -- only cases assigned to it. Both sides can update (advance/revert stage,
