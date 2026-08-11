@@ -23,4 +23,4 @@ git commit -q -m "Deploy $(date -u '+%Y-%m-%d %H:%M UTC')"
 git push -q -f "$REPO_URL" main:gh-pages
 rm -rf .git
 
-echo "✓ Live at https://halajmix.github.io/dental-lab-tracker/ (allow ~1 min for CDN)"
+echo "✓ Live at https://dr-crown.com (allow ~1 min for CDN, longer on first-ever DNS propagation)"

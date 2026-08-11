@@ -3,9 +3,12 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  // Served from https://<user>.github.io/dental-lab-tracker/ in production,
-  // from the root during local dev.
-  base: process.env.NODE_ENV === "production" ? "/dental-lab-tracker/" : "/",
+  // Custom domain (dr-crown.com) serves from the root, same as local dev —
+  // the /dental-lab-tracker/ sub-path only applied to the old bare
+  // halajmix.github.io/dental-lab-tracker/ URL, which now 301-redirects to
+  // the custom domain automatically once GitHub Pages picks up the CNAME
+  // file (see public/CNAME) — no need to keep two different base paths.
+  base: "/",
   server: {
     port: Number(process.env.PORT) || 5173,
     open: false,
