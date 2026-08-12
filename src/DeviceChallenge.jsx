@@ -55,7 +55,7 @@ export default function DeviceChallenge({ sessionId, location, emailed, onVerifi
         <p className="mb-4 text-sm text-slate-600">
           {emailed
             ? "We emailed a 6-digit code to the account owner. Enter it to approve this bench."
-            : "A verification code was generated but could not be emailed — ask an administrator to check the station-session function's email configuration."}
+            : "A verification code was generated but could not be emailed — ask an administrator to check the device-session function's email configuration."}
         </p>
 
         <form onSubmit={submit}>

@@ -100,7 +100,7 @@ export default function DeviceManagement() {
     return (
       <p className="py-2 text-xs text-slate-400">
         Device auditing isn't enabled yet — run the Phase&nbsp;9 migration and deploy the
-        <span className="font-mono"> station-session </span>function to start recording benches.
+        device-session function to start recording benches.
       </p>
     );
   }

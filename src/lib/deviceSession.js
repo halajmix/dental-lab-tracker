@@ -11,6 +11,11 @@ import { supabase } from "./supabaseClient.js";
 
 const FINGERPRINT_KEY = "lab_station_device_id";
 
+// The station-session code was deployed via the dashboard editor, which kept
+// its auto-generated name. Supabase functions can't be renamed, so this is the
+// deployed slug; if it's ever redeployed as "station-session", update here.
+const FUNCTION_NAME = "super-processor";
+
 /**
  * Stable identifier for "this browser profile on this device".
  *
@@ -36,7 +41,7 @@ export function getDeviceFingerprint() {
 }
 
 async function callFunction(action, payload = {}) {
-  const { data, error } = await supabase.functions.invoke("station-session", {
+  const { data, error } = await supabase.functions.invoke(FUNCTION_NAME, {
     body: { action, fingerprint: getDeviceFingerprint(), ...payload },
   });
   if (error) {
