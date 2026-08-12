@@ -34,6 +34,7 @@ import {
   Camera,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES } from "./PrescriptionForm.jsx";
+import DeviceManagement from "./DeviceManagement.jsx";
 import {
   STAGES,
   STAGE_INDEX,
@@ -825,6 +826,12 @@ export default function DentalLabTracker({ auth }) {
               >
                 <BarChart3 size={16} className="text-blue-600" /> SLA Analytics
               </button>
+            </div>
+            <div className="border-t border-slate-100 pt-4">
+              <h4 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Signed-in devices
+              </h4>
+              <DeviceManagement />
             </div>
           </div>
         </SlideOver>
@@ -1652,6 +1659,13 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="border-t border-slate-100 pt-4">
+          <h4 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Signed-in devices
+          </h4>
+          <DeviceManagement />
         </div>
 
         <div className="sticky bottom-0 -mx-5 border-t border-slate-100 bg-white px-5 py-3">

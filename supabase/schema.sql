@@ -354,3 +354,134 @@ create policy "case_notes_insert" on case_notes for insert
         and (c.clinic_id = my_clinic_id() or c.lab_id = my_lab_id())
     )
   );
+
+/* ------------------------------------------------------------------ */
+/*  Phase 9 — Lab Station device sessions, IP auditing, anomaly OTP    */
+/*                                                                     */
+/*  Written for this app's actual stack: plain Postgres + RLS in the   */
+/*  existing Supabase project, driven by an Edge Function (Deno) that  */
+/*  can see real request headers. There is no Prisma/Express layer     */
+/*  here to hang an ORM schema off.                                    */
+/*                                                                     */
+/*  Client IP is captured server-side ONLY (Edge Function reads        */
+/*  cf-connecting-ip / x-forwarded-for). It is never accepted from the */
+/*  browser, which could trivially forge it.                           */
+/* ------------------------------------------------------------------ */
+
+create table if not exists lab_device_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- Org the device belongs to. Exactly one is set, mirroring profiles.
+  clinic_id uuid references clinics(id) on delete cascade,
+  lab_id uuid references labs(id) on delete cascade,
+
+  session_name text not null default 'New device',      -- "Main Bench iPad"
+  device_fingerprint text not null,                     -- stable per browser profile
+  user_agent text default '',
+  device_label text default '',                         -- "iPadOS 17 / Safari"
+
+  current_ip inet,
+  last_ip inet,
+  ip_subnet text,                                       -- /24 (v4) or /64 (v6)
+
+  is_trusted boolean not null default false,
+  status text not null default 'ACTIVE'
+    check (status in ('ACTIVE', 'CHALLENGE_REQUIRED', 'REVOKED')),
+
+  last_active_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '365 days'),
+  created_at timestamptz not null default now(),
+
+  -- One row per (user, device) — heartbeats upsert onto this.
+  unique (user_id, device_fingerprint)
+);
+
+create index if not exists lab_device_sessions_user_idx on lab_device_sessions (user_id);
+create index if not exists lab_device_sessions_org_idx on lab_device_sessions (clinic_id, lab_id);
+
+create table if not exists lab_trusted_ips (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid references clinics(id) on delete cascade,
+  lab_id uuid references labs(id) on delete cascade,
+  ip_address inet not null,
+  cidr_subnet text not null,
+  label text default '',                                -- "Lab Wi-Fi (Muscat)"
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
+create index if not exists lab_trusted_ips_org_idx on lab_trusted_ips (clinic_id, lab_id);
+
+-- Step-up challenges. Codes are stored hashed — a DB leak must not hand
+-- an attacker a working OTP.
+create table if not exists device_otp_challenges (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references lab_device_sessions(id) on delete cascade,
+  code_hash text not null,
+  attempts integer not null default 0,
+  expires_at timestamptz not null default (now() + interval '10 minutes'),
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists device_otp_challenges_session_idx on device_otp_challenges (session_id);
+
+alter table lab_device_sessions enable row level security;
+alter table lab_trusted_ips enable row level security;
+alter table device_otp_challenges enable row level security;
+
+-- Users see their own devices; an org's members see the org's devices so a
+-- lab owner can audit and revoke benches from Settings.
+drop policy if exists "device_sessions_select" on lab_device_sessions;
+create policy "device_sessions_select" on lab_device_sessions for select
+  using (
+    user_id = auth.uid()
+    or (clinic_id is not null and clinic_id = my_clinic_id())
+    or (lab_id is not null and lab_id = my_lab_id())
+    or is_admin()
+  );
+
+-- Rename / revoke only. Every security-relevant column (ip, status,
+-- is_trusted) is written by the Edge Function under the service role, so a
+-- client cannot mark its own device trusted or clear a challenge.
+drop policy if exists "device_sessions_update" on lab_device_sessions;
+create policy "device_sessions_update" on lab_device_sessions for update
+  using (
+    user_id = auth.uid()
+    or (clinic_id is not null and clinic_id = my_clinic_id())
+    or (lab_id is not null and lab_id = my_lab_id())
+  );
+
+drop policy if exists "trusted_ips_select" on lab_trusted_ips;
+create policy "trusted_ips_select" on lab_trusted_ips for select
+  using (
+    (clinic_id is not null and clinic_id = my_clinic_id())
+    or (lab_id is not null and lab_id = my_lab_id())
+    or is_admin()
+  );
+
+-- device_otp_challenges intentionally has NO client policy: only the Edge
+-- Function (service role, which bypasses RLS) ever reads or writes codes.
+
+-- Guard rail: a client UPDATE must not be able to escalate trust or status.
+-- RLS alone can't restrict *which columns* change, so enforce it in a trigger.
+create or replace function guard_device_session_columns()
+returns trigger as $$
+begin
+  if current_setting('role', true) = 'service_role' then
+    return new;  -- Edge Function: full control
+  end if;
+  if new.is_trusted is distinct from old.is_trusted
+     or new.current_ip is distinct from old.current_ip
+     or new.ip_subnet is distinct from old.ip_subnet
+     or (new.status is distinct from old.status and new.status <> 'REVOKED') then
+    raise exception 'Only session_name changes and revocation are allowed from a client';
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists lab_device_sessions_guard on lab_device_sessions;
+create trigger lab_device_sessions_guard
+  before update on lab_device_sessions
+  for each row execute function guard_device_session_columns();
