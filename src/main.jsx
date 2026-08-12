@@ -2,6 +2,8 @@ import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import DentalLabTracker from "./DentalLabTracker.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import PWAInstallBanner from "./PWAInstallBanner.jsx";
+import ConnectionStatus from "./ConnectionStatus.jsx";
 import { AuthGate } from "./Auth.jsx";
 import "./index.css";
 
@@ -16,6 +18,11 @@ function PageLoader() {
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
+      {/* Outside the AuthGate on purpose: connection state and the install
+          invite are both relevant on the login screen too, and neither
+          should be torn down by an auth state change. */}
+      <ConnectionStatus />
+      <PWAInstallBanner />
       <AuthGate>
         {(auth) =>
           auth.profile.role === "admin" ? (
