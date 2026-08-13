@@ -4,6 +4,7 @@ import DentalLabTracker from "./DentalLabTracker.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import PWAInstallBanner from "./PWAInstallBanner.jsx";
 import ConnectionStatus from "./ConnectionStatus.jsx";
+import ImpersonationBanner from "./ImpersonationBanner.jsx";
 import { AuthGate } from "./Auth.jsx";
 import "./index.css";
 
@@ -23,6 +24,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           should be torn down by an auth state change. */}
       <ConnectionStatus />
       <PWAInstallBanner />
+      <ImpersonationBanner />
       <AuthGate>
         {(auth) =>
           auth.profile.role === "admin" ? (

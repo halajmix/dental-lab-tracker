@@ -48,6 +48,8 @@ export const clinicFromRow = (r) => ({
   license: r.license ?? "",
   dentist: r.dentist ?? "",
   dentistLicense: r.dentist_license ?? "",
+  email: r.email ?? "",
+  ownerId: r.owner_id ?? null,
 });
 
 export async function fetchClinicsByIds(ids) {
@@ -211,6 +213,51 @@ export async function uploadCasePhoto(userId, groupId, file) {
   if (uploadError) throw uploadError;
   const { data } = supabase.storage.from("case-photos").getPublicUrl(path);
   return data.publicUrl;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Super Admin privileged actions — everything here needs the service  */
+/*  role (deleting a login, listing raw auth.users, generating an       */
+/*  impersonation session), so it goes through the admin-actions Edge   */
+/*  Function rather than a direct table call. The function re-checks    */
+/*  role='admin' server-side on every call; this client code is not the */
+/*  security boundary.                                                  */
+/* ------------------------------------------------------------------ */
+
+async function callAdminAction(action, payload = {}) {
+  const { data, error } = await supabase.functions.invoke("admin-actions", { body: { action, ...payload } });
+  if (error) {
+    let detail = error.message;
+    try {
+      const parsed = await error.context?.json?.();
+      if (parsed?.error) detail = parsed.error;
+    } catch {
+      /* keep the generic message */
+    }
+    throw new Error(detail);
+  }
+  return data;
+}
+
+export async function adminListUsers() {
+  const { users } = await callAdminAction("list-users");
+  return users;
+}
+
+export async function adminDeleteAccount(userId) {
+  await callAdminAction("delete-account", { userId });
+}
+
+export async function adminDeleteOrg(orgType, id) {
+  await callAdminAction("delete-org", { orgType, id });
+}
+
+export async function adminDeleteCase(caseId) {
+  await callAdminAction("delete-case", { caseId });
+}
+
+export async function adminGetImpersonationToken(userId) {
+  return callAdminAction("impersonate", { userId }); // { hashedToken, email }
 }
 
 /* ------------------------------------------------------------------ */
