@@ -363,6 +363,7 @@ function CaseRxDetails({ c }) {
         {row("Included", includedSummary(p))}
         {row("Files", p.files?.length ? `${p.files.length} attached` : null)}
         {row("Patient ID", c.patientId !== "PT-NEW" ? c.patientId : null)}
+        {row("Patient WhatsApp", c.patientPhone || null)}
       </div>
       {p.notes && (
         <div className="mb-2 mt-1.5 rounded-lg bg-white px-3 py-2 text-sm text-slate-600 ring-1 ring-inset ring-slate-100">

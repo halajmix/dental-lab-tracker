@@ -82,8 +82,11 @@ function buildRxMessage(caseObj, clinic, lab) {
 async function buildShare(sheetEl, caseObj, clinic, lab) {
   const msg = buildRxMessage(caseObj, clinic, lab);
   const phone = normalizePhone(caseObj.patientPhone);
+  // api.whatsapp.com/send, not wa.me — both are official Meta click-to-chat
+  // endpoints, but wa.me has been unreliable (connection resets seen in
+  // testing) while api.whatsapp.com answers consistently.
   const waUrl = phone
-    ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
+    ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`
     : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
 
   let file = null;

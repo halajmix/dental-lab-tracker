@@ -3,7 +3,8 @@ import { X, MessageCircle, Mail, Phone, Copy, Check, Send } from "lucide-react";
 import { toothSummary } from "./PrescriptionForm.jsx";
 import { STAGES } from "./LifecycleEngine.jsx";
 
-// Digits only, no leading zeros — the format wa.me expects.
+// Digits only, no leading zeros — the format WhatsApp's click-to-chat
+// endpoint expects.
 const waPhone = (p) => (p || "").replace(/\D/g, "").replace(/^0+/, "");
 
 /**
@@ -63,9 +64,12 @@ export default function ContactLabModal({ open, caseObj, lab, clinic, onClose })
   const fullMessage = [context, "", note.trim() || "(your message)", "", signature].join("\n");
   const subject = `${caseObj.id} — ${caseObj.patientName} · ${caseObj.prescription?.category ?? "Lab case"}`;
 
+  // api.whatsapp.com/send, not wa.me — both are official Meta click-to-chat
+  // endpoints, but wa.me has been unreliable (connection resets seen in
+  // testing) while api.whatsapp.com answers consistently.
   const phone = waPhone(lab?.contact);
   const waUrl = phone
-    ? `https://wa.me/${phone}?text=${encodeURIComponent(fullMessage)}`
+    ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(fullMessage)}`
     : `https://api.whatsapp.com/send?text=${encodeURIComponent(fullMessage)}`;
   const mailUrl = `mailto:${lab?.email ?? ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(fullMessage)}`;
 
