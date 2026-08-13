@@ -493,8 +493,10 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
 /*  Small field helpers                                                */
 /* ================================================================== */
 
+// text-base (16px) below sm:, dropping to text-sm on larger screens — below
+// 16px, iOS Safari force-zooms on focus, which is disruptive on a phone.
 const inputCls =
-  "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400";
+  "w-full rounded-lg border border-slate-300 px-3 py-2 text-base sm:text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400";
 
 /**
  * Dropdown that allows multiple selections. Behaves like a <select multiple>
@@ -717,10 +719,10 @@ function RestorationCard({ r, notation, onEdit, onDelete }) {
           <p className="mt-0.5 truncate text-xs text-slate-500">{toothSummary({ teeth: r.teeth, notation }) || "No teeth"}</p>
         </div>
         <div className="flex shrink-0 gap-1">
-          <button type="button" onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600" title="Edit">
+          <button type="button" onClick={onEdit} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-blue-600" title="Edit">
             <Pencil size={14} />
           </button>
-          <button type="button" onClick={onDelete} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Delete">
+          <button type="button" onClick={onDelete} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Delete">
             <Trash2 size={14} />
           </button>
         </div>
@@ -1410,7 +1412,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
                         ))}
                       </div>
                     </div>
-                    <button type="button" onClick={() => setDraftOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                    <button type="button" onClick={() => setDraftOpen(false)} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600">
                       <X size={16} />
                     </button>
                   </div>
@@ -1707,13 +1709,16 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
                             </button>
                           </div>
                         )}
+                        {/* Always visible, not hover-gated — a hover-only reveal
+                            is invisible and unusable on a touch-only device
+                            (iPad, phone) with no mouse to hover with. */}
                         <button
                           type="button"
                           onClick={() => removePhoto(f.id)}
-                          className="absolute right-1 top-1 rounded-full bg-slate-900/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
+                          className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full bg-slate-900/70 text-white transition hover:bg-slate-900/90"
                           title="Remove"
                         >
-                          <Trash2 size={11} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     ))}

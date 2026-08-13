@@ -265,8 +265,14 @@ function ProfileSettingsModal({ open, onClose, auth }) {
             ) : (
               <CircleUser size={34} className="absolute inset-0 m-auto text-slate-300" />
             )}
+            {/* Full-overlay hint on hover for mouse users, but also a small
+                persistent badge — a hover-only affordance gives no visual
+                cue at all that this is tappable on a touch-only device. */}
             <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 opacity-0 transition group-hover:bg-slate-900/50 group-hover:opacity-100">
               <Camera size={18} className="text-white" />
+            </span>
+            <span className="absolute bottom-0 right-0 flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-white ring-2 ring-white">
+              <Camera size={11} />
             </span>
           </button>
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
@@ -1676,9 +1682,11 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
 /* ------------------------------------------------------------------ */
 
 // Light, borderless input — sits on a soft gray fill until focused, when it
-// lifts to white with a colored ring. Used only by AddLabModal's lighter style.
+// lifts to white with a colored ring. Used by AddLabModal, ProfileSettingsModal
+// and LabSettingsDrawer. text-base (16px) below sm: avoids iOS Safari's
+// force-zoom-on-focus for any input under 16px.
 const lightInputCls =
-  "w-full rounded-xl border border-transparent bg-gray-50 px-3.5 py-2.5 text-sm text-slate-800 outline-none transition focus:bg-white focus:ring-2 focus:ring-blue-500";
+  "w-full rounded-xl border border-transparent bg-gray-50 px-3.5 py-2.5 text-base sm:text-sm text-slate-800 outline-none transition focus:bg-white focus:ring-2 focus:ring-blue-500";
 
 function AddLabModal({ open, onClose, onSave }) {
   const [name, setName] = useState("");

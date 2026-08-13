@@ -156,7 +156,7 @@ export default function DeviceManagement() {
                         </span>
                         <Pencil
                           size={11}
-                          className="shrink-0 text-slate-300 opacity-0 transition group-hover:opacity-100"
+                          className="shrink-0 text-slate-300 transition group-hover:text-slate-500"
                         />
                       </button>
                     )}
