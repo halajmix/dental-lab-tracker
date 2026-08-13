@@ -394,6 +394,7 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
                 <Spec label="Implant System" value={rx.implantSystem} />
                 <Spec label="Abutment Type" value={rx.abutmentType} />
                 <Spec label="Abutment / Platform Ø" value={rx.abutmentDiameter} />
+                <Spec label="Abutment Colour Code" value={rx.abutmentColor} />
               </>
             )}
             <Spec label="Stump / Prep Shade" value={rx?.stumpShade} />

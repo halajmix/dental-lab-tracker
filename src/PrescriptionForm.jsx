@@ -185,6 +185,8 @@ const IMPLANT_SYSTEMS = [
   "BioHorizons",
   "Neodent",
   "Implant Direct",
+  "Bio3",
+  "SPI (Thommen Medical)",
   "Other — see notes",
 ];
 const ABUTMENT_TYPES = [
@@ -607,6 +609,11 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const [implantSystem, setImplantSystem] = useState("");
   const [abutmentType, setAbutmentType] = useState("");
   const [abutmentDiameter, setAbutmentDiameter] = useState("");
+  // Free-text, not a lookup table: color coding is manufacturer AND
+  // product-line specific (e.g. Straumann Bone Level vs Tissue Level use
+  // different schemes for the same diameter) — the dentist enters the
+  // actual code for their implant, rather than the app guessing wrong.
+  const [abutmentColor, setAbutmentColor] = useState("");
   const [rush, setRush] = useState(false);
   const [insertionDate, setInsertionDate] = useState("");
 
@@ -802,7 +809,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setPonticDesign(PONTIC_DESIGNS[0]);
     setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
-    setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter("");
+    setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter(""); setAbutmentColor("");
     setScans([]);
     photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
     setPhotos([]); setPhotoGroupId(crypto.randomUUID());
@@ -828,6 +835,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
       implantSystem: isImplant ? implantSystem : null,
       abutmentType: isImplant ? abutmentType : null,
       abutmentDiameter: isImplant ? abutmentDiameter : null,
+      abutmentColor: isImplant ? abutmentColor.trim() : null,
       rush,
       baseTat,
       effTat,
@@ -1100,6 +1108,14 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
                         <option key={d} value={d}>{d}</option>
                       ))}
                     </select>
+                  </Field>
+                  <Field label="Abutment Colour Code" hint="Optional · helps the lab match the physical component">
+                    <input
+                      className={inputCls}
+                      value={abutmentColor}
+                      onChange={(e) => setAbutmentColor(e.target.value)}
+                      placeholder="e.g. Yellow, Pink, Green…"
+                    />
                   </Field>
                 </>
               )}

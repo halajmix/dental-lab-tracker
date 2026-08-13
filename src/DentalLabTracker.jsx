@@ -361,6 +361,7 @@ function CaseRxDetails({ c }) {
         {row("Pontic design", p.ponticDesign && toothSummary(p).includes("(p)") ? p.ponticDesign : null)}
         {row("Implant system", p.implantSystem)}
         {row("Abutment", p.implantSystem ? `${p.abutmentType ?? ""} ${p.abutmentDiameter ?? ""}`.trim() : null)}
+        {row("Abutment colour code", p.abutmentColor || null)}
         {row("Deliver by", c.appointmentDate ? `${c.appointmentDate}${c.deliveryTime && c.deliveryTime !== "Anytime" ? ` · ${c.deliveryTime}` : ""}` : null)}
         {row("Included", includedSummary(p))}
         {row("Scans", p.files?.filter((f) => f.kind === "scan").length ? `${p.files.filter((f) => f.kind === "scan").length} STL file(s)` : null)}
