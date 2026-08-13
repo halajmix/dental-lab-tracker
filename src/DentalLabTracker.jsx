@@ -1150,23 +1150,9 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
       </div>
 
       {/* Lab SLA snapshot */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-          <p className="text-[11px] font-medium text-slate-500">Actual Turn around time</p>
-          <p className="mt-0.5 text-lg font-bold text-slate-800">{sla.actualTat != null ? `${sla.actualTat.toFixed(1)}d` : "—"} <span className="text-xs font-medium text-slate-400">/ {sla.promisedTat}d</span></p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-          <p className="text-[11px] font-medium text-slate-500">On-Time Rate</p>
-          <p className="mt-0.5 text-lg font-bold text-slate-800">{sla.onTimeRate == null ? "—" : `${Math.round(sla.onTimeRate * 100)}%`}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-          <p className="text-[11px] font-medium text-slate-500">Remake Rate</p>
-          <p className="mt-0.5 text-lg font-bold text-slate-800">{Math.round(sla.remakeRate * 100)}% <span className="text-xs font-medium text-slate-400">({sla.remakes})</span></p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-          <p className="text-[11px] font-medium text-slate-500">Quality Score</p>
-          <p className="mt-0.5 text-lg font-bold" style={{ color: sla.qualityScore >= 85 ? "#16a34a" : sla.qualityScore >= 70 ? "#d97706" : "#dc2626" }}>{sla.qualityScore}</p>
-        </div>
+      <div className="w-full max-w-[220px] rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:max-w-[240px]">
+        <p className="text-[11px] font-medium text-slate-500">Actual Turn around time</p>
+        <p className="mt-0.5 text-lg font-bold text-slate-800">{sla.actualTat != null ? `${sla.actualTat.toFixed(1)}d` : "—"} <span className="text-xs font-medium text-slate-400">/ {sla.promisedTat}d</span></p>
       </div>
 
       {/* Case list — compact rows, not cards, so several fit without scrolling */}
