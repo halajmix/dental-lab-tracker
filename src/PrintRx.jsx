@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Printer, FileText, Zap, Paperclip, MessageCircle, Loader2, Check, Download } from "lucide-react";
-import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, includedSummary } from "./PrescriptionForm.jsx";
+import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, includedSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 
 // Render an on-screen element to a multi-page A4 PDF File (no print dialog).
 // html2canvas + jsPDF are ~700kB, so they're loaded on demand at first share.
@@ -59,17 +59,20 @@ function buildRxMessage(caseObj, clinic, lab) {
       caseObj.deliveryTime && caseObj.deliveryTime !== "Anytime" ? ` (${caseObj.deliveryTime})` : ""
     }`,
   ];
+  const shadeText = (guide, shade) => (guide === SHADE_BY_LAB ? "Determined by lab" : shade && shade !== "N/A" ? shade : null);
   if (rx?.restorations?.length) {
     rx.restorations.forEach((r, i) => {
       const teeth = toothSummary({ teeth: r.teeth, notation: rx.notation });
-      lines.push(`Restoration ${i + 1}: ${r.category}${r.material ? ` — ${r.material}` : ""}${teeth ? ` (${teeth})` : ""}${r.vitaShade && r.vitaShade !== "N/A" ? ` · Shade ${r.vitaShade}` : ""}`);
+      const shade = shadeText(r.shadeGuide, r.vitaShade);
+      lines.push(`Restoration ${i + 1}: ${r.category}${r.material ? ` — ${r.material}` : ""}${teeth ? ` (${teeth})` : ""}${shade ? ` · Shade ${shade}` : ""}`);
     });
     if (rx.rush) lines.push(`Express order`);
     if (rx.notes) lines.push(`Notes: ${rx.notes}`);
   } else if (rx) {
     lines.push(`Restoration: ${rx.category}${rx.material ? ` — ${rx.material}` : ""}`);
     if (toothSummary(rx)) lines.push(`Teeth: ${toothSummary(rx)}`);
-    if (rx.vitaShade && rx.vitaShade !== "N/A") lines.push(`Shade: ${rx.vitaShade}`);
+    const shade = shadeText(rx.shadeGuide, rx.vitaShade);
+    if (shade) lines.push(`Shade: ${shade}`);
     if (rx.rush) lines.push(`Express order`);
     if (rx.notes) lines.push(`Notes: ${rx.notes}`);
   }
@@ -401,19 +404,23 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
                   <div>
                     <Spec label="Restoration" value={r.category} />
                     <Spec label="Material" value={r.material} />
-                    <Spec label="Shade Guide" value={r.shadeGuide} />
-                    <Spec label="Main Shade" value={r.vitaShade} />
+                    {r.shadeGuide === SHADE_BY_LAB ? (
+                      <Spec label="Shade" value="Determined by lab" />
+                    ) : (
+                      <>
+                        <Spec label="Shade Guide" value={r.shadeGuide} />
+                        <Spec label="Main Shade" value={r.vitaShade} />
+                      </>
+                    )}
                   </div>
                   <div>
                     {r.implantSystem && (
                       <>
-                        <Spec label="Implant System" value={r.implantSystem} />
-                        <Spec label="Abutment Type" value={r.abutmentType} />
-                        <Spec label="Abutment / Platform Ø" value={r.abutmentDiameter} />
+                        <Spec label="Implant Brand" value={r.implantSystem} />
+                        <Spec label="Abutment Size" value={r.abutmentType} />
                         <Spec label="Abutment Colour Code" value={r.abutmentColor} />
                       </>
                     )}
-                    <Spec label="Pontic Design" value={r.ponticDesign} />
                     <Spec label="Stump / Prep Shade" value={r.stumpShade} />
                   </div>
                 </div>
@@ -426,16 +433,21 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Material &amp; Appliance</p>
               <Spec label="Restoration" value={rx?.category} />
               <Spec label="Material" value={rx?.material} />
-              <Spec label="Shade Guide" value={rx?.shadeGuide} />
-              <Spec label="Main Shade" value={rx?.vitaShade} />
+              {rx?.shadeGuide === SHADE_BY_LAB ? (
+                <Spec label="Shade" value="Determined by lab" />
+              ) : (
+                <>
+                  <Spec label="Shade Guide" value={rx?.shadeGuide} />
+                  <Spec label="Main Shade" value={rx?.vitaShade} />
+                </>
+              )}
             </div>
             <div>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Specifications</p>
               {rx?.implantSystem && (
                 <>
-                  <Spec label="Implant System" value={rx.implantSystem} />
-                  <Spec label="Abutment Type" value={rx.abutmentType} />
-                  <Spec label="Abutment / Platform Ø" value={rx.abutmentDiameter} />
+                  <Spec label="Implant Brand" value={rx.implantSystem} />
+                  <Spec label="Abutment Size" value={rx.abutmentType} />
                   <Spec label="Abutment Colour Code" value={rx.abutmentColor} />
                 </>
               )}

@@ -199,7 +199,12 @@ const SHADE_GUIDES = {
   "Bleach / Whitening": ["BL1", "BL2", "BL3", "BL4"],
   "Custom / Photo": ["Custom (see photo)"],
 };
-const SHADE_GUIDE_NAMES = Object.keys(SHADE_GUIDES);
+// A dedicated "guide" that isn't really a guide — picking it means the
+// dentist isn't specifying a shade at all, the lab decides it (e.g. from
+// photos/notes). Collapses the Shade dropdown entirely rather than listing
+// values for it, so it has no entry in SHADE_GUIDES itself.
+export const SHADE_BY_LAB = "Shade by Lab";
+const SHADE_GUIDE_NAMES = [...Object.keys(SHADE_GUIDES), SHADE_BY_LAB];
 
 const STUMP_SHADES = ["N/A", "ND1", "ND2", "ND3", "ND4", "ND5", "ND6", "ND7", "ND8", "ND9"];
 
@@ -207,7 +212,6 @@ const STUMP_SHADES = ["N/A", "ND1", "ND2", "ND3", "ND4", "ND5", "ND6", "ND7", "N
 // When the category is "Others - refer to notes", spec fields collapse to this.
 const REFER = "Refer to notes";
 const REFER_CATEGORY = "Others - refer to notes";
-const PONTIC_DESIGNS = ["Modified Ridge Lap", "Ovate", "Sanitary / Hygienic", "Conical", "Ridge Lap (Full)"];
 
 // Preferred time of day for the lab to deliver back to the clinic.
 const DELIVERY_TIMES = ["Anytime", "Morning", "Afternoon", "Before sunset", "Evening"];
@@ -238,20 +242,6 @@ const ABUTMENT_TYPES = [
   "Multi-unit",
   "Locator / Overdenture",
 ];
-const ABUTMENT_DIAMETERS = [
-  "Ø3.0 (Narrow)",
-  "Ø3.3 (Narrow)",
-  "Ø3.5 (Narrow)",
-  "Ø3.75 (Regular)",
-  "Ø4.0 (Regular)",
-  "Ø4.3 (Regular)",
-  "Ø4.5 (Regular)",
-  "Ø4.8 (Wide)",
-  "Ø5.0 (Wide)",
-  "Ø5.5 (Wide)",
-  "Ø6.0 (Extra Wide)",
-];
-
 // Translucent / tooth-coloured materials where the underlying prep colour shows
 // through — these are the only ones that need a stump shade.
 const AESTHETIC_MATERIALS = [
@@ -649,9 +639,11 @@ function SectionHeader({ icon: Icon, n, title, subtitle }) {
  */
 function RestorationFields({ draft, onChange, errors }) {
   const isImplant = IMPLANT_CATEGORIES.includes(draft.category);
-  const isBridge = BRIDGE_CATEGORIES.includes(draft.category);
   const showStump = HAS_STUMP.includes(draft.category) && AESTHETIC_MATERIALS.includes(draft.material);
+  const shadeByLab = draft.shadeGuide === SHADE_BY_LAB;
   const err = (k) => errors?.includes(k);
+
+  const changeShadeGuide = (g) => onChange({ shadeGuide: g, vitaShade: g === SHADE_BY_LAB ? SHADE_BY_LAB : SHADE_GUIDES[g][0] });
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -664,27 +656,19 @@ function RestorationFields({ draft, onChange, errors }) {
       </Field>
       {isImplant && (
         <>
-          <Field label="Implant System" required>
+          <Field label="Implant Brand" required>
             <select className={`${inputCls} ${err("implantSystem") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.implantSystem} onChange={(e) => onChange({ implantSystem: e.target.value })}>
-              <option value="">Select system…</option>
+              <option value="">Select brand…</option>
               {IMPLANT_SYSTEMS.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
           </Field>
-          <Field label="Abutment Type" required>
+          <Field label="Abutment Size" required>
             <select className={`${inputCls} ${err("abutmentType") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.abutmentType} onChange={(e) => onChange({ abutmentType: e.target.value })}>
-              <option value="">Select abutment…</option>
+              <option value="">Select…</option>
               {ABUTMENT_TYPES.map((a) => (
                 <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Abutment / Platform Ø" required>
-            <select className={`${inputCls} ${err("abutmentDiameter") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.abutmentDiameter} onChange={(e) => onChange({ abutmentDiameter: e.target.value })}>
-              <option value="">Select diameter…</option>
-              {ABUTMENT_DIAMETERS.map((d) => (
-                <option key={d} value={d}>{d}</option>
               ))}
             </select>
           </Field>
@@ -694,36 +678,25 @@ function RestorationFields({ draft, onChange, errors }) {
         </>
       )}
       <Field label="Shade Guide">
-        <select
-          className={inputCls}
-          value={draft.shadeGuide}
-          onChange={(e) => onChange({ shadeGuide: e.target.value, vitaShade: SHADE_GUIDES[e.target.value][0] })}
-        >
+        <select className={inputCls} value={draft.shadeGuide} onChange={(e) => changeShadeGuide(e.target.value)}>
           {SHADE_GUIDE_NAMES.map((g) => (
             <option key={g} value={g}>{g}</option>
           ))}
         </select>
       </Field>
-      <Field label="Shade">
-        <select className={inputCls} value={draft.vitaShade} onChange={(e) => onChange({ vitaShade: e.target.value })}>
-          {SHADE_GUIDES[draft.shadeGuide].map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </Field>
-      {showStump && (
-        <Field label="Stump Shade" hint="Needed for translucent materials">
-          <select className={inputCls} value={draft.stumpShade} onChange={(e) => onChange({ stumpShade: e.target.value })}>
-            {STUMP_SHADES.map((s) => (
+      {!shadeByLab && (
+        <Field label="Shade">
+          <select className={inputCls} value={draft.vitaShade} onChange={(e) => onChange({ vitaShade: e.target.value })}>
+            {SHADE_GUIDES[draft.shadeGuide].map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
         </Field>
       )}
-      {isBridge && (
-        <Field label="Pontic Design" hint="Applied to pontic units">
-          <select className={inputCls} value={draft.ponticDesign} onChange={(e) => onChange({ ponticDesign: e.target.value })}>
-            {PONTIC_DESIGNS.map((s) => (
+      {showStump && (
+        <Field label="Stump Shade" hint="Needed for translucent materials">
+          <select className={inputCls} value={draft.stumpShade} onChange={(e) => onChange({ stumpShade: e.target.value })}>
+            {STUMP_SHADES.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
@@ -736,7 +709,6 @@ function RestorationFields({ draft, onChange, errors }) {
 /** Compact display of one confirmed restoration in the cart list. */
 function RestorationCard({ r, notation, onEdit, onDelete }) {
   const isImplant = IMPLANT_CATEGORIES.includes(r.category);
-  const isBridge = BRIDGE_CATEGORIES.includes(r.category);
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
@@ -755,9 +727,8 @@ function RestorationCard({ r, notation, onEdit, onDelete }) {
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
         {r.material && <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{r.material}</span>}
-        {r.vitaShade && r.vitaShade !== "N/A" && <span className="rounded-full bg-violet-100 px-2 py-0.5 font-semibold text-violet-700">Shade {r.vitaShade}</span>}
+        {r.vitaShade && r.vitaShade !== "N/A" && <span className="rounded-full bg-violet-100 px-2 py-0.5 font-semibold text-violet-700">{r.vitaShade === SHADE_BY_LAB ? SHADE_BY_LAB : `Shade ${r.vitaShade}`}</span>}
         {isImplant && r.implantSystem && <span className="rounded-full bg-indigo-100 px-2 py-0.5 font-semibold text-indigo-700">{r.implantSystem}</span>}
-        {isBridge && r.ponticDesign && <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700">{r.ponticDesign}</span>}
       </div>
     </div>
   );
@@ -775,10 +746,8 @@ const emptyDraft = () => ({
   shadeGuide: "Vita Classical",
   vitaShade: "A2",
   stumpShade: "N/A",
-  ponticDesign: PONTIC_DESIGNS[0],
   implantSystem: "",
   abutmentType: "",
-  abutmentDiameter: "",
   abutmentColor: "",
 });
 
@@ -807,7 +776,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const [shadeGuide, setShadeGuide] = useState("Vita Classical");
   const [vitaShade, setVitaShade] = useState("A2");
   const [stumpShade, setStumpShade] = useState("N/A");
-  const [ponticDesign, setPonticDesign] = useState(PONTIC_DESIGNS[0]);
 
   // Restoration cart — a case is EITHER several independent fixed
   // restorations (crowns/bridges/veneers/implants, each own spec) OR one
@@ -827,7 +795,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   // Implant-only specs (blank so the dentist has to choose deliberately).
   const [implantSystem, setImplantSystem] = useState("");
   const [abutmentType, setAbutmentType] = useState("");
-  const [abutmentDiameter, setAbutmentDiameter] = useState("");
   // Free-text, not a lookup table: color coding is manufacturer AND
   // product-line specific (e.g. Straumann Bone Level vs Tissue Level use
   // different schemes for the same diameter) — the dentist enters the
@@ -931,7 +898,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
       stumpShade: HAS_STUMP.includes(c) ? d.stumpShade : "N/A",
       implantSystem: IMPLANT_CATEGORIES.includes(c) ? d.implantSystem : "",
       abutmentType: IMPLANT_CATEGORIES.includes(c) ? d.abutmentType : "",
-      abutmentDiameter: IMPLANT_CATEGORIES.includes(c) ? d.abutmentDiameter : "",
       abutmentColor: IMPLANT_CATEGORIES.includes(c) ? d.abutmentColor : "",
       selection: remapSelectionForCategory(d.selection, c),
     }));
@@ -954,7 +920,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     !draft.material && "material",
     draftIsImplant && !draft.implantSystem && "implantSystem",
     draftIsImplant && !draft.abutmentType && "abutmentType",
-    draftIsImplant && !draft.abutmentDiameter && "abutmentDiameter",
   ].filter(Boolean);
   const draftValid = draftErrors.length === 0;
 
@@ -974,10 +939,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
       shadeGuide: r.shadeGuide,
       vitaShade: r.vitaShade,
       stumpShade: r.stumpShade,
-      ponticDesign: r.ponticDesign ?? PONTIC_DESIGNS[0],
       implantSystem: r.implantSystem ?? "",
       abutmentType: r.abutmentType ?? "",
-      abutmentDiameter: r.abutmentDiameter ?? "",
       abutmentColor: r.abutmentColor ?? "",
     });
     setDraftTouched(false);
@@ -994,10 +957,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
       shadeGuide: draft.shadeGuide,
       vitaShade: draft.vitaShade,
       stumpShade: draft.stumpShade,
-      ponticDesign: BRIDGE_CATEGORIES.includes(draft.category) ? draft.ponticDesign : null,
       implantSystem: draftIsImplant ? draft.implantSystem : null,
       abutmentType: draftIsImplant ? draft.abutmentType : null,
-      abutmentDiameter: draftIsImplant ? draft.abutmentDiameter : null,
       abutmentColor: draftIsImplant ? draft.abutmentColor.trim() : null,
     };
     setRestorations((prev) => {
@@ -1037,7 +998,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     if (!IMPLANT_CATEGORIES.includes(c)) {
       setImplantSystem("");
       setAbutmentType("");
-      setAbutmentDiameter("");
     }
     if (c === REFER_CATEGORY) {
       // Everything is detailed in the notes → collapse the spec fields.
@@ -1131,7 +1091,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     material: caseMode === "appliance" && !isSplint && !material,
     implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
     abutmentType: caseMode === "appliance" && isImplant && !abutmentType,
-    abutmentDiameter: caseMode === "appliance" && isImplant && !abutmentDiameter,
     photosUploading,
   };
   const isValid = !Object.values(errors).some(Boolean);
@@ -1144,9 +1103,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     labId: "Target lab",
     restorations: "At least one restoration",
     material: "Material",
-    implantSystem: "Implant system",
-    abutmentType: "Abutment type",
-    abutmentDiameter: "Abutment diameter",
+    implantSystem: "Implant brand",
+    abutmentType: "Abutment size",
     photosUploading: "Photos still uploading",
   };
   const missing = Object.entries(errors)
@@ -1159,10 +1117,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     setIncluded([]); setIncludedOther("");
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
-    setPonticDesign(PONTIC_DESIGNS[0]);
     setCaseMode("restorations"); setRestorations([]); setDraftOpen(false); setDraftTouched(false); setDraft(emptyDraft());
     setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
-    setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter(""); setAbutmentColor("");
+    setImplantSystem(""); setAbutmentType(""); setAbutmentColor("");
     setScans([]);
     photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
     setPhotos([]); setPhotoGroupId(crypto.randomUUID());
@@ -1204,10 +1161,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
             shadeGuide,
             vitaShade,
             stumpShade,
-            ponticDesign: BRIDGE_CATEGORIES.includes(category) ? ponticDesign : null,
             implantSystem: isImplant ? implantSystem : null,
             abutmentType: isImplant ? abutmentType : null,
-            abutmentDiameter: isImplant ? abutmentDiameter : null,
             abutmentColor: isImplant ? abutmentColor.trim() : null,
           };
     onSave(
@@ -1231,7 +1186,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   /* ---------------- per-step status for the accordion ---------------- */
   const stepErrors = {
     1: ["patientName", "labId"],
-    2: ["restorations", "teeth", "material", "implantSystem", "abutmentType", "abutmentDiameter"],
+    2: ["restorations", "teeth", "material", "implantSystem", "abutmentType"],
     3: [],
   };
   const stepInvalid = (n) => stepErrors[n].some((k) => errors[k]);
@@ -1587,7 +1542,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
                             value={shadeGuide}
                             onChange={(e) => {
                               setShadeGuide(e.target.value);
-                              setVitaShade(SHADE_GUIDES[e.target.value][0]);
+                              setVitaShade(e.target.value === SHADE_BY_LAB ? SHADE_BY_LAB : SHADE_GUIDES[e.target.value][0]);
                             }}
                           >
                             {SHADE_GUIDE_NAMES.map((g) => (
@@ -1596,17 +1551,21 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
                           </select>
                         )}
                       </Field>
-                      <Field label="Shade">
-                        {isRefer ? (
+                      {isRefer ? (
+                        <Field label="Shade">
                           <input className={inputCls} value={REFER} disabled readOnly />
-                        ) : (
-                          <select className={inputCls} value={vitaShade} onChange={(e) => setVitaShade(e.target.value)}>
-                            {SHADE_GUIDES[shadeGuide].map((s) => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        )}
-                      </Field>
+                        </Field>
+                      ) : (
+                        shadeGuide !== SHADE_BY_LAB && (
+                          <Field label="Shade">
+                            <select className={inputCls} value={vitaShade} onChange={(e) => setVitaShade(e.target.value)}>
+                              {SHADE_GUIDES[shadeGuide].map((s) => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </Field>
+                        )
+                      )}
                     </>
                   )}
                 </div>

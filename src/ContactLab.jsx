@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { X, MessageCircle, Mail, Phone, Copy, Check, Send } from "lucide-react";
-import { toothSummary } from "./PrescriptionForm.jsx";
+import { toothSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 import { STAGES } from "./LifecycleEngine.jsx";
 
 // Digits only, no leading zeros — the format WhatsApp's click-to-chat
@@ -18,21 +18,24 @@ export function buildCaseContext(caseObj, clinic) {
     `Case: ${caseObj.id}`,
     `Patient: ${caseObj.patientName} (${caseObj.patientId})`,
   ];
+  const shadeText = (guide, shade) => (guide === SHADE_BY_LAB ? "Determined by lab" : shade && shade !== "N/A" ? shade : null);
   if (rx?.restorations?.length) {
     rx.restorations.forEach((r, i) => {
       const teeth = toothSummary({ teeth: r.teeth, notation: rx.notation });
+      const shade = shadeText(r.shadeGuide, r.vitaShade);
       let line = `Restoration ${i + 1}: ${r.category}${r.material ? ` — ${r.material}` : ""}${teeth ? ` (${teeth})` : ""}`;
-      if (r.vitaShade && r.vitaShade !== "N/A") line += ` · Shade ${r.vitaShade}`;
-      if (r.implantSystem) line += ` · Implant: ${r.implantSystem} · ${r.abutmentType} · ${r.abutmentDiameter}`;
+      if (shade) line += ` · Shade ${shade}`;
+      if (r.implantSystem) line += ` · Implant: ${r.implantSystem} · ${r.abutmentType}`;
       lines.push(line);
     });
     if (rx.rush) lines.push(`Express order`);
   } else if (rx) {
     lines.push(`Restoration: ${rx.category}${rx.material ? ` — ${rx.material}` : ""}`);
     if (toothSummary(rx)) lines.push(`Teeth: ${toothSummary(rx)}`);
-    if (rx.vitaShade && rx.vitaShade !== "N/A") lines.push(`Shade: ${rx.vitaShade}`);
+    const shade = shadeText(rx.shadeGuide, rx.vitaShade);
+    if (shade) lines.push(`Shade: ${shade}`);
     if (rx.implantSystem) {
-      lines.push(`Implant: ${rx.implantSystem} · ${rx.abutmentType} · ${rx.abutmentDiameter}`);
+      lines.push(`Implant: ${rx.implantSystem} · ${rx.abutmentType}`);
     }
     if (rx.rush) lines.push(`Express order`);
   }

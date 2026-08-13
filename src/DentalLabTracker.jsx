@@ -35,7 +35,7 @@ import {
   Image as ImageIcon,
   ScanLine,
 } from "lucide-react";
-import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES } from "./PrescriptionForm.jsx";
+import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 import DeviceManagement from "./DeviceManagement.jsx";
 import {
   STAGES,
@@ -345,7 +345,12 @@ function CaseRxDetails({ c }) {
   // Rows for ONE restoration — reused per card in cart mode, and (with the
   // whole prescription as the "restoration") for the legacy single-item shape.
   const specRows = (r) => {
-    const shade = r.vitaShade && r.vitaShade !== "N/A" ? `${r.vitaShade}${r.shadeGuide && r.shadeGuide !== "N/A" ? ` (${r.shadeGuide})` : ""}` : null;
+    const shade =
+      r.shadeGuide === SHADE_BY_LAB
+        ? SHADE_BY_LAB
+        : r.vitaShade && r.vitaShade !== "N/A"
+        ? `${r.vitaShade}${r.shadeGuide && r.shadeGuide !== "N/A" ? ` (${r.shadeGuide})` : ""}`
+        : null;
     const teethLabel = toothSummary({ teeth: r.teeth, notation: p.notation });
     return (
       <div className="divide-y divide-slate-100">
@@ -354,9 +359,8 @@ function CaseRxDetails({ c }) {
         {row("Teeth", teethLabel)}
         {row("Shade", shade)}
         {row("Stump shade", r.stumpShade && r.stumpShade !== "N/A" ? r.stumpShade : null)}
-        {row("Pontic design", r.ponticDesign && (hasCart || teethLabel.includes("(p)")) ? r.ponticDesign : null)}
-        {row("Implant system", r.implantSystem)}
-        {row("Abutment", r.implantSystem ? `${r.abutmentType ?? ""} ${r.abutmentDiameter ?? ""}`.trim() : null)}
+        {row("Implant brand", r.implantSystem)}
+        {row("Abutment size", r.abutmentType)}
         {row("Abutment colour code", r.abutmentColor || null)}
       </div>
     );
