@@ -23,12 +23,12 @@ function Field({ label, children }) {
   );
 }
 
-/** Omani number: fixed +968 chip, 8 local digits — same pattern as Settings. */
+/** Omani number: fixed 00968 chip, 8 local digits — same pattern as Settings. */
 function OmaniPhoneInput({ value, onChange, required }) {
   return (
     <div className="flex items-center gap-2">
       <span className="shrink-0 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500">
-        +968
+        00968
       </span>
       <input
         required={required}
@@ -270,6 +270,15 @@ function SignupScreen({ onSwitch }) {
       setError(error.message);
       return;
     }
+    // Supabase deliberately reports success for an already-registered email
+    // (anti-probing) — the only tell is an empty identities array. Without
+    // this check the user waits forever for an email that will never come.
+    if (!data.session && data.user && (data.user.identities?.length ?? 0) === 0) {
+      setError(
+        "This email is already registered — log in instead. If you left setup unfinished, it resumes exactly where you stopped.",
+      );
+      return;
+    }
     // If the project requires email confirmation, no session comes back yet —
     // the user completes org setup (Onboarding) after they confirm and log in.
     if (!data.session) {
@@ -362,7 +371,7 @@ function DentistOnboarding({ userId, userEmail, onDone, onBack }) {
         owner_id: userId,
         name: clinicName.trim(),
         dentist: dentistName.trim(),
-        contact: `+968 ${phone}`,
+        contact: `00968${phone}`,
         email: email.trim(),
       })
       .select()
@@ -486,7 +495,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
       .insert({
         owner_id: userId,
         name: name.trim(),
-        contact: `+968 ${phone}`,
+        contact: `00968${phone}`,
         email: email.trim(),
         tat: 5,
         express_pct: 20,
@@ -595,7 +604,17 @@ function Onboarding({ session, onDone }) {
   return (
     <Shell>
       <h2 className="mb-1 text-lg font-bold text-slate-800">One more step</h2>
-      <p className="mb-5 text-xs text-slate-500">Are you a dental clinic or a laboratory?</p>
+      <p className="mb-1 text-xs text-slate-500">Are you a dental clinic or a laboratory?</p>
+      <p className="mb-5 text-[11px] text-slate-400">
+        Signed in as <span className="font-semibold text-slate-500">{session.user.email}</span> — you
+        can leave and log back in any time; setup resumes here.{" "}
+        <button
+          onClick={() => supabase.auth.signOut()}
+          className="font-semibold text-blue-600 hover:underline"
+        >
+          Sign out
+        </button>
+      </p>
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={() => setRole("dentist")}

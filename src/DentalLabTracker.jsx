@@ -291,7 +291,7 @@ function ProfileSettingsModal({ open, onClose, auth }) {
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-600">Phone (Oman)</span>
           <div className="flex items-center gap-2">
-            <span className="shrink-0 rounded-xl bg-gray-50 px-3.5 py-2.5 text-sm font-medium text-slate-500">+968</span>
+            <span className="shrink-0 rounded-xl bg-gray-50 px-3.5 py-2.5 text-sm font-medium text-slate-500">00968</span>
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 8))}
@@ -1499,7 +1499,7 @@ function AddLabModal({ open, onClose, onSave }) {
             className={lightInputCls}
             value={contact}
             onChange={(e) => setContact(e.target.value)}
-            placeholder="+968 9000 0000"
+            placeholder="00968 9000 0000"
             inputMode="tel"
           />
         </label>
@@ -1621,7 +1621,7 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
           <div className="space-y-3">
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-slate-600">Phone</span>
-              <input value={contact} onChange={(e) => setContact(e.target.value)} className={lightInputCls} placeholder="+968 9000 0000" />
+              <input value={contact} onChange={(e) => setContact(e.target.value)} className={lightInputCls} placeholder="00968 9000 0000" />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
