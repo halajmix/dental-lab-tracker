@@ -1,0 +1,161 @@
+/**
+ * Case email notifications: fired by a Supabase Database Webhook on the
+ * `cases` table (NOT called directly from the browser) —
+ *   INSERT             → email the LAB a new case was sent to it
+ *   UPDATE into "Work Complete" → email the CLINIC the case is ready
+ *
+ * Wired this way (DB webhook → this function) rather than from client code
+ * so it fires no matter which screen/action changed the row, instead of
+ * needing every future client mutation path to remember to call it.
+ *
+ * Deploy:
+ *   Supabase Dashboard → Edge Functions → New function → name it exactly
+ *   "case-notify" (type the name yourself — don't accept an auto-generated
+ *   slug, that's how station-session ended up deployed as "super-processor")
+ *   → paste this file.
+ *
+ * Then wire the trigger (Dashboard → Database → Webhooks → Create a new
+ * hook): table "cases", events INSERT + UPDATE, type "Edge Function",
+ * target this function, HTTP header  Authorization: Bearer <anon key>
+ * (the anon key is safe to put there — it's already public in the client
+ * bundle; never put the service role key in that header field).
+ *
+ * Secrets reused from the existing station-session function — no new ones
+ * to set: RESEND_API_KEY, OTP_FROM_EMAIL (kept that name for continuity;
+ * it's really just "from" address for any transactional email this app
+ * sends, not OTP-specific).
+ */
+
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+// Mirrors STAGE_INDEX in src/LifecycleEngine.jsx — keep in sync if the
+// pipeline's stage order ever changes there.
+const WORK_COMPLETE_INDEX = 3;
+
+const APP_URL = "https://dr-crown.com";
+
+async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+  const key = Deno.env.get("RESEND_API_KEY");
+  if (!key) {
+    console.warn("RESEND_API_KEY not set — case notification not emailed");
+    return false;
+  }
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: Deno.env.get("OTP_FROM_EMAIL") ?? "Dr-Crown <noreply@dr-crown.com>",
+        to: [to],
+        subject,
+        html,
+      }),
+    });
+    if (!res.ok) console.error("case-notify: Resend responded", res.status, await res.text());
+    return res.ok;
+  } catch (err) {
+    console.error("case-notify: email send failed", err);
+    return false;
+  }
+}
+
+function emailShell(title: string, bodyHtml: string): string {
+  return `
+    <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px">
+      <h2 style="margin:0 0 12px">${title}</h2>
+      ${bodyHtml}
+      <p style="margin:20px 0 0">
+        <a href="${APP_URL}" style="color:#2563eb;text-decoration:none;font-weight:600">Open Dr-Crown &rarr;</a>
+      </p>
+    </div>`;
+}
+
+function caseSummaryRows(record: Record<string, unknown>): string {
+  const rx = (record.prescription ?? {}) as Record<string, unknown>;
+  const row = (label: string, value: unknown) =>
+    value ? `<tr><td style="padding:2px 12px 2px 0;color:#94a3b8">${label}</td><td style="color:#1e293b;font-weight:600">${value}</td></tr>` : "";
+  return `
+    <table style="font-size:13px;border-collapse:collapse;margin:12px 0">
+      ${row("Patient", record.patient_name)}
+      ${row("Restoration", rx.category)}
+      ${row("Material", rx.material && rx.material !== "Refer to notes" ? rx.material : "")}
+      ${row("Deliver by", record.appointment_date)}
+      ${rx.rush ? row("Priority", "EXPRESS") : ""}
+    </table>`;
+}
+
+/* ------------------------------------------------------------------ */
+
+Deno.serve(async (req) => {
+  if (req.method !== "POST") return json({ error: "POST only" }, 405);
+
+  let payload: { type?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> };
+  try {
+    payload = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { type, record, old_record } = payload;
+  if (!record) return json({ ok: true, skipped: "no record" });
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  try {
+    if (type === "INSERT") {
+      // A new case was sent to a lab — email the lab.
+      if (!record.lab_id) return json({ ok: true, skipped: "no lab assigned" });
+
+      const [{ data: lab }, { data: clinic }] = await Promise.all([
+        admin.from("labs").select("name, email").eq("id", record.lab_id).maybeSingle(),
+        admin.from("clinics").select("name").eq("id", record.clinic_id).maybeSingle(),
+      ]);
+      if (!lab?.email) return json({ ok: true, skipped: "lab has no email on file" });
+
+      const emailed = await sendEmail(
+        lab.email,
+        `New case from ${clinic?.name ?? "a clinic"} — ${record.patient_name}`,
+        emailShell(
+          `New case sent to ${lab.name}`,
+          `<p style="color:#475569">${clinic?.name ?? "A clinic"} just sent you a new case, case ID <b>${record.id}</b>.</p>${caseSummaryRows(record)}`,
+        ),
+      );
+      return json({ ok: true, emailed });
+    }
+
+    if (type === "UPDATE") {
+      const wasComplete = typeof old_record?.stage_index === "number" && (old_record.stage_index as number) >= WORK_COMPLETE_INDEX;
+      const isComplete = typeof record.stage_index === "number" && (record.stage_index as number) >= WORK_COMPLETE_INDEX;
+      // Only the crossing INTO complete, not every update while already complete/beyond.
+      if (wasComplete || !isComplete) return json({ ok: true, skipped: "not a new completion" });
+
+      const [{ data: clinic }, { data: lab }] = await Promise.all([
+        admin.from("clinics").select("name, email").eq("id", record.clinic_id).maybeSingle(),
+        admin.from("labs").select("name").eq("id", record.lab_id).maybeSingle(),
+      ]);
+      if (!clinic?.email) return json({ ok: true, skipped: "clinic has no email on file" });
+
+      const emailed = await sendEmail(
+        clinic.email,
+        `${lab?.name ?? "Your lab"} marked ${record.patient_name}'s case complete`,
+        emailShell(
+          "Case complete — ready for pickup",
+          `<p style="color:#475569">${lab?.name ?? "Your lab"} finished case <b>${record.id}</b> and it's ready to collect.</p>${caseSummaryRows(record)}`,
+        ),
+      );
+      return json({ ok: true, emailed });
+    }
+
+    return json({ ok: true, skipped: `unhandled type ${type}` });
+  } catch (err) {
+    console.error("case-notify error", err);
+    // 200, not 500: a failed notification must never make Supabase treat the
+    // underlying case write as failed or retry-storm the webhook.
+    return json({ ok: false, error: "Internal error" });
+  }
+});
