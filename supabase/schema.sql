@@ -485,3 +485,8 @@ drop trigger if exists lab_device_sessions_guard on lab_device_sessions;
 create trigger lab_device_sessions_guard
   before update on lab_device_sessions
   for each row execute function guard_device_session_columns();
+
+/* --------------------------------------------------------------------- */
+/*  Phase 10 — onboarding collects clinic email                          */
+/* --------------------------------------------------------------------- */
+alter table clinics add column if not exists email text default '';

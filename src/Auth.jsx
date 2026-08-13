@@ -23,6 +23,27 @@ function Field({ label, children }) {
   );
 }
 
+/** Omani number: fixed +968 chip, 8 local digits — same pattern as Settings. */
+function OmaniPhoneInput({ value, onChange, required }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="shrink-0 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500">
+        +968
+      </span>
+      <input
+        required={required}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 8))}
+        className={inputCls}
+        placeholder="9XXXXXXX"
+        inputMode="numeric"
+        pattern="\d{8}"
+        title="8-digit Omani number, no country code"
+      />
+    </div>
+  );
+}
+
 function Shell({ children }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
@@ -323,11 +344,11 @@ function AuthScreen() {
 /*  Onboarding — runs once a session exists but no profile row does    */
 /* ------------------------------------------------------------------ */
 
-function DentistOnboarding({ userId, onDone, onBack }) {
+function DentistOnboarding({ userId, userEmail, onDone, onBack }) {
   const [clinicName, setClinicName] = useState("");
   const [dentistName, setDentistName] = useState("");
-  const [contact, setContact] = useState("");
-  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState(userEmail || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -337,7 +358,13 @@ function DentistOnboarding({ userId, onDone, onBack }) {
     setError("");
     const { data: newClinic, error: clinicErr } = await supabase
       .from("clinics")
-      .insert({ owner_id: userId, name: clinicName.trim(), dentist: dentistName.trim(), contact: contact.trim() })
+      .insert({
+        owner_id: userId,
+        name: clinicName.trim(),
+        dentist: dentistName.trim(),
+        contact: `+968 ${phone}`,
+        email: email.trim(),
+      })
       .select()
       .single();
     if (clinicErr) {
@@ -347,7 +374,7 @@ function DentistOnboarding({ userId, onDone, onBack }) {
     }
     const { error: profErr } = await supabase
       .from("profiles")
-      .insert({ id: userId, role: "dentist", name: (name || dentistName).trim(), clinic_id: newClinic.id });
+      .insert({ id: userId, role: "dentist", name: dentistName.trim(), clinic_id: newClinic.id, phone });
     setBusy(false);
     if (profErr) {
       setError(profErr.message);
@@ -373,11 +400,11 @@ function DentistOnboarding({ userId, onDone, onBack }) {
         <Field label="Dentist name *">
           <input required value={dentistName} onChange={(e) => setDentistName(e.target.value)} className={inputCls} placeholder="Dr. A. Chen, BDS" />
         </Field>
-        <Field label="Your display name">
-          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Defaults to dentist name" />
+        <Field label="Contact number *">
+          <OmaniPhoneInput required value={phone} onChange={setPhone} />
         </Field>
-        <Field label="Clinic contact">
-          <input value={contact} onChange={(e) => setContact(e.target.value)} className={inputCls} placeholder="+968 2400 0000 · care@clinic.com" />
+        <Field label="E-mail *">
+          <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="care@clinic.com" />
         </Field>
         <button
           type="submit"
@@ -401,10 +428,8 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
 
   // New-lab form fields
   const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState(userEmail || "");
-  const [tat, setTat] = useState(5);
-  const [expressPct, setExpressPct] = useState(20);
   const [displayName, setDisplayName] = useState("");
 
   React.useEffect(() => {
@@ -454,15 +479,17 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
     e.preventDefault();
     setBusy(true);
     setError("");
+    // TAT/express start at sensible defaults — the lab tunes them later in
+    // Lab Settings, keeping onboarding to the four identity fields only.
     const { data: newLab, error: labErr } = await supabase
       .from("labs")
       .insert({
         owner_id: userId,
         name: name.trim(),
-        contact: contact.trim(),
+        contact: `+968 ${phone}`,
         email: email.trim(),
-        tat: Number(tat) || 1,
-        express_pct: Number(expressPct) || 0,
+        tat: 5,
+        express_pct: 20,
       })
       .select()
       .single();
@@ -473,7 +500,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
     }
     const { error: profErr } = await supabase
       .from("profiles")
-      .insert({ id: userId, role: "lab", name: (displayName || name).trim(), lab_id: newLab.id });
+      .insert({ id: userId, role: "lab", name: (displayName || name).trim(), lab_id: newLab.id, phone });
     setBusy(false);
     if (profErr) {
       setError(profErr.message);
@@ -508,8 +535,8 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
             <p className="text-xs text-slate-500">{claimable.contact || "No phone on file"} · {claimable.email || "No email"}</p>
             <p className="mt-1 text-xs text-slate-500">Turn around time {claimable.tat}d · Express +{claimable.express_pct}%</p>
           </div>
-          <Field label="Your display name">
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Lead Technician" />
+          <Field label="Technician name">
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Ahmed Al-Balushi" />
           </Field>
           <button
             onClick={claim}
@@ -531,25 +558,15 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
           <Field label="Lab name *">
             <input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Apex Dental Lab" />
           </Field>
-          <Field label="Your display name">
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="Defaults to lab name" />
+          <Field label="Technician name *">
+            <input required value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Ahmed Al-Balushi" />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Phone">
-              <input value={contact} onChange={(e) => setContact(e.target.value)} className={inputCls} placeholder="+1 555 000 0000" />
-            </Field>
-            <Field label="Email">
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Standard Turn around time (days)">
-              <input type="number" min={1} value={tat} onChange={(e) => setTat(e.target.value)} className={inputCls} />
-            </Field>
-            <Field label="Express surcharge (%)">
-              <input type="number" min={0} value={expressPct} onChange={(e) => setExpressPct(e.target.value)} className={inputCls} />
-            </Field>
-          </div>
+          <Field label="Phone number *">
+            <OmaniPhoneInput required value={phone} onChange={setPhone} />
+          </Field>
+          <Field label="E-mail *">
+            <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+          </Field>
           <button
             type="submit"
             disabled={busy}
@@ -572,7 +589,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
 function Onboarding({ session, onDone }) {
   const [role, setRole] = useState(null); // null | "dentist" | "lab"
 
-  if (role === "dentist") return <DentistOnboarding userId={session.user.id} onDone={onDone} onBack={() => setRole(null)} />;
+  if (role === "dentist") return <DentistOnboarding userId={session.user.id} userEmail={session.user.email} onDone={onDone} onBack={() => setRole(null)} />;
   if (role === "lab") return <LabOnboarding userId={session.user.id} userEmail={session.user.email} onDone={onDone} onBack={() => setRole(null)} />;
 
   return (
