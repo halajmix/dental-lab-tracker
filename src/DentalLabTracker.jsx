@@ -330,7 +330,9 @@ function ProfileSettingsModal({ open, onClose, auth }) {
  */
 function CaseRxDetails({ c }) {
   const p = c.prescription;
-  if (!p?.category) return <p className="text-sm text-slate-400">No prescription details on this case.</p>;
+  const restorations = p?.restorations ?? [];
+  const hasCart = restorations.length > 0;
+  if (!p?.category && !hasCart) return <p className="text-sm text-slate-400">No prescription details on this case.</p>;
 
   const row = (label, value) =>
     value ? (
@@ -340,10 +342,25 @@ function CaseRxDetails({ c }) {
       </div>
     ) : null;
 
-  const shade =
-    p.vitaShade && p.vitaShade !== "N/A"
-      ? `${p.vitaShade}${p.shadeGuide && p.shadeGuide !== "N/A" ? ` (${p.shadeGuide})` : ""}`
-      : null;
+  // Rows for ONE restoration — reused per card in cart mode, and (with the
+  // whole prescription as the "restoration") for the legacy single-item shape.
+  const specRows = (r) => {
+    const shade = r.vitaShade && r.vitaShade !== "N/A" ? `${r.vitaShade}${r.shadeGuide && r.shadeGuide !== "N/A" ? ` (${r.shadeGuide})` : ""}` : null;
+    const teethLabel = toothSummary({ teeth: r.teeth, notation: p.notation });
+    return (
+      <div className="divide-y divide-slate-100">
+        {row("Procedure", r.category)}
+        {row("Material", r.material !== "Refer to notes" ? r.material : null)}
+        {row("Teeth", teethLabel)}
+        {row("Shade", shade)}
+        {row("Stump shade", r.stumpShade && r.stumpShade !== "N/A" ? r.stumpShade : null)}
+        {row("Pontic design", r.ponticDesign && (hasCart || teethLabel.includes("(p)")) ? r.ponticDesign : null)}
+        {row("Implant system", r.implantSystem)}
+        {row("Abutment", r.implantSystem ? `${r.abutmentType ?? ""} ${r.abutmentDiameter ?? ""}`.trim() : null)}
+        {row("Abutment colour code", r.abutmentColor || null)}
+      </div>
+    );
+  };
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-2">
@@ -352,16 +369,19 @@ function CaseRxDetails({ c }) {
           <Zap size={12} /> EXPRESS ORDER
         </div>
       )}
+      {hasCart ? (
+        <div className="space-y-2.5 py-1.5">
+          {restorations.map((r, i) => (
+            <div key={r.id ?? i} className="rounded-lg border border-slate-200 bg-white px-3">
+              <p className="pt-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Restoration {i + 1} of {restorations.length}</p>
+              {specRows(r)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        specRows(p)
+      )}
       <div className="divide-y divide-slate-100">
-        {row("Procedure", p.category)}
-        {row("Material", p.material !== "Refer to notes" ? p.material : null)}
-        {row("Teeth", toothSummary(p))}
-        {row("Shade", shade)}
-        {row("Stump shade", p.stumpShade && p.stumpShade !== "N/A" ? p.stumpShade : null)}
-        {row("Pontic design", p.ponticDesign && toothSummary(p).includes("(p)") ? p.ponticDesign : null)}
-        {row("Implant system", p.implantSystem)}
-        {row("Abutment", p.implantSystem ? `${p.abutmentType ?? ""} ${p.abutmentDiameter ?? ""}`.trim() : null)}
-        {row("Abutment colour code", p.abutmentColor || null)}
         {row("Deliver by", c.appointmentDate ? `${c.appointmentDate}${c.deliveryTime && c.deliveryTime !== "Anytime" ? ` · ${c.deliveryTime}` : ""}` : null)}
         {row("Included", includedSummary(p))}
         {row("Scans", p.files?.filter((f) => f.kind === "scan").length ? `${p.files.filter((f) => f.kind === "scan").length} STL file(s)` : null)}
@@ -1101,7 +1121,13 @@ function DentistDashboard({
                         </span>
                       )}
                     </div>
-                    {c.prescription?.category && <div className="mt-0.5 text-[11px] text-slate-400">{c.prescription.category}</div>}
+                    {c.prescription?.restorations?.length ? (
+                      <div className="mt-0.5 text-[11px] text-slate-400">
+                        {c.prescription.restorations.length} restoration{c.prescription.restorations.length === 1 ? "" : "s"}: {c.prescription.restorations.map((r) => r.category).join(", ")}
+                      </div>
+                    ) : (
+                      c.prescription?.category && <div className="mt-0.5 text-[11px] text-slate-400">{c.prescription.category}</div>
+                    )}
                   </td>
                   <td className="px-4 py-3.5 align-top text-slate-600">{labById[c.labId]?.name ?? "—"}</td>
                   <td className="px-4 py-3.5 align-top whitespace-nowrap">
@@ -1477,20 +1503,34 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
       {/* Critical info — Material / Teeth / Shade in one subtly shaded row, not a wall of text */}
       {c.prescription && (
         <div className="mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg bg-slate-50 px-3.5 py-2.5 text-sm ring-1 ring-inset ring-slate-100">
-          <span>
-            <span className="font-medium text-slate-400">Material </span>
-            <span className="font-bold text-slate-700">{c.prescription.material || "—"}</span>
-          </span>
-          <span>
-            <span className="font-medium text-slate-400">Teeth </span>
-            <span className="font-bold text-slate-700">{toothSummary(c.prescription) || "—"}</span>
-          </span>
-          <span>
-            <span className="font-medium text-slate-400">Shade </span>
-            <span className="font-bold text-slate-700">
-              {c.prescription.vitaShade && c.prescription.vitaShade !== "N/A" ? c.prescription.vitaShade : "—"}
+          {c.prescription.restorations?.length ? (
+            <span>
+              <span className="font-medium text-slate-400">Restorations </span>
+              <span className="font-bold text-slate-700">
+                {c.prescription.restorations.length} ·{" "}
+                {c.prescription.restorations
+                  .map((r) => `${r.category} (${toothSummary({ teeth: r.teeth, notation: c.prescription.notation }) || "—"})`)
+                  .join(", ")}
+              </span>
             </span>
-          </span>
+          ) : (
+            <>
+              <span>
+                <span className="font-medium text-slate-400">Material </span>
+                <span className="font-bold text-slate-700">{c.prescription.material || "—"}</span>
+              </span>
+              <span>
+                <span className="font-medium text-slate-400">Teeth </span>
+                <span className="font-bold text-slate-700">{toothSummary(c.prescription) || "—"}</span>
+              </span>
+              <span>
+                <span className="font-medium text-slate-400">Shade </span>
+                <span className="font-bold text-slate-700">
+                  {c.prescription.vitaShade && c.prescription.vitaShade !== "N/A" ? c.prescription.vitaShade : "—"}
+                </span>
+              </span>
+            </>
+          )}
           {c.prescription.files?.some((f) => f.kind === "photo" && f.url) && (
             <span className="ml-auto flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-700">
               <ImageIcon size={11} /> {c.prescription.files.filter((f) => f.kind === "photo" && f.url).length}

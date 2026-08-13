@@ -59,7 +59,14 @@ function buildRxMessage(caseObj, clinic, lab) {
       caseObj.deliveryTime && caseObj.deliveryTime !== "Anytime" ? ` (${caseObj.deliveryTime})` : ""
     }`,
   ];
-  if (rx) {
+  if (rx?.restorations?.length) {
+    rx.restorations.forEach((r, i) => {
+      const teeth = toothSummary({ teeth: r.teeth, notation: rx.notation });
+      lines.push(`Restoration ${i + 1}: ${r.category}${r.material ? ` — ${r.material}` : ""}${teeth ? ` (${teeth})` : ""}${r.vitaShade && r.vitaShade !== "N/A" ? ` · Shade ${r.vitaShade}` : ""}`);
+    });
+    if (rx.rush) lines.push(`Express order`);
+    if (rx.notes) lines.push(`Notes: ${rx.notes}`);
+  } else if (rx) {
     lines.push(`Restoration: ${rx.category}${rx.material ? ` — ${rx.material}` : ""}`);
     if (toothSummary(rx)) lines.push(`Teeth: ${toothSummary(rx)}`);
     if (rx.vitaShade && rx.vitaShade !== "N/A") lines.push(`Shade: ${rx.vitaShade}`);
@@ -118,8 +125,13 @@ async function buildShare(sheetEl, caseObj, clinic, lab) {
 
 function ToothDiagram({ prescription }) {
   const notation = prescription?.notation ?? "FDI";
+  // Union of every restoration's teeth in cart mode — the diagram is a
+  // whole-case-at-a-glance reference, not per-restoration.
+  const teeth = prescription?.restorations?.length
+    ? prescription.restorations.flatMap((r) => r.teeth)
+    : prescription?.teeth ?? [];
   const roleOf = {};
-  (prescription?.teeth ?? []).forEach((t) => (roleOf[t.universal] = t.role));
+  teeth.forEach((t) => (roleOf[t.universal] = t.role));
   const label = (u) => (notation === "FDI" ? UNIVERSAL_TO_FDI[u] : u);
 
   const Row = ({ teeth }) => (
@@ -148,7 +160,7 @@ function ToothDiagram({ prescription }) {
       <div className="text-center text-[8px] uppercase tracking-widest text-slate-400">— occlusal midline —</div>
       <Row teeth={LOWER_ROW} />
       <p className="pt-1 text-center text-[10px] text-slate-500">
-        {notation} notation · Restored: {(prescription?.teeth ?? []).map((t) => (notation === "FDI" ? t.fdi : t.universal) + (t.role === "pontic" ? "(p)" : "")).join(", ") || "—"}
+        {notation} notation · Restored: {teeth.map((t) => (notation === "FDI" ? t.fdi : t.universal) + (t.role === "pontic" ? "(p)" : "")).join(", ") || "—"}
       </p>
     </div>
   );
@@ -379,27 +391,59 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
         </div>
 
         {/* specs */}
-        <div className="mt-5 grid grid-cols-2 gap-x-8">
-          <div>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Material &amp; Appliance</p>
-            <Spec label="Restoration" value={rx?.category} />
-            <Spec label="Material" value={rx?.material} />
-            <Spec label="Shade Guide" value={rx?.shadeGuide} />
-            <Spec label="Main Shade" value={rx?.vitaShade} />
+        {rx?.restorations?.length ? (
+          <div className="mt-5 space-y-3">
+            {rx.restorations.map((r, i) => (
+              <div key={r.id ?? i} className="rounded-lg border border-slate-200 p-3 print:border-slate-300">
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Restoration {i + 1} of {rx.restorations.length} — {toothSummary({ teeth: r.teeth, notation: rx.notation }) || "—"}
+                </p>
+                <div className="grid grid-cols-2 gap-x-8">
+                  <div>
+                    <Spec label="Restoration" value={r.category} />
+                    <Spec label="Material" value={r.material} />
+                    <Spec label="Shade Guide" value={r.shadeGuide} />
+                    <Spec label="Main Shade" value={r.vitaShade} />
+                  </div>
+                  <div>
+                    {r.implantSystem && (
+                      <>
+                        <Spec label="Implant System" value={r.implantSystem} />
+                        <Spec label="Abutment Type" value={r.abutmentType} />
+                        <Spec label="Abutment / Platform Ø" value={r.abutmentDiameter} />
+                        <Spec label="Abutment Colour Code" value={r.abutmentColor} />
+                      </>
+                    )}
+                    <Spec label="Pontic Design" value={r.ponticDesign} />
+                    <Spec label="Stump / Prep Shade" value={r.stumpShade} />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-          <div>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Specifications</p>
-            {rx?.implantSystem && (
-              <>
-                <Spec label="Implant System" value={rx.implantSystem} />
-                <Spec label="Abutment Type" value={rx.abutmentType} />
-                <Spec label="Abutment / Platform Ø" value={rx.abutmentDiameter} />
-                <Spec label="Abutment Colour Code" value={rx.abutmentColor} />
-              </>
-            )}
-            <Spec label="Stump / Prep Shade" value={rx?.stumpShade} />
+        ) : (
+          <div className="mt-5 grid grid-cols-2 gap-x-8">
+            <div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Material &amp; Appliance</p>
+              <Spec label="Restoration" value={rx?.category} />
+              <Spec label="Material" value={rx?.material} />
+              <Spec label="Shade Guide" value={rx?.shadeGuide} />
+              <Spec label="Main Shade" value={rx?.vitaShade} />
+            </div>
+            <div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Specifications</p>
+              {rx?.implantSystem && (
+                <>
+                  <Spec label="Implant System" value={rx.implantSystem} />
+                  <Spec label="Abutment Type" value={rx.abutmentType} />
+                  <Spec label="Abutment / Platform Ø" value={rx.abutmentDiameter} />
+                  <Spec label="Abutment Colour Code" value={rx.abutmentColor} />
+                </>
+              )}
+              <Spec label="Stump / Prep Shade" value={rx?.stumpShade} />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* attachments + notes */}
         <div className="mt-5">

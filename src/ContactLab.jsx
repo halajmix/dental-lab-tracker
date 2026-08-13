@@ -18,7 +18,16 @@ export function buildCaseContext(caseObj, clinic) {
     `Case: ${caseObj.id}`,
     `Patient: ${caseObj.patientName} (${caseObj.patientId})`,
   ];
-  if (rx) {
+  if (rx?.restorations?.length) {
+    rx.restorations.forEach((r, i) => {
+      const teeth = toothSummary({ teeth: r.teeth, notation: rx.notation });
+      let line = `Restoration ${i + 1}: ${r.category}${r.material ? ` — ${r.material}` : ""}${teeth ? ` (${teeth})` : ""}`;
+      if (r.vitaShade && r.vitaShade !== "N/A") line += ` · Shade ${r.vitaShade}`;
+      if (r.implantSystem) line += ` · Implant: ${r.implantSystem} · ${r.abutmentType} · ${r.abutmentDiameter}`;
+      lines.push(line);
+    });
+    if (rx.rush) lines.push(`Express order`);
+  } else if (rx) {
     lines.push(`Restoration: ${rx.category}${rx.material ? ` — ${rx.material}` : ""}`);
     if (toothSummary(rx)) lines.push(`Teeth: ${toothSummary(rx)}`);
     if (rx.vitaShade && rx.vitaShade !== "N/A") lines.push(`Shade: ${rx.vitaShade}`);
@@ -62,7 +71,10 @@ export default function ContactLabModal({ open, caseObj, lab, clinic, onClose })
   const context = buildCaseContext(caseObj, clinic);
   const signature = `— ${clinic.dentist}, ${clinic.name}`;
   const fullMessage = [context, "", note.trim() || "(your message)", "", signature].join("\n");
-  const subject = `${caseObj.id} — ${caseObj.patientName} · ${caseObj.prescription?.category ?? "Lab case"}`;
+  const subjectRx = caseObj.prescription?.restorations?.length
+    ? `${caseObj.prescription.restorations.length} restoration${caseObj.prescription.restorations.length === 1 ? "" : "s"}`
+    : caseObj.prescription?.category ?? "Lab case";
+  const subject = `${caseObj.id} — ${caseObj.patientName} · ${subjectRx}`;
 
   // api.whatsapp.com/send, not wa.me — both are official Meta click-to-chat
   // endpoints, but wa.me has been unreliable (connection resets seen in

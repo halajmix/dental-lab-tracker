@@ -25,13 +25,23 @@ function rowFor(c, labName, dentist) {
   const remake = c.remake
     ? `${c.remake.classification === "clinical" ? "Clinical" : "Laboratory"}: ${c.remake.reason}`
     : "None";
+  // Cart-mode cases join every restoration into one summary cell each, so
+  // the CSV keeps its one-row-per-case shape (every other column already
+  // assumes that) rather than needing one row per restoration.
+  const restorations = c.prescription?.restorations;
+  const restorationType = restorations?.length
+    ? restorations.map((r) => r.category).join("; ")
+    : c.prescription?.category ?? "—";
+  const toothNumbers = restorations?.length
+    ? restorations.map((r) => toothSummary({ teeth: r.teeth, notation: c.prescription.notation })).join("; ")
+    : toothSummary(c.prescription) || "—";
   return [
     c.id,
     c.patientName,
     dentist,
     labName,
-    c.prescription?.category ?? "—",
-    toothSummary(c.prescription) || "—",
+    restorationType,
+    toothNumbers,
     c.createdDate ?? "—",
     c.appointmentDate ?? "—",
     (c.stageIndex ?? 0) + 1,

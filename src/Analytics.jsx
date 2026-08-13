@@ -27,9 +27,10 @@ const BASE_PRICE = {
 // only shortens turnaround (see PrescriptionForm's effTat) — so fee is base
 // minus any remake credit.
 export function caseFee(c, labs = []) {
-  const unit = BASE_PRICE[c.prescription?.category] ?? 400;
-  const units = c.prescription?.teeth?.length || 1;
-  const base = unit * units;
+  const restorations = c.prescription?.restorations;
+  const base = restorations?.length
+    ? restorations.reduce((sum, r) => sum + (BASE_PRICE[r.category] ?? 400) * (r.teeth?.length || 1), 0)
+    : (BASE_PRICE[c.prescription?.category] ?? 400) * (c.prescription?.teeth?.length || 1);
   const credit = c.remake?.cost ? Number(c.remake.cost) : 0;
   return { base, credit, total: Math.max(0, base - credit) };
 }

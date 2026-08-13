@@ -22,6 +22,8 @@ import {
   Plus,
   Loader2,
   RotateCcw,
+  Pencil,
+  Layers3,
 } from "lucide-react";
 import { uploadCasePhoto } from "./lib/data.js";
 
@@ -142,6 +144,45 @@ const SPLINT_CATEGORIES = [
 // Exported: the lab-side Settings uses this same list so per-procedure
 // turnaround times always stay in sync with the Rx form's categories.
 export const CATEGORY_NAMES = Object.keys(CATEGORIES);
+
+// Categories that decompose into independent per-tooth restorations, so a
+// case can hold several of them (a crown here, a veneer there, each its own
+// material/shade/spec) — the "cart" in Step 2. Everything else is a whole-
+// case appliance (a denture or splint isn't tied to specific teeth the same
+// way) and stays exactly one item per case, using the form's original
+// single-item fields untouched.
+const RESTORATION_CATEGORIES = [
+  "Crown - tooth",
+  "Crown - implant",
+  "Bridge - tooth (conventional)",
+  "Bridge - tooth (Resin Bonded)",
+  "Bridge - implant",
+  "Veneer",
+];
+const APPLIANCE_CATEGORIES = CATEGORY_NAMES.filter((c) => !RESTORATION_CATEGORIES.includes(c));
+
+// A tooth's role is implied by its restoration's category for everything
+// except bridges — a Crown is always "unit", a Veneer is always "veneer",
+// so there's no need to ask the dentist to also pick a chart mode for those.
+// Only a bridge genuinely needs a per-tooth choice (which teeth are the
+// abutments vs the pontic span), so that's the only category that shows a
+// mode toggle on the restoration-cart chart.
+const IMPLICIT_ROLE = { "Crown - tooth": "unit", "Crown - implant": "unit", Veneer: "veneer" };
+const roleForDraftTooth = (category, chartMode) =>
+  BRIDGE_CATEGORIES.includes(category) ? chartMode : IMPLICIT_ROLE[category] ?? "unit";
+
+// When the category changes, re-stamp every already-selected tooth with
+// the role that now makes sense — e.g. leaving a bridge category drops any
+// "pontic" markings (a lone crown/veneer can't have a pontic), while moving
+// between two bridge categories (tooth-supported <-> implant-supported)
+// keeps the abutment/pontic split the dentist already set.
+const remapSelectionForCategory = (selection, category) => {
+  const isBridge = BRIDGE_CATEGORIES.includes(category);
+  const implicit = IMPLICIT_ROLE[category] ?? "unit";
+  return Object.fromEntries(
+    Object.entries(selection).map(([u, role]) => [u, isBridge ? (role === "pontic" ? "pontic" : "unit") : implicit])
+  );
+};
 
 // Shade guides (systems) → their shade tabs. The form picks a guide, then a shade.
 const SHADE_GUIDES = {
@@ -285,7 +326,19 @@ const MIDGAP = 22;
 const colX = (i) => MARGIN_X + i * STEP + (i >= 8 ? MIDGAP : 0);
 const CHART_W = colX(15) + TOOTH_W + MARGIN_X;
 
-function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onClear, onGroup }) {
+// Default toolbar for the case-level (appliance-mode) chart, unchanged.
+// The restoration-cart editor passes its own `modes` — a 2-way
+// Abutment/Pontic toggle for bridges, or an empty array (hidden toolbar,
+// tapping a tooth just uses the role implied by the restoration's category)
+// for everything else, since the category already says what a tooth is.
+const DEFAULT_TOOTH_MODES = [
+  { k: "unit", txt: "Unit / Crown", on: "bg-blue-600 text-white" },
+  { k: "veneer", txt: "Veneer", on: "bg-teal-600 text-white" },
+  { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white" },
+];
+
+function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onClear, onGroup, disabled, modes = DEFAULT_TOOTH_MODES }) {
+  const isDisabled = (u) => !!disabled?.has(u);
   const rows = [
     { key: "upper", teeth: UPPER_ROW, y: 34 },
     { key: "lower", teeth: LOWER_ROW, y: 150 },
@@ -318,24 +371,22 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
     <div>
       {/* Toolbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex overflow-hidden rounded-lg border border-slate-300">
-          {[
-            { k: "unit", txt: "Unit / Crown", on: "bg-blue-600 text-white" },
-            { k: "veneer", txt: "Veneer", on: "bg-teal-600 text-white" },
-            { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white" },
-          ].map((m) => (
-            <button
-              key={m.k}
-              type="button"
-              onClick={() => setMode(m.k)}
-              className={`px-3 py-1.5 text-xs font-semibold transition ${
-                mode === m.k ? m.on : "bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {m.txt}
-            </button>
-          ))}
-        </div>
+        {modes.length > 0 && (
+          <div className="flex overflow-hidden rounded-lg border border-slate-300">
+            {modes.map((m) => (
+              <button
+                key={m.k}
+                type="button"
+                onClick={() => setMode(m.k)}
+                className={`px-3 py-1.5 text-xs font-semibold transition ${
+                  mode === m.k ? m.on : "bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {m.txt}
+              </button>
+            ))}
+          </div>
+        )}
         <button type="button" onClick={() => onArch("upper")} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
           {upperAllSelected ? "Clear Upper" : "Full Upper Arch"}
         </button>
@@ -383,18 +434,26 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
           {rows.map((row) =>
             row.teeth.map((u, i) => {
               const role = selection[u]; // undefined | 'unit' | 'veneer' | 'pontic'
+              const locked = isDisabled(u);
               const x = colX(i);
-              const fill =
-                role === "unit" ? "#2563eb" : role === "veneer" ? "#0d9488" : role === "pontic" ? "#f59e0b" : "#f8fafc";
-              const stroke =
-                role === "unit" ? "#1d4ed8" : role === "veneer" ? "#0f766e" : role === "pontic" ? "#d97706" : "#cbd5e1";
-              const textFill = role ? "#ffffff" : "#475569";
+              const fill = locked
+                ? "#e2e8f0"
+                : role === "unit" ? "#2563eb" : role === "veneer" ? "#0d9488" : role === "pontic" ? "#f59e0b" : "#f8fafc";
+              const stroke = locked
+                ? "#94a3b8"
+                : role === "unit" ? "#1d4ed8" : role === "veneer" ? "#0f766e" : role === "pontic" ? "#d97706" : "#cbd5e1";
+              const textFill = locked ? "#94a3b8" : role ? "#ffffff" : "#475569";
               const tt = toothType(u);
               // crown height varies slightly by type for a chart-like feel
               const h = tt === "molar" ? 56 : tt === "premolar" ? 52 : 48;
               const yTop = row.y + (60 - h) / 2;
               return (
-                <g key={u} className={`tooth-hit ${role ? "" : "tooth-empty"}`} onClick={() => onToggle(u)}>
+                <g
+                  key={u}
+                  className={`tooth-hit ${role ? "" : "tooth-empty"}`}
+                  style={locked ? { cursor: "not-allowed" } : undefined}
+                  onClick={() => !locked && onToggle(u)}
+                >
                   <rect
                     className="glyph"
                     x={x}
@@ -405,7 +464,8 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
                     fill={fill}
                     stroke={stroke}
                     strokeWidth={role ? 1.5 : 1}
-                    strokeDasharray={role === "pontic" ? "3 2" : "none"}
+                    strokeDasharray={role === "pontic" ? "3 2" : locked ? "2 2" : "none"}
+                    opacity={locked ? 0.6 : 1}
                   />
                   <text
                     x={x + TOOTH_W / 2}
@@ -430,6 +490,9 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-teal-600" /> Veneer</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-amber-600 bg-amber-500" /> Pontic</span>
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-blue-500/20" /> Bridge span</span>
+        {disabled?.size > 0 && (
+          <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-slate-400 bg-slate-200" /> Already in another restoration</span>
+        )}
         <span className="ml-auto font-medium text-slate-600">{notation} notation</span>
       </div>
     </div>
@@ -575,6 +638,150 @@ function SectionHeader({ icon: Icon, n, title, subtitle }) {
   );
 }
 
+/**
+ * The material/shade/stump/pontic/implant field block for ONE restoration —
+ * appears once at least one tooth has been picked for it (the category was
+ * already chosen before the chart, driving what shows here). Used inside
+ * the restoration cart's add/edit editor. Mirrors the category-driven logic
+ * the whole-case (appliance) fields already use, just scoped to a `draft`
+ * object instead of top-level state — restricted to RESTORATION_CATEGORIES,
+ * so the splint / "refer to notes" branches never apply here.
+ */
+function RestorationFields({ draft, onChange, errors }) {
+  const isImplant = IMPLANT_CATEGORIES.includes(draft.category);
+  const isBridge = BRIDGE_CATEGORIES.includes(draft.category);
+  const showStump = HAS_STUMP.includes(draft.category) && AESTHETIC_MATERIALS.includes(draft.material);
+  const err = (k) => errors?.includes(k);
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <Field label="Material" required>
+        <select className={`${inputCls} ${err("material") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.material} onChange={(e) => onChange({ material: e.target.value })}>
+          {CATEGORIES[draft.category].materials.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      </Field>
+      {isImplant && (
+        <>
+          <Field label="Implant System" required>
+            <select className={`${inputCls} ${err("implantSystem") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.implantSystem} onChange={(e) => onChange({ implantSystem: e.target.value })}>
+              <option value="">Select system…</option>
+              {IMPLANT_SYSTEMS.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Abutment Type" required>
+            <select className={`${inputCls} ${err("abutmentType") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.abutmentType} onChange={(e) => onChange({ abutmentType: e.target.value })}>
+              <option value="">Select abutment…</option>
+              {ABUTMENT_TYPES.map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Abutment / Platform Ø" required>
+            <select className={`${inputCls} ${err("abutmentDiameter") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.abutmentDiameter} onChange={(e) => onChange({ abutmentDiameter: e.target.value })}>
+              <option value="">Select diameter…</option>
+              {ABUTMENT_DIAMETERS.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Abutment Colour Code" hint="Optional · helps the lab match the physical component">
+            <input className={inputCls} value={draft.abutmentColor} onChange={(e) => onChange({ abutmentColor: e.target.value })} placeholder="e.g. Yellow, Pink, Green…" />
+          </Field>
+        </>
+      )}
+      <Field label="Shade Guide">
+        <select
+          className={inputCls}
+          value={draft.shadeGuide}
+          onChange={(e) => onChange({ shadeGuide: e.target.value, vitaShade: SHADE_GUIDES[e.target.value][0] })}
+        >
+          {SHADE_GUIDE_NAMES.map((g) => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Shade">
+        <select className={inputCls} value={draft.vitaShade} onChange={(e) => onChange({ vitaShade: e.target.value })}>
+          {SHADE_GUIDES[draft.shadeGuide].map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      </Field>
+      {showStump && (
+        <Field label="Stump Shade" hint="Needed for translucent materials">
+          <select className={inputCls} value={draft.stumpShade} onChange={(e) => onChange({ stumpShade: e.target.value })}>
+            {STUMP_SHADES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {isBridge && (
+        <Field label="Pontic Design" hint="Applied to pontic units">
+          <select className={inputCls} value={draft.ponticDesign} onChange={(e) => onChange({ ponticDesign: e.target.value })}>
+            {PONTIC_DESIGNS.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+    </div>
+  );
+}
+
+/** Compact display of one confirmed restoration in the cart list. */
+function RestorationCard({ r, notation, onEdit, onDelete }) {
+  const isImplant = IMPLANT_CATEGORIES.includes(r.category);
+  const isBridge = BRIDGE_CATEGORIES.includes(r.category);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-800">{r.category}</p>
+          <p className="mt-0.5 truncate text-xs text-slate-500">{toothSummary({ teeth: r.teeth, notation }) || "No teeth"}</p>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <button type="button" onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600" title="Edit">
+            <Pencil size={14} />
+          </button>
+          <button type="button" onClick={onDelete} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Delete">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+        {r.material && <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{r.material}</span>}
+        {r.vitaShade && r.vitaShade !== "N/A" && <span className="rounded-full bg-violet-100 px-2 py-0.5 font-semibold text-violet-700">Shade {r.vitaShade}</span>}
+        {isImplant && r.implantSystem && <span className="rounded-full bg-indigo-100 px-2 py-0.5 font-semibold text-indigo-700">{r.implantSystem}</span>}
+        {isBridge && r.ponticDesign && <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700">{r.ponticDesign}</span>}
+      </div>
+    </div>
+  );
+}
+
+// A fresh restoration editor draft — used both for the initial "add" state
+// and to reset after confirming one, so the cart's next item doesn't start
+// pre-filled with the previous one's spec.
+const emptyDraft = () => ({
+  id: null, // set only when editing an existing restoration
+  selection: {}, // { universal: 'unit' | 'veneer' | 'pontic' }, same shape as the case-level chart
+  mode: "unit",
+  category: RESTORATION_CATEGORIES[0],
+  material: CATEGORIES[RESTORATION_CATEGORIES[0]].materials[0],
+  shadeGuide: "Vita Classical",
+  vitaShade: "A2",
+  stumpShade: "N/A",
+  ponticDesign: PONTIC_DESIGNS[0],
+  implantSystem: "",
+  abutmentType: "",
+  abutmentDiameter: "",
+  abutmentColor: "",
+});
+
 /* ================================================================== */
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
@@ -601,6 +808,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const [vitaShade, setVitaShade] = useState("A2");
   const [stumpShade, setStumpShade] = useState("N/A");
   const [ponticDesign, setPonticDesign] = useState(PONTIC_DESIGNS[0]);
+
+  // Restoration cart — a case is EITHER several independent fixed
+  // restorations (crowns/bridges/veneers/implants, each own spec) OR one
+  // whole-case appliance (denture/splint/"refer to notes", the original
+  // single-item fields above, untouched). "restorations" mode replaces the
+  // fields above with the cart below; never both in the same case.
+  const [caseMode, setCaseMode] = useState("restorations");
+  const [restorations, setRestorations] = useState([]);
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftTouched, setDraftTouched] = useState(false); // gates the editor's own inline errors, independent of the form-wide `touched`
+  const [draft, setDraft] = useState(emptyDraft);
+  const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
   const [labId, setLabId] = useState("");
   const [deliveryTime, setDeliveryTime] = useState(DELIVERY_TIMES[0]);
@@ -670,11 +889,140 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const isSplint = SPLINT_CATEGORIES.includes(category); // no material / shade
   const isImplant = IMPLANT_CATEGORIES.includes(category); // needs system + abutment specs
 
+  /* ---------------- restoration cart: draft editor ---------------- */
+  const toggleDraftTooth = (u) =>
+    setDraft((d) => {
+      const role = roleForDraftTooth(d.category, d.mode);
+      const next = { ...d.selection };
+      if (next[u] === role) delete next[u];
+      else next[u] = role;
+      return { ...d, selection: next };
+    });
+
+  const toggleDraftArch = (which) => {
+    const row = which === "upper" ? UPPER_ROW : LOWER_ROW;
+    setDraft((d) => {
+      const role = roleForDraftTooth(d.category, d.mode);
+      const allSel = row.every((u) => d.selection[u]);
+      const next = { ...d.selection };
+      row.forEach((u) => (allSel ? delete next[u] : (next[u] = role)));
+      return { ...d, selection: next };
+    });
+  };
+
+  const toggleDraftGroup = (teeth) =>
+    setDraft((d) => {
+      const role = roleForDraftTooth(d.category, d.mode);
+      const allSel = teeth.every((u) => d.selection[u]);
+      const next = { ...d.selection };
+      teeth.forEach((u) => (allSel ? delete next[u] : (next[u] = role)));
+      return { ...d, selection: next };
+    });
+
+  // Category select lives above the chart now (picked first), so changing
+  // it needs to both reset the dependent spec fields (material/implant/etc,
+  // same as onCategoryChange does for appliance mode) AND re-stamp any
+  // already-selected teeth's roles to match the new category.
+  const changeDraftCategory = (c) => {
+    setDraft((d) => ({
+      ...d,
+      category: c,
+      material: CATEGORIES[c].materials[0],
+      stumpShade: HAS_STUMP.includes(c) ? d.stumpShade : "N/A",
+      implantSystem: IMPLANT_CATEGORIES.includes(c) ? d.implantSystem : "",
+      abutmentType: IMPLANT_CATEGORIES.includes(c) ? d.abutmentType : "",
+      abutmentDiameter: IMPLANT_CATEGORIES.includes(c) ? d.abutmentDiameter : "",
+      abutmentColor: IMPLANT_CATEGORIES.includes(c) ? d.abutmentColor : "",
+      selection: remapSelectionForCategory(d.selection, c),
+    }));
+  };
+
+  const draftTeeth = Object.keys(draft.selection)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((u) => ({ universal: u, fdi: UNIVERSAL_TO_FDI[u], role: draft.selection[u] }));
+
+  // Teeth already claimed by OTHER confirmed restorations — locked in the
+  // draft's chart so the same tooth can't end up in two restorations.
+  const takenTeeth = new Set(
+    restorations.filter((r) => r.id !== draft.id).flatMap((r) => r.teeth.map((t) => t.universal))
+  );
+
+  const draftIsImplant = IMPLANT_CATEGORIES.includes(draft.category);
+  const draftErrors = [
+    draftTeeth.length === 0 && "teeth",
+    !draft.material && "material",
+    draftIsImplant && !draft.implantSystem && "implantSystem",
+    draftIsImplant && !draft.abutmentType && "abutmentType",
+    draftIsImplant && !draft.abutmentDiameter && "abutmentDiameter",
+  ].filter(Boolean);
+  const draftValid = draftErrors.length === 0;
+
+  const openAddRestoration = () => {
+    setDraft(emptyDraft());
+    setDraftTouched(false);
+    setDraftOpen(true);
+  };
+
+  const openEditRestoration = (r) => {
+    setDraft({
+      id: r.id,
+      selection: Object.fromEntries(r.teeth.map((t) => [t.universal, t.role])),
+      mode: "unit",
+      category: r.category,
+      material: r.material,
+      shadeGuide: r.shadeGuide,
+      vitaShade: r.vitaShade,
+      stumpShade: r.stumpShade,
+      ponticDesign: r.ponticDesign ?? PONTIC_DESIGNS[0],
+      implantSystem: r.implantSystem ?? "",
+      abutmentType: r.abutmentType ?? "",
+      abutmentDiameter: r.abutmentDiameter ?? "",
+      abutmentColor: r.abutmentColor ?? "",
+    });
+    setDraftTouched(false);
+    setDraftOpen(true);
+  };
+
+  const confirmDraft = () => {
+    if (!draftValid) return;
+    const entry = {
+      id: draft.id ?? crypto.randomUUID(),
+      teeth: draftTeeth,
+      category: draft.category,
+      material: draft.material,
+      shadeGuide: draft.shadeGuide,
+      vitaShade: draft.vitaShade,
+      stumpShade: draft.stumpShade,
+      ponticDesign: BRIDGE_CATEGORIES.includes(draft.category) ? draft.ponticDesign : null,
+      implantSystem: draftIsImplant ? draft.implantSystem : null,
+      abutmentType: draftIsImplant ? draft.abutmentType : null,
+      abutmentDiameter: draftIsImplant ? draft.abutmentDiameter : null,
+      abutmentColor: draftIsImplant ? draft.abutmentColor.trim() : null,
+    };
+    setRestorations((prev) => {
+      const exists = prev.some((r) => r.id === entry.id);
+      return exists ? prev.map((r) => (r.id === entry.id ? entry : r)) : [...prev, entry];
+    });
+    setDraftOpen(false);
+    setDraftTouched(false);
+  };
+
+  const deleteRestoration = (id) => setRestorations((prev) => prev.filter((r) => r.id !== id));
+
   /* ---------------- TAT auto-calculation ---------------- */
   const lab = labById[labId];
   // Procedure-specific turnaround (set by the lab in its Settings) wins over
-  // the lab's standard TAT when one exists for the selected category.
-  const baseTat = Number(lab?.procedureTats?.[category]) || (lab?.tat ?? 0);
+  // the lab's standard TAT when one exists for the selected category. In
+  // restorations mode the case can't be ready before its SLOWEST item, so
+  // it's the max across every restoration's own procedure TAT.
+  const procTat = (c) => Number(lab?.procedureTats?.[c]) || (lab?.tat ?? 0);
+  const baseTat =
+    caseMode === "restorations"
+      ? restorations.length
+        ? Math.max(...restorations.map((r) => procTat(r.category)))
+        : lab?.tat ?? 0
+      : procTat(category);
   const effTat = rush ? Math.max(1, Math.ceil(baseTat / 2)) : baseTat;
   const today = new Date();
   const estReady = lab ? addDays(today, effTat) : null;
@@ -773,14 +1121,17 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const photosUploading = photos.some((p) => p.uploading);
 
   /* ---------------- validation & submit ---------------- */
+  // Appliance-mode error keys only apply outside restorations mode — a case
+  // is one or the other, never both, so only one set is ever "live".
   const errors = {
     patientName: !patientName.trim(),
-    teeth: selectedTeeth.length === 0,
     labId: !labId,
-    material: !isSplint && !material,
-    implantSystem: isImplant && !implantSystem,
-    abutmentType: isImplant && !abutmentType,
-    abutmentDiameter: isImplant && !abutmentDiameter,
+    restorations: caseMode === "restorations" && restorations.length === 0,
+    teeth: caseMode === "appliance" && selectedTeeth.length === 0,
+    material: caseMode === "appliance" && !isSplint && !material,
+    implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
+    abutmentType: caseMode === "appliance" && isImplant && !abutmentType,
+    abutmentDiameter: caseMode === "appliance" && isImplant && !abutmentDiameter,
     photosUploading,
   };
   const isValid = !Object.values(errors).some(Boolean);
@@ -791,6 +1142,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     patientName: "Patient name",
     teeth: "At least one tooth on the chart",
     labId: "Target lab",
+    restorations: "At least one restoration",
     material: "Material",
     implantSystem: "Implant system",
     abutmentType: "Abutment type",
@@ -808,6 +1160,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setPonticDesign(PONTIC_DESIGNS[0]);
+    setCaseMode("restorations"); setRestorations([]); setDraftOpen(false); setDraftTouched(false); setDraft(emptyDraft());
     setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
     setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter(""); setAbutmentColor("");
     setScans([]);
@@ -821,21 +1174,10 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const submit = (opts = {}) => {
     setTouched(true);
     if (!isValid) return;
-    const prescription = {
+    const common = {
       notation,
       included,
       includedOther: includedOther.trim(),
-      teeth: selectedTeeth,
-      category,
-      material,
-      shadeGuide,
-      vitaShade,
-      stumpShade,
-      ponticDesign: BRIDGE_CATEGORIES.includes(category) ? ponticDesign : null,
-      implantSystem: isImplant ? implantSystem : null,
-      abutmentType: isImplant ? abutmentType : null,
-      abutmentDiameter: isImplant ? abutmentDiameter : null,
-      abutmentColor: isImplant ? abutmentColor.trim() : null,
       rush,
       baseTat,
       effTat,
@@ -846,6 +1188,28 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
       ],
       notes: notes.trim(),
     };
+    // Cart-mode cases carry a `restorations` array and omit the legacy flat
+    // fields entirely; appliance-mode cases keep the exact original shape
+    // (and so does every pre-refactor case already in production — every
+    // reader downstream branches on `restorations?.length` to tell the two
+    // apart, so old data keeps rendering exactly as before with no migration).
+    const prescription =
+      caseMode === "restorations"
+        ? { ...common, restorations }
+        : {
+            ...common,
+            teeth: selectedTeeth,
+            category,
+            material,
+            shadeGuide,
+            vitaShade,
+            stumpShade,
+            ponticDesign: BRIDGE_CATEGORIES.includes(category) ? ponticDesign : null,
+            implantSystem: isImplant ? implantSystem : null,
+            abutmentType: isImplant ? abutmentType : null,
+            abutmentDiameter: isImplant ? abutmentDiameter : null,
+            abutmentColor: isImplant ? abutmentColor.trim() : null,
+          };
     onSave(
       {
         patientName: patientName.trim(),
@@ -867,7 +1231,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   /* ---------------- per-step status for the accordion ---------------- */
   const stepErrors = {
     1: ["patientName", "labId"],
-    2: ["teeth", "material", "implantSystem", "abutmentType", "abutmentDiameter"],
+    2: ["restorations", "teeth", "material", "implantSystem", "abutmentType", "abutmentDiameter"],
     3: [],
   };
   const stepInvalid = (n) => stepErrors[n].some((k) => errors[k]);
@@ -875,13 +1239,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
 
   const stepSummary = {
     1: [patientName || "No patient", lab?.name].filter(Boolean).join(" · "),
-    2: [
-      `${selectedTeeth.length} ${selectedTeeth.length === 1 ? "tooth" : "teeth"}`,
-      category,
-      material || null,
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    2:
+      caseMode === "restorations"
+        ? restorations.length
+          ? `${restorations.length} restoration${restorations.length === 1 ? "" : "s"} · ${restorations.reduce((n, r) => n + r.teeth.length, 0)} units`
+          : "No restorations added yet"
+        : [
+            `${selectedTeeth.length} ${selectedTeeth.length === 1 ? "tooth" : "teeth"}`,
+            category,
+            material || null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
     3: [
       insertionDate || "No date",
       deliveryTime !== "Anytime" ? deliveryTime : null,
@@ -1017,165 +1386,233 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
             </div>
           </section>
 
-          {/* Tooth selection */}
+          {/* Case type — a case is EITHER several independent fixed
+              restorations OR one whole-case appliance, never both */}
           <section className="mb-6">
-            <div className="mb-4 flex items-center justify-between">
-              <SectionHeader icon={ScanLine} n="b" title="Tooth Selection" subtitle="Tap teeth, or use a quick-select group" />
-              <div className="flex overflow-hidden rounded-lg border border-slate-300">
-                {["FDI", "Universal"].map((nn) => (
-                  <button key={nn} type="button" onClick={() => setNotation(nn)} className={`px-3 py-1.5 text-xs font-semibold transition ${notation === nn ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                    {nn}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <ToothChart notation={notation} selection={selection} mode={mode} setMode={setMode} onToggle={toggleTooth} onArch={toggleArch} onClear={() => setSelection({})} onGroup={toggleGroup} />
-            <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${err("teeth") ? "bg-rose-50 text-rose-600" : "bg-slate-50 text-slate-600"}`}>
-              {selectedTeeth.length === 0 ? (
-                err("teeth") ? "Select at least one tooth." : "No teeth selected yet."
-              ) : (
-                <span>
-                  <span className="font-semibold">{selectedTeeth.length} unit{selectedTeeth.length > 1 ? "s" : ""}:</span>{" "}
-                  {selectedTeeth
-                    .map((t) => {
-                      const n = notation === "FDI" ? t.fdi : t.universal;
-                      return `${n}${t.role === "pontic" ? " (pontic)" : t.role === "veneer" ? " (veneer)" : ""}`;
-                    })
-                    .join(", ")}
-                </span>
-              )}
+            <SectionHeader icon={Layers} n="b" title="Case Type" subtitle="Fixed restorations are added one by one; appliances are a single item" />
+            <div className="flex w-fit overflow-hidden rounded-lg border border-slate-300">
+              <button
+                type="button"
+                onClick={() => { setCaseMode("restorations"); setDraftOpen(false); }}
+                className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold transition ${caseMode === "restorations" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                <Layers3 size={14} /> Fixed Restoration(s)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCaseMode("appliance");
+                  setDraftOpen(false);
+                  if (!APPLIANCE_CATEGORIES.includes(category)) onCategoryChange(APPLIANCE_CATEGORIES[0]);
+                }}
+                className={`px-3.5 py-2 text-xs font-semibold transition ${caseMode === "appliance" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              >
+                Appliance / Removable / Splint
+              </button>
             </div>
           </section>
 
-          {/* Work order */}
-          <section>
-            <SectionHeader icon={Layers} n="c" title="Work Order & Materials" subtitle="Restoration category drives the material menu" />
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Restoration Category" required>
-                <select className={inputCls} value={category} onChange={(e) => onCategoryChange(e.target.value)}>
-                  {Object.keys(CATEGORIES).map((c) => (
-                    <option key={c} value={c}>{c}</option>
+          {caseMode === "restorations" ? (
+            /* ---------------- Restorations cart ---------------- */
+            <section>
+              <div className="mb-4 flex items-center justify-between">
+                <SectionHeader icon={Layers3} n="c" title="Restorations" subtitle="Add each restoration independently — its own teeth, material and shade" />
+                {!draftOpen && (
+                  <button
+                    type="button"
+                    onClick={openAddRestoration}
+                    className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                  >
+                    <Plus size={14} /> Add Restoration
+                  </button>
+                )}
+              </div>
+
+              {restorations.length === 0 && !draftOpen && (
+                <div className={`rounded-lg border border-dashed px-4 py-6 text-center text-xs ${err("restorations") ? "border-rose-300 bg-rose-50 text-rose-600" : "border-slate-300 bg-slate-50 text-slate-400"}`}>
+                  {err("restorations") ? "Add at least one restoration to continue." : "No restorations added yet."}
+                </div>
+              )}
+
+              {restorations.length > 0 && (
+                <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                  {restorations.map((r) => (
+                    <RestorationCard key={r.id} r={r} notation={notation} onEdit={() => openEditRestoration(r)} onDelete={() => deleteRestoration(r.id)} />
                   ))}
-                </select>
-              </Field>
-              {!isSplint && (
-                <Field label="Material" required>
-                  {isRefer ? (
-                    <input className={inputCls} value={REFER} disabled readOnly />
-                  ) : (
-                    <select className={inputCls} value={material} onChange={(e) => setMaterial(e.target.value)}>
-                      {CATEGORIES[category].materials.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  )}
-                </Field>
+                </div>
               )}
-              {isImplant && (
-                <>
-                  <Field label="Implant System" required>
-                    <select
-                      className={`${inputCls} ${err("implantSystem") ? "border-rose-400 ring-rose-100" : ""}`}
-                      value={implantSystem}
-                      onChange={(e) => setImplantSystem(e.target.value)}
-                    >
-                      <option value="">Select system…</option>
-                      {IMPLANT_SYSTEMS.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Abutment Type" required>
-                    <select
-                      className={`${inputCls} ${err("abutmentType") ? "border-rose-400 ring-rose-100" : ""}`}
-                      value={abutmentType}
-                      onChange={(e) => setAbutmentType(e.target.value)}
-                    >
-                      <option value="">Select abutment…</option>
-                      {ABUTMENT_TYPES.map((a) => (
-                        <option key={a} value={a}>{a}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Abutment / Platform Ø" required>
-                    <select
-                      className={`${inputCls} ${err("abutmentDiameter") ? "border-rose-400 ring-rose-100" : ""}`}
-                      value={abutmentDiameter}
-                      onChange={(e) => setAbutmentDiameter(e.target.value)}
-                    >
-                      <option value="">Select diameter…</option>
-                      {ABUTMENT_DIAMETERS.map((d) => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Abutment Colour Code" hint="Optional · helps the lab match the physical component">
-                    <input
-                      className={inputCls}
-                      value={abutmentColor}
-                      onChange={(e) => setAbutmentColor(e.target.value)}
-                      placeholder="e.g. Yellow, Pink, Green…"
-                    />
-                  </Field>
-                </>
-              )}
-              {!SPLINT_CATEGORIES.includes(category) && (
-                <>
-                  <Field label="Shade Guide">
-                    {isRefer ? (
-                      <input className={inputCls} value={REFER} disabled readOnly />
-                    ) : (
-                      <select
-                        className={inputCls}
-                        value={shadeGuide}
-                        onChange={(e) => {
-                          setShadeGuide(e.target.value);
-                          setVitaShade(SHADE_GUIDES[e.target.value][0]);
-                        }}
-                      >
-                        {SHADE_GUIDE_NAMES.map((g) => (
-                          <option key={g} value={g}>{g}</option>
+
+              {draftOpen && (
+                <div className="rounded-xl border-2 border-blue-200 bg-blue-50/40 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <h5 className="text-sm font-bold text-slate-800">{draft.id ? "Edit Restoration" : "New Restoration"}</h5>
+                      <div className="flex overflow-hidden rounded-lg border border-slate-300">
+                        {["FDI", "Universal"].map((nn) => (
+                          <button key={nn} type="button" onClick={() => setNotation(nn)} className={`px-2.5 py-1 text-[11px] font-semibold transition ${notation === nn ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                            {nn}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setDraftOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  {/* Category first — everything after (chart mode, then
+                      material/shade/implant fields) depends on it */}
+                  <div className="mb-3">
+                    <Field label="Restoration Type" required>
+                      <select className={inputCls} value={draft.category} onChange={(e) => changeDraftCategory(e.target.value)}>
+                        {RESTORATION_CATEGORIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
-                    )}
-                  </Field>
-                  <Field label="Shade">
-                    {isRefer ? (
-                      <input className={inputCls} value={REFER} disabled readOnly />
-                    ) : (
-                      <select className={inputCls} value={vitaShade} onChange={(e) => setVitaShade(e.target.value)}>
-                        {SHADE_GUIDES[shadeGuide].map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    )}
-                  </Field>
-                </>
+                    </Field>
+                  </div>
+
+                  <ToothChart
+                    notation={notation}
+                    selection={draft.selection}
+                    mode={draft.mode}
+                    setMode={(m) => updateDraft({ mode: m })}
+                    onToggle={toggleDraftTooth}
+                    onArch={toggleDraftArch}
+                    onClear={() => updateDraft({ selection: {} })}
+                    onGroup={toggleDraftGroup}
+                    disabled={takenTeeth}
+                    modes={
+                      BRIDGE_CATEGORIES.includes(draft.category)
+                        ? [
+                            { k: "unit", txt: "Abutment", on: "bg-blue-600 text-white" },
+                            { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white" },
+                          ]
+                        : []
+                    }
+                  />
+                  <div className={`mb-3 mt-2 rounded-lg px-3 py-2 text-xs ${draftTouched && draftErrors.includes("teeth") ? "bg-rose-50 text-rose-600" : "bg-white text-slate-600"}`}>
+                    {draftTeeth.length === 0
+                      ? draftTouched && draftErrors.includes("teeth")
+                        ? "Select at least one tooth for this restoration."
+                        : `Tap teeth for this ${draft.category.toLowerCase()} — material and shade appear once at least one is picked.`
+                      : `${draftTeeth.length} unit${draftTeeth.length > 1 ? "s" : ""} selected: ${draftTeeth
+                          .map((t) => `${notation === "FDI" ? t.fdi : t.universal}${t.role === "pontic" ? " (pontic)" : ""}`)
+                          .join(", ")}`}
+                  </div>
+
+                  {draftTeeth.length > 0 && <RestorationFields draft={draft} onChange={updateDraft} errors={draftTouched ? draftErrors : []} />}
+
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button type="button" onClick={() => setDraftOpen(false)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraftTouched(true);
+                        confirmDraft();
+                      }}
+                      className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                    >
+                      <Check size={13} /> {draft.id ? "Save Changes" : "Add to Case"}
+                    </button>
+                  </div>
+                </div>
               )}
-              {showStump && (
-                <Field label="Stump Shade" hint="Needed for translucent materials">
-                  {isRefer ? (
-                    <input className={inputCls} value={REFER} disabled readOnly />
-                  ) : (
-                    <select className={inputCls} value={stumpShade} onChange={(e) => setStumpShade(e.target.value)}>
-                      {STUMP_SHADES.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  )}
-                </Field>
-              )}
-              {BRIDGE_CATEGORIES.includes(category) && (
-                <Field label="Pontic Design" hint="Applied to pontic units">
-                  <select className={inputCls} value={ponticDesign} onChange={(e) => setPonticDesign(e.target.value)}>
-                    {PONTIC_DESIGNS.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+            </section>
+          ) : (
+            <>
+              {/* ---------------- Appliance mode: unchanged from before ---------------- */}
+              <section className="mb-6">
+                <div className="mb-4 flex items-center justify-between">
+                  <SectionHeader icon={ScanLine} n="c" title="Tooth Selection" subtitle="Tap teeth, or use a quick-select group" />
+                  <div className="flex overflow-hidden rounded-lg border border-slate-300">
+                    {["FDI", "Universal"].map((nn) => (
+                      <button key={nn} type="button" onClick={() => setNotation(nn)} className={`px-3 py-1.5 text-xs font-semibold transition ${notation === nn ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                        {nn}
+                      </button>
                     ))}
-                  </select>
-                </Field>
-              )}
-            </div>
-          </section>
+                  </div>
+                </div>
+                <ToothChart notation={notation} selection={selection} mode={mode} setMode={setMode} onToggle={toggleTooth} onArch={toggleArch} onClear={() => setSelection({})} onGroup={toggleGroup} />
+                <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${err("teeth") ? "bg-rose-50 text-rose-600" : "bg-slate-50 text-slate-600"}`}>
+                  {selectedTeeth.length === 0 ? (
+                    err("teeth") ? "Select at least one tooth." : "No teeth selected yet."
+                  ) : (
+                    <span>
+                      <span className="font-semibold">{selectedTeeth.length} unit{selectedTeeth.length > 1 ? "s" : ""}:</span>{" "}
+                      {selectedTeeth
+                        .map((t) => {
+                          const n = notation === "FDI" ? t.fdi : t.universal;
+                          return `${n}${t.role === "pontic" ? " (pontic)" : t.role === "veneer" ? " (veneer)" : ""}`;
+                        })
+                        .join(", ")}
+                    </span>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <SectionHeader icon={Layers} n="d" title="Work Order & Materials" subtitle="Restoration category drives the material menu" />
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <Field label="Appliance Type" required>
+                    <select className={inputCls} value={category} onChange={(e) => onCategoryChange(e.target.value)}>
+                      {APPLIANCE_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  {!isSplint && (
+                    <Field label="Material" required>
+                      {isRefer ? (
+                        <input className={inputCls} value={REFER} disabled readOnly />
+                      ) : (
+                        <select className={inputCls} value={material} onChange={(e) => setMaterial(e.target.value)}>
+                          {CATEGORIES[category].materials.map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      )}
+                    </Field>
+                  )}
+                  {!SPLINT_CATEGORIES.includes(category) && (
+                    <>
+                      <Field label="Shade Guide">
+                        {isRefer ? (
+                          <input className={inputCls} value={REFER} disabled readOnly />
+                        ) : (
+                          <select
+                            className={inputCls}
+                            value={shadeGuide}
+                            onChange={(e) => {
+                              setShadeGuide(e.target.value);
+                              setVitaShade(SHADE_GUIDES[e.target.value][0]);
+                            }}
+                          >
+                            {SHADE_GUIDE_NAMES.map((g) => (
+                              <option key={g} value={g}>{g}</option>
+                            ))}
+                          </select>
+                        )}
+                      </Field>
+                      <Field label="Shade">
+                        {isRefer ? (
+                          <input className={inputCls} value={REFER} disabled readOnly />
+                        ) : (
+                          <select className={inputCls} value={vitaShade} onChange={(e) => setVitaShade(e.target.value)}>
+                            {SHADE_GUIDES[shadeGuide].map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        )}
+                      </Field>
+                    </>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
             <div className="mt-4 flex justify-end">
               <button type="button" onClick={() => setStep(3)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
                 Next · Logistics <ChevronDown size={15} className="-rotate-90" />
@@ -1339,16 +1776,31 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
         <div className={`border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
           {/* live order summary */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-6 py-2 text-[11px]">
-            <span className="flex items-center gap-1 font-semibold text-slate-700">
-              <ScanLine size={12} className="text-slate-400" />
-              {selectedTeeth.length} {selectedTeeth.length === 1 ? "unit" : "units"}
-            </span>
-            <span className="text-slate-400">·</span>
-            <span className="text-slate-600">{category}{material ? ` — ${material}` : ""}</span>
-            {vitaShade && vitaShade !== "N/A" && vitaShade !== REFER && (
+            {caseMode === "restorations" ? (
               <>
+                <span className="flex items-center gap-1 font-semibold text-slate-700">
+                  <ScanLine size={12} className="text-slate-400" />
+                  {restorations.reduce((n, r) => n + r.teeth.length, 0)} units
+                </span>
                 <span className="text-slate-400">·</span>
-                <span className="text-slate-600">Shade {vitaShade}</span>
+                <span className="text-slate-600">
+                  {restorations.length ? `${restorations.length} restoration${restorations.length === 1 ? "" : "s"}: ${restorations.map((r) => r.category).join(", ")}` : "No restorations yet"}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="flex items-center gap-1 font-semibold text-slate-700">
+                  <ScanLine size={12} className="text-slate-400" />
+                  {selectedTeeth.length} {selectedTeeth.length === 1 ? "unit" : "units"}
+                </span>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-600">{category}{material ? ` — ${material}` : ""}</span>
+                {vitaShade && vitaShade !== "N/A" && vitaShade !== REFER && (
+                  <>
+                    <span className="text-slate-400">·</span>
+                    <span className="text-slate-600">Shade {vitaShade}</span>
+                  </>
+                )}
               </>
             )}
             <span className="ml-auto flex items-center gap-3">
