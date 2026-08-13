@@ -1163,6 +1163,16 @@ const QUEUE_TAB_DEFS = [
 
 function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onExportCsv }) {
   const [queueTab, setQueueTab] = useState("incoming");
+  // Brief confirmation after a stage change moves a case out of the tab
+  // you're looking at — without this, advancing the only case in "Incoming"
+  // just makes the list go blank with no explanation (looked like the case
+  // vanished; it just moved to the "In Production" tab).
+  const [toast, setToast] = useState(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   if (!lab) return null;
 
@@ -1170,10 +1180,33 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
   const inProduction = (c) => c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex < STAGE_INDEX.WORK_COMPLETE;
   const inCompleted = (c) => c.stageIndex >= STAGE_INDEX.WORK_COMPLETE;
   const BUCKET = { incoming: inIncoming, in_production: inProduction, completed: inCompleted };
+  const bucketOf = (stageIndex) =>
+    Object.entries(BUCKET).find(([, test]) => test({ stageIndex }))?.[0] ?? "incoming";
 
   const tabs = QUEUE_TAB_DEFS.map((t) => ({ ...t, count: queue.filter(BUCKET[t.key]).length }));
   const visibleQueue = queue.filter(BUCKET[queueTab]);
   const activeLabel = tabs.find((t) => t.key === queueTab)?.label ?? "";
+
+  // Wrap advance/revert so the view follows the case to wherever it lands —
+  // and says so — instead of silently leaving the current tab empty.
+  const followCase = (caseId, nextStageIndex) => {
+    const nextTab = bucketOf(nextStageIndex);
+    if (nextTab !== queueTab) {
+      setQueueTab(nextTab);
+      const label = QUEUE_TAB_DEFS.find((t) => t.key === nextTab)?.label ?? nextTab;
+      setToast(`Case moved to "${label}" — showing it here now.`);
+    }
+  };
+  const handleAdvance = (caseId) => {
+    const c = queue.find((x) => x.id === caseId);
+    onAdvance(caseId);
+    if (c) followCase(caseId, c.stageIndex + 1);
+  };
+  const handleRevert = (caseId) => {
+    const c = queue.find((x) => x.id === caseId);
+    onRevert(caseId);
+    if (c) followCase(caseId, c.stageIndex - 1);
+  };
 
   // This lab's own SLA snapshot.
   const { perLab } = computeAnalytics(queue, [lab]);
@@ -1232,13 +1265,22 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
             <LabCaseCard
               key={c.id}
               c={c}
-              onAdvance={onAdvance}
-              onRevert={onRevert}
+              onAdvance={handleAdvance}
+              onRevert={handleRevert}
               onOpenCase={onOpenCase}
               onLogRemake={onLogRemake}
               onSetInvoiceNumber={onSetInvoiceNumber}
             />
           ))}
+        </div>
+      )}
+
+      {/* Toast: confirms a stage change moved the case to a different tab */}
+      {toast && (
+        <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+          <div className="flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+            <CheckCheck size={16} className="text-emerald-400" /> {toast}
+          </div>
         </div>
       )}
     </div>
