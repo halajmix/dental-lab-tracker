@@ -661,8 +661,20 @@ function useStationSession(session) {
     if (result) setState(result);
   }, []);
 
+  // Keyed on the user id, NOT the `session` object itself — Supabase hands
+  // out a brand-new session object on every auth event, including its
+  // automatic token refresh (which also fires on tab focus/regain, so very
+  // often on a phone: lock screen, switch apps, back to the browser). Keying
+  // on the whole object re-ran this effect — and its immediate ping() — on
+  // every one of those, not just every HEARTBEAT_MS as intended. On cellular
+  // data each extra heartbeat can look like a genuine network change, which
+  // fires a real OTP email; enough of those in a short window exhausts
+  // Resend's send-rate limit. Same object-identity bug class already fixed
+  // for LabSettingsDrawer/ProfileSettingsModal — just not caught here.
+  const userId = session?.user?.id ?? null;
+
   useEffect(() => {
-    if (!session) {
+    if (!userId) {
       setState({ status: null, sessionId: null });
       return;
     }
@@ -673,7 +685,7 @@ function useStationSession(session) {
       clearInterval(interval);
       window.removeEventListener("online", ping);
     };
-  }, [session, ping]);
+  }, [userId, ping]);
 
   const clear = useCallback(() => setState((s) => ({ ...s, status: "ACTIVE" })), []);
   return { ...state, clear };
