@@ -332,7 +332,6 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
           </div>
           <div className="text-right text-xs">
             <p className="text-sm font-bold text-slate-800">Laboratory Prescription</p>
-            <p className="text-slate-500">Clinic License #: {clinic.license}</p>
             <p className="text-slate-500">Date: {new Date().toISOString().slice(0, 10)}</p>
             <p className="mt-1 font-semibold text-slate-700">{clinic.dentist}</p>
           </div>
@@ -474,15 +473,10 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
         </div>
 
         {/* signature */}
-        <div className="mt-10 flex items-end justify-between">
+        <div className="mt-10">
           <div className="text-[11px] text-slate-500">
             <p>Verified &amp; authorized by:</p>
             <p className="mt-6 border-t border-slate-400 pt-1 font-semibold text-slate-800">{clinic.dentist}</p>
-            <p>License #: {clinic.dentistLicense}</p>
-          </div>
-          <div className="text-center text-[11px] text-slate-400">
-            <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-slate-300">Seal</div>
-            Clinic Stamp
           </div>
         </div>
 
