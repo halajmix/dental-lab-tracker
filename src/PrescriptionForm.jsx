@@ -16,13 +16,11 @@ import {
   Sparkles,
   Clock,
   ScanLine,
-  DollarSign,
   MessageCircle,
   PackageCheck,
   ChevronDown,
   Plus,
 } from "lucide-react";
-import { caseFee } from "./Analytics.jsx";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -669,9 +667,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const insufficientTime =
     insertionDate && estReady && new Date(insertionDate) < new Date(iso(estReady));
 
-  // Live fee preview (base + express surcharge from the selected lab).
-  const fee = caseFee({ labId, prescription: { category, teeth: selectedTeeth, rush } }, labs);
-
   /* ---------------- category change resets dependent spec fields ---------------- */
   const onCategoryChange = (c) => {
     setCategory(c);
@@ -869,7 +864,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                 <select className={`${inputCls} ${err("labId") ? "border-rose-400 ring-rose-100" : ""}`} value={labId} onChange={(e) => setLabId(e.target.value)}>
                   <option value="">Select lab…</option>
                   {labs.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name} — {l.tat}d turn around time · +{l.expressPct ?? 20}% express</option>
+                    <option key={l.id} value={l.id}>{l.name} — {l.tat}d turn around time</option>
                   ))}
                 </select>
               </Field>
@@ -1135,18 +1130,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                 >
                   <span className="flex items-center gap-1.5">
                     <Zap size={15} className={rush ? "text-amber-500" : "text-slate-400"} />
-                    {rush ? `Express${lab ? ` +${lab.expressPct ?? 20}%` : ""}` : "Standard"}
+                    {rush ? "Express" : "Standard"}
                   </span>
                   <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${rush ? "bg-amber-500" : "bg-slate-300"}`}>
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${rush ? "translate-x-4" : "translate-x-0.5"}`} />
                   </span>
                 </button>
-                {rush && <p className="mt-1 text-[11px] text-amber-600">Lab charges {lab ? `${lab.expressPct ?? 20}%` : "a %"} extra for faster-than-usual work.</p>}
+                {rush && <p className="mt-1 text-[11px] text-amber-600">Shortens the lab's standard turnaround for this case.</p>}
               </div>
             </div>
 
-            {/* TAT + fee summary cards */}
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {/* TAT + schedule-check summary cards */}
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500"><Clock size={12} /> Estimated Turnaround</p>
                 <p className="mt-0.5 text-lg font-bold text-slate-800">
@@ -1166,15 +1161,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                   {!insertionDate ? "Set an insertion date" : insufficientTime ? "Insertion is before ready date" : "Fits before insertion"}
                 </p>
               </div>
-              {rush && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
-                  <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500"><DollarSign size={12} /> Estimated Fee</p>
-                  <p className="mt-0.5 text-lg font-bold text-slate-800">${fee.total.toLocaleString()}</p>
-                  {fee.surcharge > 0 && (
-                    <p className="text-[11px] text-amber-600">${fee.base.toLocaleString()} + ${fee.surcharge.toLocaleString()} express</p>
-                  )}
-                </div>
-              )}
             </div>
           </section>
 
@@ -1258,7 +1244,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
             <span className="ml-auto flex items-center gap-3">
               {rush && (
                 <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-700">
-                  <Zap size={10} /> EXPRESS ${fee.total.toLocaleString()}
+                  <Zap size={10} /> EXPRESS
                 </span>
               )}
               <span className={`flex items-center gap-1 font-semibold ${insufficientTime ? "text-rose-600" : "text-slate-700"}`}>

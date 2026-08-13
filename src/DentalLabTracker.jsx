@@ -1115,7 +1115,7 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
 
   return (
     <div className="space-y-5">
-      {/* Lab info sub-header — contact/turnaround/express details live in Settings now */}
+      {/* Lab info sub-header — contact/turnaround details live in Settings now */}
       <div>
         <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
           <Building2 size={18} className="text-blue-600" /> {lab.name}
@@ -1439,7 +1439,6 @@ function AddLabModal({ open, onClose, onSave }) {
   const [contact, setContact] = useState("");
   const [email, setEmail] = useState("");
   const [tat, setTat] = useState(5);
-  const [expressPct, setExpressPct] = useState(20);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const reset = () => {
@@ -1447,7 +1446,6 @@ function AddLabModal({ open, onClose, onSave }) {
     setContact("");
     setEmail("");
     setTat(5);
-    setExpressPct(20);
     setShowAdvanced(false);
   };
 
@@ -1459,7 +1457,6 @@ function AddLabModal({ open, onClose, onSave }) {
       contact: contact.trim() || "—",
       email: email.trim(),
       tat: Number(tat) || 1,
-      expressPct: Number(expressPct) || 0,
     });
     reset();
     onClose();
@@ -1496,16 +1493,10 @@ function AddLabModal({ open, onClose, onSave }) {
               <span className="mb-1.5 block text-xs font-medium text-slate-500">Email</span>
               <input type="email" className={lightInputCls} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="orders@lab.com" />
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-slate-500">Default Turnaround (Days)</span>
-                <input type="number" min={1} className={lightInputCls} value={tat} onChange={(e) => setTat(e.target.value)} />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-slate-500">Express Surcharge (%)</span>
-                <input type="number" min={0} className={lightInputCls} value={expressPct} onChange={(e) => setExpressPct(e.target.value)} />
-              </label>
-            </div>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-slate-500">Default Turnaround (Days)</span>
+              <input type="number" min={1} className={lightInputCls} value={tat} onChange={(e) => setTat(e.target.value)} />
+            </label>
             <button
               type="button"
               onClick={() => setShowAdvanced(false)}
@@ -1521,7 +1512,7 @@ function AddLabModal({ open, onClose, onSave }) {
             className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:underline"
           >
             <ChevronDown size={14} /> Show advanced settings
-            <span className="font-normal text-slate-400">(email, turnaround, express fee)</span>
+            <span className="font-normal text-slate-400">(email, turnaround)</span>
           </button>
         )}
 
@@ -1542,16 +1533,15 @@ function AddLabModal({ open, onClose, onSave }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Lab Settings — contact/turnaround/express info (moved off the      */
-/*  dashboard header) plus a per-procedure turnaround time list. Each  */
-/*  procedure mirrors the Rx form's category dropdown; a blank value   */
-/*  falls back to the lab's standard turnaround.                       */
+/*  Lab Settings — contact/turnaround info (moved off the dashboard    */
+/*  header) plus a per-procedure turnaround time list. Each procedure  */
+/*  mirrors the Rx form's category dropdown; a blank value falls back  */
+/*  to the lab's standard turnaround.                                  */
 /* ------------------------------------------------------------------ */
 
 function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
   const [contact, setContact] = useState("");
   const [tat, setTat] = useState(5);
-  const [expressPct, setExpressPct] = useState(20);
   const [procTats, setProcTats] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1564,7 +1554,6 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
     if (!open) return;
     setContact(lab.contact ?? "");
     setTat(lab.tat ?? 5);
-    setExpressPct(lab.expressPct ?? 20);
     setProcTats(lab.procedureTats ?? {});
     setError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1587,7 +1576,6 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
       await updateLab(lab.id, {
         contact: contact.trim(),
         tat: Math.max(1, Number(tat) || 1),
-        expressPct: Math.max(0, Number(expressPct) || 0),
         procedureTats: procTats,
       });
       await onSaved();
@@ -1609,16 +1597,10 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
               <span className="mb-1 block text-xs font-medium text-slate-600">Phone</span>
               <input value={contact} onChange={(e) => setContact(e.target.value)} className={lightInputCls} placeholder="00968 9000 0000" />
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-slate-600">Standard turn around (days)</span>
-                <input type="number" min={1} value={tat} onChange={(e) => setTat(e.target.value)} className={lightInputCls} />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-slate-600">Express surcharge (%)</span>
-                <input type="number" min={0} value={expressPct} onChange={(e) => setExpressPct(e.target.value)} className={lightInputCls} />
-              </label>
-            </div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600">Standard turn around (days)</span>
+              <input type="number" min={1} value={tat} onChange={(e) => setTat(e.target.value)} className={lightInputCls} />
+            </label>
           </div>
         </div>
 

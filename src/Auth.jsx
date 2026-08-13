@@ -488,8 +488,8 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
     e.preventDefault();
     setBusy(true);
     setError("");
-    // TAT/express start at sensible defaults — the lab tunes them later in
-    // Lab Settings, keeping onboarding to the four identity fields only.
+    // TAT starts at a sensible default — the lab tunes it later in Lab
+    // Settings, keeping onboarding to the four identity fields only.
     const { data: newLab, error: labErr } = await supabase
       .from("labs")
       .insert({
@@ -498,7 +498,6 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
         contact: `00968${phone}`,
         email: email.trim(),
         tat: 5,
-        express_pct: 20,
       })
       .select()
       .single();
@@ -542,7 +541,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
           <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
             <p className="font-bold text-slate-800">{claimable.name}</p>
             <p className="text-xs text-slate-500">{claimable.contact || "No phone on file"} · {claimable.email || "No email"}</p>
-            <p className="mt-1 text-xs text-slate-500">Turn around time {claimable.tat}d · Express +{claimable.express_pct}%</p>
+            <p className="mt-1 text-xs text-slate-500">Turn around time {claimable.tat}d</p>
           </div>
           <Field label="Technician name">
             <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Ahmed Al-Balushi" />

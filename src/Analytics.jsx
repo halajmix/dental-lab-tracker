@@ -23,16 +23,15 @@ const BASE_PRICE = {
   "Others - refer to notes": 300,
 };
 
-// Full fee breakdown for a case. Express adds the target lab's own surcharge %.
+// Full fee breakdown for a case. Rush no longer carries a surcharge — it
+// only shortens turnaround (see PrescriptionForm's effTat) — so fee is base
+// minus any remake credit.
 export function caseFee(c, labs = []) {
   const unit = BASE_PRICE[c.prescription?.category] ?? 400;
   const units = c.prescription?.teeth?.length || 1;
   const base = unit * units;
-  const lab = labs.find((l) => l.id === c.labId);
-  const expressPct = c.prescription?.rush ? (lab?.expressPct ?? 0) : 0;
-  const surcharge = Math.round((base * expressPct) / 100);
   const credit = c.remake?.cost ? Number(c.remake.cost) : 0;
-  return { base, expressPct, surcharge, credit, total: Math.max(0, base + surcharge - credit) };
+  return { base, credit, total: Math.max(0, base - credit) };
 }
 
 export const caseCost = (c, labs) => caseFee(c, labs).total;

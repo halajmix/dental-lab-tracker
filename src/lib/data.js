@@ -15,7 +15,6 @@ export const labFromRow = (r) => ({
   email: r.email ?? "",
   address: r.address ?? "",
   tat: r.tat,
-  expressPct: r.express_pct,
   procedureTats: r.procedure_tats ?? {},
   ownerId: r.owner_id,
   createdByClinicId: r.created_by_clinic_id,
@@ -95,13 +94,12 @@ export async function fetchLabs() {
   return data.map(labFromRow);
 }
 
-// Lab self-service settings (phone, standard TAT, express %, per-procedure
-// TATs). RLS: only the owning lab account (or creating clinic) can update.
-export async function updateLab(labId, { contact, tat, expressPct, procedureTats }) {
+// Lab self-service settings (phone, standard TAT, per-procedure TATs).
+// RLS: only the owning lab account (or creating clinic) can update.
+export async function updateLab(labId, { contact, tat, procedureTats }) {
   const patch = {};
   if (contact !== undefined) patch.contact = contact;
   if (tat !== undefined) patch.tat = tat;
-  if (expressPct !== undefined) patch.express_pct = expressPct;
   if (procedureTats !== undefined) patch.procedure_tats = procedureTats;
   const { data, error } = await supabase.from("labs").update(patch).eq("id", labId).select().single();
   if (error) throw error;
@@ -116,7 +114,6 @@ export async function insertLab(clinicId, data) {
       contact: data.contact ?? "",
       email: data.email ?? "",
       tat: data.tat,
-      express_pct: data.expressPct,
       created_by_clinic_id: clinicId,
     })
     .select()
