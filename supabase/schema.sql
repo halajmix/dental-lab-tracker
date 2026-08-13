@@ -516,3 +516,45 @@ create policy "case_photos_owner_write" on storage.objects for insert
 drop policy if exists "case_photos_owner_delete" on storage.objects;
 create policy "case_photos_owner_delete" on storage.objects for delete
   using (bucket_id = 'case-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+/* --------------------------------------------------------------------- */
+/*  Phase 12 — case email notifications (new case -> lab, complete ->    */
+/*  clinic), fired by a plain trigger + pg_net rather than the dashboard */
+/*  "Database Webhooks" UI, because that UI depends on an internal       */
+/*  "supabase_functions" schema this project doesn't have (errors with   */
+/*  "schema supabase_functions does not exist"). pg_net directly is the  */
+/*  same underlying mechanism without that dependency.                   */
+/*                                                                       */
+/*  The anon key below is NOT a secret — it's already public in the      */
+/*  deployed app's JS bundle (VITE_SUPABASE_ANON_KEY); RLS is what       */
+/*  actually protects data, not this key's secrecy. NEVER put the        */
+/*  service role key here instead.                                       */
+/* --------------------------------------------------------------------- */
+
+create extension if not exists pg_net;
+
+create or replace function notify_case_webhook()
+returns trigger as $$
+begin
+  perform net.http_post(
+    url := 'https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/case-notify',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10eGt1c2hjeGN6and5cHdveGRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxODI5MjEsImV4cCI6MjEwMTc1ODkyMX0.veuhpvYV93Vv9BhFkUMMkTtz6hG3f_5tEeHu8_nxRz8'
+    ),
+    body := jsonb_build_object(
+      'type', TG_OP,
+      'table', TG_TABLE_NAME,
+      'schema', TG_TABLE_SCHEMA,
+      'record', to_jsonb(NEW),
+      'old_record', case when TG_OP = 'UPDATE' then to_jsonb(OLD) else null end
+    )
+  );
+  return NEW;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists cases_notify_webhook on cases;
+create trigger cases_notify_webhook
+  after insert or update on cases
+  for each row execute function notify_case_webhook();
