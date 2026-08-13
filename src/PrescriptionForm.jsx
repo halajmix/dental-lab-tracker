@@ -20,7 +20,10 @@ import {
   PackageCheck,
   ChevronDown,
   Plus,
+  Loader2,
+  RotateCcw,
 } from "lucide-react";
+import { uploadCasePhoto } from "./lib/data.js";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -574,7 +577,7 @@ function SectionHeader({ icon: Icon, n, title, subtitle }) {
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, labs, onSave }) {
+export default function PrescriptionForm({ open, onClose, labs, onSave, userId }) {
   const [notation, setNotation] = useState("FDI");
   const [mode, setMode] = useState("unit");
   const [selection, setSelection] = useState({}); // { universal: 'unit'|'pontic' }
@@ -608,7 +611,11 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const [insertionDate, setInsertionDate] = useState("");
 
   const [scans, setScans] = useState([]);
+  // Real uploads to Supabase Storage (bucket `case-photos`), not simulated —
+  // the lab reads these directly off the case. Grouped under one client-side
+  // id per form session (no case row exists yet while the form is open).
   const [photos, setPhotos] = useState([]);
+  const [photoGroupId, setPhotoGroupId] = useState(() => crypto.randomUUID());
   const [notes, setNotes] = useState("");
 
   const [touched, setTouched] = useState(false);
@@ -703,13 +710,60 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
   const showStump =
     HAS_STUMP.includes(category) && AESTHETIC_MATERIALS.includes(material) && !isRefer;
 
-  /* ---------------- file handling (simulated) ---------------- */
+  /* ---------------- file handling ---------------- */
+  // STL scans are still simulated — there's no in-browser way to preview or
+  // usefully validate a mesh file, and the lab receiving a real intraoral
+  // scanner export isn't this app's job.
   const addFiles = (fileList, setter) => {
     const arr = Array.from(fileList).map((f) => ({ name: f.name, size: f.size }));
     setter((prev) => [...prev, ...arr]);
   };
   const addSampleScan = () =>
     setScans((p) => [...p, { name: `IOS_scan_${p.length + 1}.stl`, size: 4_800_000 + p.length * 512_000 }]);
+
+  // Clinical/shade photos are REAL uploads to Supabase Storage so the lab
+  // sees the actual image, not just a filename. Each file gets a local
+  // object-URL thumbnail immediately, then the entry is patched in place
+  // once the upload resolves (or fails, with a retry option).
+  const uploadOnePhoto = async (entryId, file) => {
+    try {
+      const url = await uploadCasePhoto(userId, photoGroupId, file);
+      setPhotos((p) => p.map((ph) => (ph.id === entryId ? { ...ph, url, uploading: false, error: null } : ph)));
+    } catch (err) {
+      setPhotos((p) => p.map((ph) => (ph.id === entryId ? { ...ph, uploading: false, error: err.message || "Upload failed" } : ph)));
+    }
+  };
+
+  const addPhotos = (fileList) => {
+    const files = Array.from(fileList);
+    const entries = files.map((file) => ({
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      file,
+      name: file.name,
+      size: file.size,
+      previewUrl: URL.createObjectURL(file),
+      url: null,
+      uploading: true,
+      error: null,
+    }));
+    setPhotos((p) => [...p, ...entries]);
+    entries.forEach((entry) => uploadOnePhoto(entry.id, entry.file));
+  };
+
+  const retryPhoto = (entry) => {
+    setPhotos((p) => p.map((ph) => (ph.id === entry.id ? { ...ph, uploading: true, error: null } : ph)));
+    uploadOnePhoto(entry.id, entry.file);
+  };
+
+  const removePhoto = (id) => {
+    setPhotos((p) => {
+      const target = p.find((ph) => ph.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return p.filter((ph) => ph.id !== id);
+    });
+  };
+
+  const photosUploading = photos.some((p) => p.uploading);
 
   /* ---------------- validation & submit ---------------- */
   const errors = {
@@ -720,6 +774,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     implantSystem: isImplant && !implantSystem,
     abutmentType: isImplant && !abutmentType,
     abutmentDiameter: isImplant && !abutmentDiameter,
+    photosUploading,
   };
   const isValid = !Object.values(errors).some(Boolean);
 
@@ -733,6 +788,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     implantSystem: "Implant system",
     abutmentType: "Abutment type",
     abutmentDiameter: "Abutment diameter",
+    photosUploading: "Photos still uploading",
   };
   const missing = Object.entries(errors)
     .filter(([, bad]) => bad)
@@ -747,7 +803,10 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
     setPonticDesign(PONTIC_DESIGNS[0]);
     setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
     setImplantSystem(""); setAbutmentType(""); setAbutmentDiameter("");
-    setScans([]); setPhotos([]); setNotes(""); setTouched(false);
+    setScans([]);
+    photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
+    setPhotos([]); setPhotoGroupId(crypto.randomUUID());
+    setNotes(""); setTouched(false);
     setStep(1);
   };
 
@@ -773,14 +832,17 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
       baseTat,
       effTat,
       estReady: estReady ? iso(estReady) : null,
-      files: [...scans.map((f) => ({ ...f, kind: "scan" })), ...photos.map((f) => ({ ...f, kind: "photo" }))],
+      files: [
+        ...scans.map((f) => ({ name: f.name, size: f.size, kind: "scan" })),
+        ...photos.filter((f) => f.url).map((f) => ({ name: f.name, size: f.size, kind: "photo", url: f.url })),
+      ],
       notes: notes.trim(),
     };
     onSave(
       {
         patientName: patientName.trim(),
         patientId: patientId.trim() || "PT-NEW",
-        patientPhone: patientPhone.trim(),
+        patientPhone: patientPhone ? `+968${patientPhone}` : "",
         appointmentDate: insertionDate || "—",
         deliveryTime,
         labId,
@@ -878,7 +940,16 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                   <input className={inputCls} value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="PT-00000" />
                 </Field>
                 <Field label="Patient WhatsApp" hint="Optional · to share the Rx PDF">
-                  <input className={inputCls} value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="+968 90000000" />
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-500">+968</span>
+                    <input
+                      className={inputCls}
+                      value={patientPhone}
+                      onChange={(e) => setPatientPhone(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                      placeholder="9XXXXXXX"
+                      inputMode="numeric"
+                    />
+                  </div>
                 </Field>
                 <button
                   type="button"
@@ -1166,7 +1237,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
 
           {/* Attachments & notes */}
           <section className="mt-6">
-            <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach STL scans and shade photos (simulated)" />
+            <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach STL scans (simulated) and clinical/shade photos — photos upload for real, the lab sees the actual image" />
             <div className="grid gap-3 sm:grid-cols-2">
               {/* STL scans */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
@@ -1194,25 +1265,48 @@ export default function PrescriptionForm({ open, onClose, labs, onSave }) {
                 </ul>
               </div>
 
-              {/* Shade photos */}
+              {/* Shade photos — real uploads, multiple at once, camera on mobile */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ImageIcon size={16} className="text-violet-600" /> Clinical / Shade Photos</div>
-                <label className="cursor-pointer rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
-                  Choose images
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => addFiles(e.target.files, setPhotos)} />
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-700"><ImageIcon size={16} className="text-violet-600" /> Clinical / Shade Photos</div>
+                  {photos.length > 0 && <span className="text-[11px] font-medium text-slate-400">{photos.length} photo{photos.length !== 1 ? "s" : ""}</span>}
+                </div>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
+                  <ImageIcon size={13} /> Choose or take photos
+                  <input type="file" accept="image/*" multiple capture="environment" className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
                 </label>
-                <ul className="mt-3 space-y-1.5">
-                  {photos.length === 0 && <li className="text-[11px] text-slate-400">No photos attached.</li>}
-                  {photos.map((f, i) => (
-                    <li key={i} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs ring-1 ring-slate-200">
-                      <span className="flex items-center gap-1.5 truncate text-slate-700"><ImageIcon size={13} className="shrink-0 text-violet-500" /> <span className="truncate">{f.name}</span></span>
-                      <span className="ml-2 flex items-center gap-2">
-                        <span className="text-slate-400">{fmtSize(f.size)}</span>
-                        <button type="button" onClick={() => setPhotos((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-rose-500"><Trash2 size={13} /></button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                {photos.length === 0 ? (
+                  <p className="mt-3 text-[11px] text-slate-400">No photos attached — the lab only sees what's uploaded here.</p>
+                ) : (
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {photos.map((f) => (
+                      <div key={f.id} className="group relative aspect-square overflow-hidden rounded-lg bg-slate-200 ring-1 ring-slate-200">
+                        <img src={f.url || f.previewUrl} alt={f.name} className="h-full w-full object-cover" />
+                        {f.uploading && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50">
+                            <Loader2 size={18} className="animate-spin text-white" />
+                          </div>
+                        )}
+                        {f.error && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-rose-900/70 px-1 text-center">
+                            <AlertTriangle size={14} className="text-white" />
+                            <button type="button" onClick={() => retryPhoto(f)} className="flex items-center gap-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 hover:bg-white">
+                              <RotateCcw size={10} /> Retry
+                            </button>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(f.id)}
+                          className="absolute right-1 top-1 rounded-full bg-slate-900/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
+                          title="Remove"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

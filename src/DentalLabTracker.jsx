@@ -32,6 +32,8 @@ import {
   Check,
   UserCog,
   Camera,
+  Image as ImageIcon,
+  ScanLine,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES } from "./PrescriptionForm.jsx";
 import DeviceManagement from "./DeviceManagement.jsx";
@@ -361,7 +363,7 @@ function CaseRxDetails({ c }) {
         {row("Abutment", p.implantSystem ? `${p.abutmentType ?? ""} ${p.abutmentDiameter ?? ""}`.trim() : null)}
         {row("Deliver by", c.appointmentDate ? `${c.appointmentDate}${c.deliveryTime && c.deliveryTime !== "Anytime" ? ` · ${c.deliveryTime}` : ""}` : null)}
         {row("Included", includedSummary(p))}
-        {row("Files", p.files?.length ? `${p.files.length} attached` : null)}
+        {row("Scans", p.files?.filter((f) => f.kind === "scan").length ? `${p.files.filter((f) => f.kind === "scan").length} STL file(s)` : null)}
         {row("Patient ID", c.patientId !== "PT-NEW" ? c.patientId : null)}
         {row("Patient WhatsApp", c.patientPhone || null)}
       </div>
@@ -371,6 +373,38 @@ function CaseRxDetails({ c }) {
           {p.notes}
         </div>
       )}
+      <CaseRxPhotos files={p.files} />
+    </div>
+  );
+}
+
+/**
+ * Clinical/shade photos, shown as real thumbnails (not just a filename
+ * count) — this is the whole point: the lab should actually see what the
+ * dentist sent. Click a thumbnail to open the full-resolution image.
+ */
+function CaseRxPhotos({ files }) {
+  const photos = (files ?? []).filter((f) => f.kind === "photo" && f.url);
+  if (photos.length === 0) return null;
+  return (
+    <div className="mb-2 mt-1.5">
+      <span className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-400">
+        <ImageIcon size={12} /> Photos ({photos.length})
+      </span>
+      <div className="grid grid-cols-4 gap-1.5">
+        {photos.map((f, i) => (
+          <a
+            key={i}
+            href={f.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="aspect-square overflow-hidden rounded-lg bg-slate-100 ring-1 ring-inset ring-slate-200 transition hover:ring-2 hover:ring-blue-300"
+            title={f.name}
+          >
+            <img src={f.url} alt={f.name} className="h-full w-full object-cover" />
+          </a>
+        ))}
+      </div>
     </div>
   );
 }
@@ -774,6 +808,7 @@ export default function DentalLabTracker({ auth }) {
           onClose={() => setShowCaseModal(false)}
           onSave={addCase}
           labs={labs}
+          userId={auth.session?.user?.id}
         />
       )}
 
@@ -1383,6 +1418,11 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
               {c.prescription.vitaShade && c.prescription.vitaShade !== "N/A" ? c.prescription.vitaShade : "—"}
             </span>
           </span>
+          {c.prescription.files?.some((f) => f.kind === "photo" && f.url) && (
+            <span className="ml-auto flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-700">
+              <ImageIcon size={11} /> {c.prescription.files.filter((f) => f.kind === "photo" && f.url).length}
+            </span>
+          )}
         </div>
       )}
 

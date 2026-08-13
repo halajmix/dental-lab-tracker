@@ -411,6 +411,21 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
             </p>
             <p className="mt-1 text-slate-700">{rx?.notes || "No special instructions."}</p>
           </div>
+          {rx?.files?.some((f) => f.kind === "photo" && f.url) && (
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {rx.files
+                .filter((f) => f.kind === "photo" && f.url)
+                .map((f, i) => (
+                  <img
+                    key={i}
+                    src={f.url}
+                    crossOrigin="anonymous"
+                    alt={f.name}
+                    className="aspect-square w-full rounded-lg border border-slate-200 object-cover print:border-slate-300"
+                  />
+                ))}
+            </div>
+          )}
         </div>
 
         {/* signature */}

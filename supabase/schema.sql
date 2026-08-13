@@ -490,3 +490,29 @@ create trigger lab_device_sessions_guard
 /*  Phase 10 — onboarding collects clinic email                          */
 /* --------------------------------------------------------------------- */
 alter table clinics add column if not exists email text default '';
+
+/* --------------------------------------------------------------------- */
+/*  Phase 11 — real Rx photo attachments (clinical / shade photos)       */
+/*  Same pattern as the avatars bucket: one public bucket, each user can */
+/*  only write inside their own "<user id>/…" folder. The dentist        */
+/*  uploads while filling out the Rx form (before the case row exists),  */
+/*  so the path is "<uid>/<client-side temp id>/<filename>" rather than  */
+/*  keyed by case id; the resulting public URLs are then stored in the   */
+/*  case's prescription.files jsonb, so no additional table is needed —  */
+/*  read access for the lab side comes from the bucket being public.     */
+/* --------------------------------------------------------------------- */
+insert into storage.buckets (id, name, public)
+values ('case-photos', 'case-photos', true)
+on conflict (id) do nothing;
+
+drop policy if exists "case_photos_public_read" on storage.objects;
+create policy "case_photos_public_read" on storage.objects for select
+  using (bucket_id = 'case-photos');
+
+drop policy if exists "case_photos_owner_write" on storage.objects;
+create policy "case_photos_owner_write" on storage.objects for insert
+  with check (bucket_id = 'case-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "case_photos_owner_delete" on storage.objects;
+create policy "case_photos_owner_delete" on storage.objects for delete
+  using (bucket_id = 'case-photos' and (storage.foldername(name))[1] = auth.uid()::text);

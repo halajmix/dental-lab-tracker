@@ -196,6 +196,24 @@ export async function uploadAvatar(userId, file) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Rx photo attachments — real uploads (clinical / shade photos) so    */
+/*  the lab actually sees what the dentist sends, not just a filename.  */
+/*  Uploaded while the Rx form is open, before the case row exists, so  */
+/*  the path is keyed by a client-side temp id rather than a case id.   */
+/* ------------------------------------------------------------------ */
+
+export async function uploadCasePhoto(userId, groupId, file) {
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const stamp = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 6);
+  const path = `${userId}/${groupId}/${stamp}-${rand}.${ext}`;
+  const { error: uploadError } = await supabase.storage.from("case-photos").upload(path, file);
+  if (uploadError) throw uploadError;
+  const { data } = supabase.storage.from("case-photos").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Case notes — a small shared thread between the clinic and lab on    */
 /*  one case, separate from the lifecycle audit history.                */
 /* ------------------------------------------------------------------ */
