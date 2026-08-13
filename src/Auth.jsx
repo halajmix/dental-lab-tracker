@@ -688,6 +688,7 @@ export function AuthGate({ children }) {
         sessionId={station.sessionId}
         location={station.location}
         emailed={station.emailed}
+        reason={station.reason}
         onVerified={station.clear}
         onSignOut={auth.signOut}
       />

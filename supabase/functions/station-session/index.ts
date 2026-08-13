@@ -172,6 +172,34 @@ async function sendOtpEmail(
   }
 }
 
+/**
+ * Create an OTP challenge for a session and email it to the account owner.
+ * Shared by the new-device and network-change paths.
+ */
+async function issueChallenge(
+  admin: SupabaseClient,
+  email: string,
+  session: { id: string; session_name: string; device_label: string },
+  ip: string | null,
+  ua: string,
+): Promise<{ emailed: boolean; location: string }> {
+  const code = generateOtp();
+  await admin.from("device_otp_challenges").insert({
+    session_id: session.id,
+    code_hash: await sha256(code),
+  });
+
+  const location = ip ? await geoLookup(ip) : "Unknown location";
+  const emailed = await sendOtpEmail(email, code, {
+    ip: ip ?? "unknown",
+    location,
+    device: session.device_label || deviceLabel(ua),
+    when: new Date().toUTCString(),
+    sessionName: session.session_name,
+  });
+  return { emailed, location };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Handlers                                                           */
 /* ------------------------------------------------------------------ */
@@ -222,8 +250,10 @@ async function handleHeartbeat(
     );
   }
 
-  // First time we've seen this device: trust where it starts from. Locking
-  // out the very first sign-in would make the feature unusable.
+  // First time we've seen this device: challenge it, even from a trusted
+  // network. Every bench proves mailbox access exactly once; verify-otp
+  // then promotes it (and its network) to trusted. This means stolen
+  // credentials alone can never silently enroll a new device.
   if (!existing) {
     const { data: created, error } = await admin
       .from("lab_device_sessions")
@@ -238,23 +268,22 @@ async function handleHeartbeat(
         current_ip: ip,
         last_ip: ip,
         ip_subnet: subnet,
-        is_trusted: true,
-        status: "ACTIVE",
+        is_trusted: false,
+        status: "CHALLENGE_REQUIRED",
       })
       .select()
       .single();
     if (error) return json({ error: error.message }, 500);
 
-    if (ip && orgFilter.value) {
-      await admin.from("lab_trusted_ips").insert({
-        clinic_id: org.clinic_id,
-        lab_id: org.lab_id,
-        ip_address: ip,
-        cidr_subnet: subnet ?? ip,
-        label: "First seen",
-      });
-    }
-    return json({ status: "ACTIVE", sessionId: created.id, firstSeen: true });
+    const { emailed, location } = await issueChallenge(admin, email, created, ip, ua);
+    return json({
+      status: "CHALLENGE_REQUIRED",
+      sessionId: created.id,
+      firstSeen: true,
+      reason: "NEW_DEVICE",
+      emailed,
+      location,
+    });
   }
 
   const sameSubnet = !!subnet && subnet === existing.ip_subnet;
@@ -283,6 +312,30 @@ async function handleHeartbeat(
         .eq("ip_address", ip);
     }
 
+    // A still-challenged bench whose code expired unused would otherwise be
+    // stranded (its subnet is already stored, so no new anomaly ever fires).
+    // Re-issue only when no live challenge remains — a heartbeat every 15
+    // minutes must not turn into an email every 15 minutes.
+    if (existing.status === "CHALLENGE_REQUIRED") {
+      const { data: live } = await admin
+        .from("device_otp_challenges")
+        .select("id")
+        .eq("session_id", existing.id)
+        .is("consumed_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .limit(1);
+      if (!live?.length) {
+        const { emailed, location } = await issueChallenge(admin, email, existing, ip, ua);
+        return json({
+          status: "CHALLENGE_REQUIRED",
+          sessionId: existing.id,
+          reason: existing.is_trusted ? "NETWORK_CHANGE" : "NEW_DEVICE",
+          emailed,
+          location,
+        });
+      }
+    }
+
     return json({ status: existing.status, sessionId: existing.id });
   }
 
@@ -299,24 +352,12 @@ async function handleHeartbeat(
     })
     .eq("id", existing.id);
 
-  const code = generateOtp();
-  await admin.from("device_otp_challenges").insert({
-    session_id: existing.id,
-    code_hash: await sha256(code),
-  });
-
-  const location = ip ? await geoLookup(ip) : "Unknown location";
-  const emailed = await sendOtpEmail(email, code, {
-    ip: ip ?? "unknown",
-    location,
-    device: existing.device_label || deviceLabel(ua),
-    when: new Date().toUTCString(),
-    sessionName: existing.session_name,
-  });
+  const { emailed, location } = await issueChallenge(admin, email, existing, ip, ua);
 
   return json({
     status: "CHALLENGE_REQUIRED",
     sessionId: existing.id,
+    reason: "NETWORK_CHANGE",
     emailed,
     location,
     // Never return the code itself — it goes to the mailbox only.

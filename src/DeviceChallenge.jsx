@@ -15,7 +15,7 @@ import { verifyDeviceOtp } from "./lib/deviceSession.js";
 /*  and creates the audit trail, it is not a substitute for RLS.       */
 /* ------------------------------------------------------------------ */
 
-export default function DeviceChallenge({ sessionId, location, emailed, onVerified, onSignOut }) {
+export default function DeviceChallenge({ sessionId, location, emailed, reason, onVerified, onSignOut }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -44,10 +44,15 @@ export default function DeviceChallenge({ sessionId, location, emailed, onVerifi
             <ShieldAlert size={20} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-800">Verify this device</h2>
+            <h2 className="text-base font-bold text-slate-800">
+              {reason === "NEW_DEVICE" ? "Approve this new device" : "Verify this device"}
+            </h2>
             <p className="text-xs text-slate-500">
-              Signed in from an unrecognised network
-              {location && location !== "Unknown location" ? ` (${location})` : ""}.
+              {reason === "NEW_DEVICE"
+                ? "This device hasn't been used with this account before."
+                : "Signed in from an unrecognised network"}
+              {location && location !== "Unknown location" ? ` (${location})` : ""}
+              {reason === "NEW_DEVICE" ? "" : "."}
             </p>
           </div>
         </div>
