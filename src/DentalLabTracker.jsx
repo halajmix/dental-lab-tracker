@@ -33,6 +33,7 @@ import {
   UserCog,
   Camera,
   Image as ImageIcon,
+  History as HistoryIcon,
   ScanLine,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
@@ -828,6 +829,7 @@ export default function DentalLabTracker({ auth }) {
           <DentistDashboard
             labById={labById}
             cases={filteredDentistCases}
+            allCases={cases}
             countBase={searchedDentistCases}
             totalCases={cases.length}
             statusFilter={statusFilter}
@@ -844,6 +846,7 @@ export default function DentalLabTracker({ auth }) {
           <LabDashboard
             lab={lab}
             queue={labQueue}
+            clinicsById={clinicsById}
             onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
             onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
             onOpenCase={setDrawerCaseId}
@@ -1014,6 +1017,7 @@ function FilterPill({ active, onClick, label, count, tone }) {
 function DentistDashboard({
   labById,
   cases,
+  allCases,
   countBase,
   totalCases,
   statusFilter,
@@ -1175,6 +1179,81 @@ function DentistDashboard({
           </table>
         </div>
       </div>
+
+      {/* Every case this clinic has ever sent, unfiltered by the pill/search
+          above — compact, log-style, click a row for the full case drawer. */}
+      <CaseLogTable
+        cases={allCases}
+        otherPartyLabel="Lab"
+        otherPartyName={(c) => labById[c.labId]?.name}
+        onOpenCase={onOpenCase}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Case log — a dense, scrollable, click-for-details table of EVERY case  */
+/*  (unfiltered by whatever tab/pill/search state the dashboard above it   */
+/*  is in), shared by both the lab and dentist dashboards. Each row opens  */
+/*  the same CaseDrawer the rest of the app uses.                          */
+/* ------------------------------------------------------------------ */
+
+const fmtLogDate = (iso) => {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "—";
+  }
+};
+
+// Most recent thing that happened on a case — falls back to created date for
+// a case with no history entries yet (shouldn't normally happen, but cheap
+// to guard).
+const lastActivityAt = (c) => (c.history?.length ? c.history[c.history.length - 1].at : c.createdDate);
+
+function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
+  const sorted = [...cases].sort((a, b) => new Date(lastActivityAt(b)) - new Date(lastActivityAt(a)));
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+        <HistoryIcon size={13} className="text-slate-400" />
+        <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">All Cases ({cases.length})</h4>
+      </div>
+      {cases.length === 0 ? (
+        <p className="px-4 py-6 text-center text-xs text-slate-400">No cases yet.</p>
+      ) : (
+        <div className="max-h-[420px] overflow-y-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-4 py-1.5">Case</th>
+                <th className="px-4 py-1.5">Patient</th>
+                <th className="px-4 py-1.5">{otherPartyLabel}</th>
+                <th className="px-4 py-1.5">Stage</th>
+                <th className="px-4 py-1.5">Last activity</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {sorted.map((c) => (
+                <tr
+                  key={c.id}
+                  onClick={() => onOpenCase(c.id)}
+                  className="cursor-pointer transition hover:bg-slate-50"
+                  title="Open case details"
+                >
+                  <td className="whitespace-nowrap px-4 py-2 font-mono text-[11px] text-slate-500">{c.id}</td>
+                  <td className="px-4 py-2 font-semibold text-slate-800">{c.patientName}</td>
+                  <td className="px-4 py-2 text-slate-600">{otherPartyName(c) ?? "—"}</td>
+                  <td className="whitespace-nowrap px-4 py-2"><StatusPill caseObj={c} /></td>
+                  <td className="whitespace-nowrap px-4 py-2 text-slate-400">{fmtLogDate(lastActivityAt(c))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1192,7 +1271,7 @@ const QUEUE_TAB_DEFS = [
   { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
 ];
 
-function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onExportCsv }) {
+function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onExportCsv }) {
   const [queueTab, setQueueTab] = useState("incoming");
   // Brief confirmation after a stage change moves a case out of the tab
   // you're looking at — without this, advancing the only case in "Incoming"
@@ -1305,6 +1384,15 @@ function LabDashboard({ lab, queue, onAdvance, onRevert, onOpenCase, onLogRemake
           ))}
         </div>
       )}
+
+      {/* Every case this lab has ever had, unfiltered by the tab above —
+          compact, log-style, click a row for the full case drawer. */}
+      <CaseLogTable
+        cases={queue}
+        otherPartyLabel="Clinic"
+        otherPartyName={(c) => clinicsById?.[c.clinicId]?.name}
+        onOpenCase={onOpenCase}
+      />
 
       {/* Toast: confirms a stage change moved the case to a different tab */}
       {toast && (
