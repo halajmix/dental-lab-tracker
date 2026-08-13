@@ -3,18 +3,15 @@ import { supabase } from "./supabaseClient.js";
 /* ------------------------------------------------------------------ */
 /*  Lab Station device session client.                                 */
 /*                                                                     */
-/*  Talks to the station-session Edge Function, which is the only part */
-/*  of this stack that can see a real client IP (the app itself is a   */
-/*  static SPA). The browser never sends its own IP — it would be      */
-/*  trivially forgeable and is read from proxy headers server-side.    */
+/*  The heartbeat/OTP-challenge calls into the station-session Edge    */
+/*  Function (deployed as "super-processor") were removed 2026-08-13   */
+/*  per explicit user request — see the comment above AuthGate in      */
+/*  Auth.jsx for why. What's left here is plain RLS-scoped table       */
+/*  access for the Settings → "Signed-in devices" viewer, which still  */
+/*  works against whatever rows already exist in lab_device_sessions.  */
 /* ------------------------------------------------------------------ */
 
 const FINGERPRINT_KEY = "lab_station_device_id";
-
-// The station-session code was deployed via the dashboard editor, which kept
-// its auto-generated name. Supabase functions can't be renamed, so this is the
-// deployed slug; if it's ever redeployed as "station-session", update here.
-const FUNCTION_NAME = "super-processor";
 
 /**
  * Stable identifier for "this browser profile on this device".
@@ -38,44 +35,6 @@ export function getDeviceFingerprint() {
     // feature degrades instead of throwing.
     return `ephemeral-${crypto.randomUUID()}`;
   }
-}
-
-async function callFunction(action, payload = {}) {
-  const { data, error } = await supabase.functions.invoke(FUNCTION_NAME, {
-    body: { action, fingerprint: getDeviceFingerprint(), ...payload },
-  });
-  if (error) {
-    // supabase-js wraps non-2xx as FunctionsHttpError with the body attached.
-    let detail = error.message;
-    try {
-      const parsed = await error.context?.json?.();
-      if (parsed?.error) detail = parsed.error;
-    } catch {
-      /* keep the generic message */
-    }
-    throw new Error(detail);
-  }
-  return data;
-}
-
-/**
- * Register/refresh this device's session and run the server-side IP audit.
- * Returns { status: "ACTIVE" | "CHALLENGE_REQUIRED" | "REVOKED", sessionId }.
- *
- * Never throws into the caller's critical path: a heartbeat failure (offline
- * bench, function cold start) must not block a technician from working.
- */
-export async function heartbeat(sessionName) {
-  try {
-    return await callFunction("heartbeat", sessionName ? { sessionName } : {});
-  } catch (err) {
-    console.warn("Device heartbeat failed (non-fatal):", err.message);
-    return null;
-  }
-}
-
-export function verifyDeviceOtp(sessionId, code) {
-  return callFunction("verify-otp", { sessionId, code });
 }
 
 /* ------------------------------------------------------------------ */

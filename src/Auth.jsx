@@ -1,9 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { Mail, Lock, LogIn, UserPlus, Stethoscope, Building2, Loader2, ArrowLeft, CheckCircle2, KeyRound } from "lucide-react";
 import { supabase } from "./lib/supabaseClient.js";
 import { useAuth } from "./lib/useAuth.js";
-import { heartbeat } from "./lib/deviceSession.js";
-import DeviceChallenge from "./DeviceChallenge.jsx";
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
@@ -637,67 +635,24 @@ function Onboarding({ session, onDone }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Lab Station device session                                          */
-/* ------------------------------------------------------------------ */
-
-const HEARTBEAT_MS = 15 * 60 * 1000;
-
-/**
- * Registers this bench with the station-session Edge Function once a real
- * profile session exists, then re-checks periodically and whenever the
- * device comes back online (an IP change while asleep is exactly the case
- * the audit exists to catch).
- *
- * Fails open by design: if the function is unreachable the technician keeps
- * working. This is an audit and step-up layer on top of Supabase auth, not
- * the thing standing between an anonymous visitor and the data — that is
- * still RLS.
- */
-function useStationSession(session) {
-  const [state, setState] = useState({ status: null, sessionId: null });
-
-  const ping = useCallback(async () => {
-    const result = await heartbeat();
-    if (result) setState(result);
-  }, []);
-
-  // Keyed on the user id, NOT the `session` object itself — Supabase hands
-  // out a brand-new session object on every auth event, including its
-  // automatic token refresh (which also fires on tab focus/regain, so very
-  // often on a phone: lock screen, switch apps, back to the browser). Keying
-  // on the whole object re-ran this effect — and its immediate ping() — on
-  // every one of those, not just every HEARTBEAT_MS as intended. On cellular
-  // data each extra heartbeat can look like a genuine network change, which
-  // fires a real OTP email; enough of those in a short window exhausts
-  // Resend's send-rate limit. Same object-identity bug class already fixed
-  // for LabSettingsDrawer/ProfileSettingsModal — just not caught here.
-  const userId = session?.user?.id ?? null;
-
-  useEffect(() => {
-    if (!userId) {
-      setState({ status: null, sessionId: null });
-      return;
-    }
-    ping();
-    const interval = setInterval(ping, HEARTBEAT_MS);
-    window.addEventListener("online", ping);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("online", ping);
-    };
-  }, [userId, ping]);
-
-  const clear = useCallback(() => setState((s) => ({ ...s, status: "ACTIVE" })), []);
-  return { ...state, clear };
-}
-
-/* ------------------------------------------------------------------ */
 /*  Top-level gate                                                     */
+/*                                                                     */
+/*  Used to also gate on a Lab Station device-session heartbeat + OTP  */
+/*  step-up (station-session Edge Function) — removed 2026-08-13 per   */
+/*  explicit user request: the heartbeat was firing far more often     */
+/*  than intended (see Auth.jsx git history / project memory) and, on  */
+/*  cellular data where the IP legitimately rotates, that meant real   */
+/*  lab technicians kept hitting real OTP-email step-ups as a matter   */
+/*  of normal phone use — too much friction for what it protected      */
+/*  (it was always an audit/step-up layer on top of RLS, never the     */
+/*  actual security boundary). The `lab_device_sessions` table, the    */
+/*  Settings → "Signed-in devices" viewer (DeviceManagement.jsx), and  */
+/*  the Edge Function itself are untouched — only the client no longer */
+/*  calls the heartbeat or blocks on its result.                       */
 /* ------------------------------------------------------------------ */
 
 export function AuthGate({ children }) {
   const auth = useAuth();
-  const station = useStationSession(auth.profile ? auth.session : null);
 
   if (auth.loading || auth.session === undefined) {
     return (
@@ -724,40 +679,6 @@ export function AuthGate({ children }) {
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <Loader2 size={24} className="animate-spin text-blue-500" />
       </div>
-    );
-  }
-
-  // Bench signed in from an unrecognised network — gate the app behind the
-  // emailed step-up code before any patient data renders.
-  if (station.status === "CHALLENGE_REQUIRED") {
-    return (
-      <DeviceChallenge
-        sessionId={station.sessionId}
-        location={station.location}
-        emailed={station.emailed}
-        reason={station.reason}
-        onVerified={station.clear}
-        onSignOut={auth.signOut}
-      />
-    );
-  }
-
-  if (station.status === "REVOKED") {
-    return (
-      <Shell>
-        <div className="py-2 text-center">
-          <h2 className="mb-1 text-lg font-bold text-slate-800">Device revoked</h2>
-          <p className="mb-5 text-sm text-slate-500">
-            This bench was signed out by an administrator. Sign in again to re-register it.
-          </p>
-          <button
-            onClick={auth.signOut}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
-          >
-            Sign out
-          </button>
-        </div>
-      </Shell>
     );
   }
 
