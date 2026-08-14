@@ -323,9 +323,16 @@ const CHART_W = colX(15) + TOOTH_W + MARGIN_X;
 // tapping a tooth just uses the role implied by the restoration's category)
 // for everything else, since the category already says what a tooth is.
 const DEFAULT_TOOTH_MODES = [
-  { k: "unit", txt: "Unit / Crown", on: "bg-blue-600 text-white" },
-  { k: "veneer", txt: "Veneer", on: "bg-teal-600 text-white" },
-  { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white" },
+  { k: "unit", txt: "Unit / Crown", on: "bg-blue-600 text-white", swatch: "bg-blue-600" },
+  { k: "veneer", txt: "Veneer", on: "bg-teal-600 text-white", swatch: "bg-teal-600" },
+  { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white", swatch: "border border-dashed border-amber-600 bg-amber-500" },
+];
+
+// Appliance mode (denture / splint / "refer to notes") — no Veneer, that's
+// a fixed restoration and can't apply to a removable appliance.
+const APPLIANCE_TOOTH_MODES = [
+  { k: "unit", txt: "Tooth", on: "bg-blue-600 text-white", swatch: "bg-blue-600" },
+  { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white", swatch: "border border-dashed border-amber-600 bg-amber-500" },
 ];
 
 function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onClear, onGroup, disabled, modes = DEFAULT_TOOTH_MODES }) {
@@ -357,6 +364,12 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
 
   const upperAllSelected = UPPER_ROW.every((u) => isSel(u));
   const lowerAllSelected = LOWER_ROW.every((u) => isSel(u));
+
+  // When the toolbar is hidden (role implied by the restoration's category)
+  // there are no `modes` to describe, so explain only the colours actually
+  // on the chart right now.
+  const rolesPresent = new Set(Object.values(selection));
+  const legendModes = (modes.length ? modes : DEFAULT_TOOTH_MODES.filter((m) => rolesPresent.has(m.k))).filter((m) => m.swatch);
 
   return (
     <div>
@@ -485,9 +498,13 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
 
       {/* Legend */}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
-        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-blue-600" /> Unit / Crown</span>
-        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-teal-600" /> Veneer</span>
-        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-amber-600 bg-amber-500" /> Pontic</span>
+        {/* Derived from `modes` so the legend never advertises a marking the
+            toolbar doesn't actually offer (e.g. Veneer in appliance mode). */}
+        {legendModes.map((m) => (
+          <span key={m.k} className="flex items-center gap-1">
+            <span className={`inline-block h-3 w-3 rounded-sm ${m.swatch}`} /> {m.txt}
+          </span>
+        ))}
         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm bg-blue-500/20" /> Bridge span</span>
         {disabled?.size > 0 && (
           <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-slate-400 bg-slate-200" /> Already in another restoration</span>
@@ -766,10 +783,15 @@ function RestorationFields({ draft, onChange, errors }) {
 }
 
 /** Compact display of one confirmed restoration in the cart list. */
-function RestorationCard({ r, notation, onEdit, onDelete }) {
+function RestorationCard({ r, notation, onEdit, onDelete, justAdded }) {
   const isImplant = IMPLANT_CATEGORIES.includes(r.category);
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={`rounded-xl border bg-white p-3 shadow-sm transition ${justAdded ? "border-emerald-400 ring-2 ring-emerald-200" : "border-slate-200"}`}>
+      {justAdded && (
+        <p className="mb-1.5 flex items-center gap-1 text-[11px] font-bold text-emerald-600">
+          <Check size={12} strokeWidth={3} /> Added to case
+        </p>
+      )}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-bold text-slate-800">{r.category}</p>
@@ -990,6 +1012,17 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     draftIsImplant && !draft.abutmentType && "abutmentType",
   ].filter(Boolean);
   const draftValid = draftErrors.length === 0;
+  // An open editor with teeth already picked is unsaved work — it's lost
+  // silently unless "Add to Case" is clicked, which is easy to miss since
+  // the chart selection looks like progress on its own.
+  const draftDirty = draftOpen && draftTeeth.length > 0;
+  // Brief green confirmation on the card that was just added/updated.
+  const [justAddedId, setJustAddedId] = useState(null);
+  useEffect(() => {
+    if (!justAddedId) return;
+    const t = setTimeout(() => setJustAddedId(null), 2200);
+    return () => clearTimeout(t);
+  }, [justAddedId]);
 
   const openAddRestoration = () => {
     setDraft(emptyDraft());
@@ -1033,6 +1066,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
       const exists = prev.some((r) => r.id === entry.id);
       return exists ? prev.map((r) => (r.id === entry.id ? entry : r)) : [...prev, entry];
     });
+    setJustAddedId(entry.id);
     setDraftOpen(false);
     setDraftTouched(false);
   };
@@ -1155,6 +1189,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     patientName: !patientName.trim(),
     labId: !labId,
     restorations: caseMode === "restorations" && restorations.length === 0,
+    unsavedRestoration: draftDirty,
     teeth: caseMode === "appliance" && selectedTeeth.length === 0,
     material: caseMode === "appliance" && !isSplint && !material,
     implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
@@ -1171,6 +1206,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     teeth: "At least one tooth on the chart",
     labId: "Target lab",
     restorations: "At least one restoration",
+    unsavedRestoration: 'Click "Add to Case" to save the restoration you started',
     material: "Material",
     implantSystem: "Implant brand",
     abutmentType: "Abutment size",
@@ -1258,7 +1294,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
   /* ---------------- per-step status for the accordion ---------------- */
   const stepErrors = {
     1: ["patientName", "labId"],
-    2: ["restorations", "teeth", "material", "implantSystem", "abutmentType"],
+    2: ["restorations", "unsavedRestoration", "teeth", "material", "implantSystem", "abutmentType"],
     3: ["insertionDate"],
   };
   const stepInvalid = (n) => stepErrors[n].some((k) => errors[k]);
@@ -1443,6 +1479,12 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                   setCaseMode("appliance");
                   setDraftOpen(false);
                   if (!APPLIANCE_CATEGORIES.includes(category)) onCategoryChange(APPLIANCE_CATEGORIES[0]);
+                  // Veneer isn't offered here, so demote any tooth already
+                  // marked as one rather than leaving an unreachable state.
+                  if (mode === "veneer") setMode("unit");
+                  setSelection((prev) =>
+                    Object.fromEntries(Object.entries(prev).map(([u, role]) => [u, role === "veneer" ? "unit" : role]))
+                  );
                 }}
                 className={`px-3.5 py-2 text-xs font-semibold transition ${caseMode === "appliance" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
               >
@@ -1476,7 +1518,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               {restorations.length > 0 && (
                 <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {restorations.map((r) => (
-                    <RestorationCard key={r.id} r={r} notation={notation} onEdit={() => openEditRestoration(r)} onDelete={() => deleteRestoration(r.id)} />
+                    <RestorationCard key={r.id} r={r} notation={notation} justAdded={r.id === justAddedId} onEdit={() => openEditRestoration(r)} onDelete={() => deleteRestoration(r.id)} />
                   ))}
                 </div>
               )}
@@ -1524,8 +1566,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                     modes={
                       BRIDGE_CATEGORIES.includes(draft.category)
                         ? [
-                            { k: "unit", txt: "Abutment", on: "bg-blue-600 text-white" },
-                            { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white" },
+                            { k: "unit", txt: "Abutment", on: "bg-blue-600 text-white", swatch: "bg-blue-600" },
+                            { k: "pontic", txt: "Pontic", on: "bg-amber-500 text-white", swatch: "border border-dashed border-amber-600 bg-amber-500" },
                           ]
                         : []
                     }
@@ -1542,8 +1584,21 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
 
                   {draftTeeth.length > 0 && <RestorationFields draft={draft} onChange={updateDraft} errors={draftTouched ? draftErrors : []} />}
 
-                  <div className="mt-4 flex justify-end gap-2">
-                    <button type="button" onClick={() => setDraftOpen(false)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                  {/* Selecting teeth looks like progress, but nothing is
+                      stored until this button is pressed — so say so loudly
+                      the moment there's something to lose. */}
+                  {draftDirty && (
+                    <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200">
+                      <AlertTriangle size={13} className="mt-px shrink-0" />
+                      <span>
+                        Not saved yet — {draftTeeth.length} tooth{draftTeeth.length === 1 ? "" : "/teeth"} selected.
+                        Press <b>{draft.id ? "Save Changes" : "Add to Case"}</b> below or this restoration is discarded.
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <button type="button" onClick={() => setDraftOpen(false)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:order-1 sm:py-1.5">
                       Cancel
                     </button>
                     <button
@@ -1552,7 +1607,11 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                         setDraftTouched(true);
                         confirmDraft();
                       }}
-                      className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                      className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white sm:order-2 sm:py-1.5 ${
+                        draftDirty
+                          ? "animate-pulse bg-rose-600 ring-2 ring-rose-300 hover:animate-none hover:bg-rose-700"
+                          : "bg-blue-600 hover:bg-blue-700"
+                      }`}
                     >
                       <Check size={13} /> {draft.id ? "Save Changes" : "Add to Case"}
                     </button>
@@ -1574,7 +1633,19 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                     ))}
                   </div>
                 </div>
-                <ToothChart notation={notation} selection={selection} mode={mode} setMode={setMode} onToggle={toggleTooth} onArch={toggleArch} onClear={() => setSelection({})} onGroup={toggleGroup} />
+                {/* No "Veneer" marking here — a veneer is a fixed
+                    restoration, meaningless on a denture or splint. */}
+                <ToothChart
+                  notation={notation}
+                  selection={selection}
+                  mode={mode}
+                  setMode={setMode}
+                  onToggle={toggleTooth}
+                  onArch={toggleArch}
+                  onClear={() => setSelection({})}
+                  onGroup={toggleGroup}
+                  modes={APPLIANCE_TOOTH_MODES}
+                />
                 <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${err("teeth") ? "bg-rose-50 text-rose-600" : "bg-slate-50 text-slate-600"}`}>
                   {selectedTeeth.length === 0 ? (
                     err("teeth") ? "Select at least one tooth." : "No teeth selected yet."
