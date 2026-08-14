@@ -9,7 +9,6 @@ import {
   Clock,
   FlaskConical,
   FileText,
-  Zap,
   AlertTriangle,
   CheckCheck,
   BarChart3,
@@ -379,11 +378,6 @@ function CaseRxDetails({ c }) {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-2">
-      {p.rush && (
-        <div className="my-1.5 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-100">
-          <Zap size={12} /> EXPRESS ORDER
-        </div>
-      )}
       {hasCart ? (
         <div className="space-y-2.5 py-1.5">
           {restorations.map((r, i) => (
@@ -1216,11 +1210,6 @@ function DentistDashboard({
                   <td className="px-4 py-3.5 align-top">
                     <div className="flex flex-wrap items-baseline gap-x-1.5">
                       <span className="font-semibold text-slate-800">{c.patientName}</span>
-                      {c.prescription?.rush && (
-                        <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
-                          <Zap size={9} /> EXPRESS
-                        </span>
-                      )}
                       {c.remake && (
                         <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
                           <RefreshCcw size={9} /> Remake
@@ -1745,13 +1734,6 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
               <ImageIcon size={11} /> {c.prescription.files.filter((f) => f.kind === "photo" && f.url).length}
             </span>
           )}
-        </div>
-      )}
-
-      {c.prescription?.rush && (
-        <div className="mb-2.5 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-100">
-          <Zap size={12} /> EXPRESS · deliver {c.appointmentDate || "—"}
-          {c.deliveryTime && c.deliveryTime !== "Anytime" && ` · ${c.deliveryTime}`}
         </div>
       )}
 

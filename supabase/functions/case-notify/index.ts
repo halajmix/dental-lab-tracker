@@ -83,7 +83,6 @@ function caseSummaryRows(record: Record<string, unknown>): string {
       ${row("Restoration", rx.category)}
       ${row("Material", rx.material && rx.material !== "Refer to notes" ? rx.material : "")}
       ${row("Deliver by", record.appointment_date)}
-      ${rx.rush ? row("Priority", "EXPRESS") : ""}
     </table>`;
 }
 

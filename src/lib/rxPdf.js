@@ -27,7 +27,6 @@ const LINE = [226, 232, 240];
 const UNIT = [30, 64, 175];
 const VENEER = [15, 118, 110];
 const PONTIC = [180, 83, 9];
-const AMBER = [180, 83, 9];
 
 // jsPDF's standard fonts encode WinAnsi (Latin-1 + common typographic
 // marks). Anything outside that — Arabic in particular — must go to the
@@ -222,10 +221,6 @@ async function vectorPdf(caseObj, clinic, lab, photos) {
   /* case meta strip */
   font(8.5, "normal", MUTED);
   pdf.text(`Case ${caseObj.id}`, M, y, { baseline: "top" });
-  if (rx.rush) {
-    font(8.5, "bold", AMBER);
-    pdf.text("EXPRESS ORDER", A4W - M, y, { baseline: "top", align: "right" });
-  }
   y += 20;
 
   /* two columns: lab | patient */

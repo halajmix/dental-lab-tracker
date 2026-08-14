@@ -29,7 +29,6 @@ export function buildCaseContext(caseObj) {
       if (r.implantSystem) line += ` · Implant: ${r.implantSystem} · ${r.abutmentType}`;
       lines.push(line);
     });
-    if (rx.rush) lines.push(`Express order`);
   } else if (rx) {
     lines.push(`Restoration: ${rx.category}${rx.material ? ` — ${rx.material}` : ""}`);
     if (toothSummary(rx)) lines.push(`Teeth: ${toothSummary(rx)}`);
@@ -38,7 +37,6 @@ export function buildCaseContext(caseObj) {
     if (rx.implantSystem) {
       lines.push(`Implant: ${rx.implantSystem} · ${rx.abutmentType}`);
     }
-    if (rx.rush) lines.push(`Express order`);
   }
   lines.push(`Status: ${stage?.label ?? "—"} (${stage?.pct ?? 0}%)`);
   lines.push(

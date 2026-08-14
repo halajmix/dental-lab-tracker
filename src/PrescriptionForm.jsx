@@ -7,7 +7,6 @@ import {
   Upload,
   Image as ImageIcon,
   Trash2,
-  Zap,
   Calendar,
   Building2,
   Layers,
@@ -890,7 +889,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
   // different schemes for the same diameter) — the dentist enters the
   // actual code for their implant, rather than the app guessing wrong.
   const [abutmentColor, setAbutmentColor] = useState("");
-  const [rush, setRush] = useState(false);
   const [insertionDate, setInsertionDate] = useState("");
 
   const [scans, setScans] = useState([]);
@@ -1089,7 +1087,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
         ? Math.max(...restorations.map((r) => procTat(r.category)))
         : lab?.tat ?? 0
       : procTat(category);
-  const effTat = rush ? Math.max(1, Math.ceil(baseTat / 2)) : baseTat;
+  const effTat = baseTat;
   const today = new Date();
   const estReady = lab ? addDays(today, effTat) : null;
   const insufficientTime =
@@ -1224,7 +1222,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setCaseMode("restorations"); setRestorations([]); setDraftOpen(false); setDraftTouched(false); setDraft(emptyDraft());
-    setLabId(""); setRush(false); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
+    setLabId(""); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
     setImplantSystem(""); setAbutmentType(""); setAbutmentColor("");
     setScans([]);
     photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
@@ -1241,7 +1239,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
       notation,
       included,
       includedOther: includedOther.trim(),
-      rush,
       baseTat,
       effTat,
       estReady: estReady ? iso(estReady) : null,
@@ -1316,7 +1313,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     3: [
       insertionDate || "No date",
       deliveryTime !== "Anytime" ? deliveryTime : null,
-      rush ? "Express" : null,
       scans.length + photos.length > 0 ? `${scans.length + photos.length} file(s)` : null,
     ]
       .filter(Boolean)
@@ -1747,13 +1743,36 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
           <section>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Deliver to Clinic on" required>
-                <input
-                  type="date"
-                  required
-                  className={`${inputCls} ${err("insertionDate") ? "border-rose-400 ring-rose-100" : ""}`}
-                  value={insertionDate}
-                  onChange={(e) => setInsertionDate(e.target.value)}
-                />
+                {/* iOS shows no hint text inside an empty date input (and the
+                    appearance reset removed even the grey dd/mm/yyyy), so an
+                    empty field read as a weird blank bar that was easy to
+                    miss entirely. While empty: blue-highlighted with an
+                    explicit "tap to pick" prompt overlaid; the overlay hides
+                    on focus so desktop keyboard entry stays visible. */}
+                <div className="relative">
+                  <input
+                    type="date"
+                    required
+                    className={`peer ${inputCls} min-h-[42px] ${
+                      err("insertionDate")
+                        ? "border-rose-400 ring-rose-100"
+                        : !insertionDate
+                        ? "border-blue-400 bg-blue-50/60 ring-2 ring-blue-100"
+                        : ""
+                    }`}
+                    value={insertionDate}
+                    onChange={(e) => setInsertionDate(e.target.value)}
+                  />
+                  {!insertionDate && (
+                    <span
+                      className={`pointer-events-none absolute inset-0 flex items-center gap-1.5 rounded-lg px-3 text-base font-medium peer-focus:hidden sm:text-sm ${
+                        err("insertionDate") ? "bg-rose-50 text-rose-600" : "bg-blue-50 text-blue-600"
+                      }`}
+                    >
+                      <Calendar size={15} /> Tap to pick a delivery date
+                    </span>
+                  )}
+                </div>
               </Field>
               <Field label="Preferred Delivery Time">
                 <select className={inputCls} value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)}>
@@ -1762,25 +1781,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                   ))}
                 </select>
               </Field>
-              <div>
-                <span className="mb-1 flex items-center gap-1 text-xs font-medium text-slate-600">Express</span>
-                <button
-                  type="button"
-                  onClick={() => setRush((r) => !r)}
-                  className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                    rush ? "border-amber-400 bg-amber-50 text-amber-700" : "border-slate-300 bg-white text-slate-500"
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Zap size={15} className={rush ? "text-amber-500" : "text-slate-400"} />
-                    {rush ? "Express" : "Standard"}
-                  </span>
-                  <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${rush ? "bg-amber-500" : "bg-slate-300"}`}>
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${rush ? "translate-x-4" : "translate-x-0.5"}`} />
-                  </span>
-                </button>
-                {rush && <p className="mt-1 text-[11px] text-amber-600">Shortens the lab's standard turnaround for this case.</p>}
-              </div>
             </div>
 
             {/* TAT + schedule-check summary cards */}
@@ -1788,8 +1788,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500"><Clock size={12} /> Estimated Turnaround</p>
                 <p className="mt-0.5 text-lg font-bold text-slate-800">
-                  {effTat} day{effTat !== 1 ? "s" : ""}{" "}
-                  {rush && baseTat !== effTat && <span className="text-xs font-medium text-amber-600 line-through decoration-slate-300">{baseTat}d</span>}
+                  {effTat} day{effTat !== 1 ? "s" : ""}
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -1929,11 +1928,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               </>
             )}
             <span className="ml-auto flex shrink-0 items-center gap-3">
-              {rush && (
-                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-700">
-                  <Zap size={10} /> EXPRESS
-                </span>
-              )}
               <span className={`flex items-center gap-1 font-semibold ${insufficientTime ? "text-rose-600" : "text-slate-700"}`}>
                 <Calendar size={12} className="text-slate-400" />
                 Ready {estReady ? iso(estReady) : "—"}
