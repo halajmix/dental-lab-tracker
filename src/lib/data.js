@@ -40,6 +40,9 @@ export const caseFromRow = (r) => ({
   // The lab's own internal billing/job reference — set by the lab, never
   // the dentist. Defaults to "" until the lab fills it in.
   invoiceNumber: r.invoice_number ?? "",
+  // Full timestamp of when the case was submitted (created_date above is
+  // date-only) — drives the dentist table's "Sent to Lab" column.
+  createdAt: r.created_at ?? null,
 });
 
 export const clinicFromRow = (r) => ({

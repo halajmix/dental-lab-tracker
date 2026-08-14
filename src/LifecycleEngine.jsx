@@ -96,14 +96,18 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 export function StatusPill({ caseObj }) {
   const idx = caseObj.stageIndex;
   const s = STAGES[idx];
-  const palette =
-    idx === LAST_STAGE
-      ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
-      : idx === 0
-      ? "bg-sky-100 text-sky-700 ring-sky-200"
-      : "bg-blue-100 text-blue-700 ring-blue-200";
+  // Work Complete and Clinic Received both read as "done" milestones —
+  // green, with a tick so completion is visible at a glance even where
+  // colour alone wouldn't carry it.
+  const done = idx >= STAGE_INDEX.WORK_COMPLETE;
+  const palette = done
+    ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
+    : idx === 0
+    ? "bg-sky-100 text-sky-700 ring-sky-200"
+    : "bg-blue-100 text-blue-700 ring-blue-200";
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${palette}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${palette}`}>
+      {done && <CheckCircle2 size={12} className="shrink-0" />}
       {s.label}
     </span>
   );

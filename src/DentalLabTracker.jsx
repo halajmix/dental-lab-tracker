@@ -23,6 +23,7 @@ import {
   CircleUser,
   ChevronDown,
   ChevronRight,
+  ArrowRight,
   MoreVertical,
   Plus,
   Eye,
@@ -1104,11 +1105,6 @@ function FilterPill({ active, onClick, label, count, tone }) {
   );
 }
 
-// Case ids are "C-" + a base36 timestamp + 2 random chars — long and mostly
-// noise. The tail is the distinguishing part, so that's what's shown; the
-// full id stays available on hover/title for cross-referencing with the lab.
-const shortCaseId = (id) => (id?.length > 8 ? `…${id.slice(-6)}` : id ?? "—");
-
 // Clinics and labs both carry governorate/wilayat now; `address` predates
 // those and is still empty for every org created through the app, so fall
 // back to it only if it was somehow filled in.
@@ -1194,10 +1190,9 @@ function DentistDashboard({
           <table className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 font-semibold">Case</th>
+                <th className="px-4 py-3 font-semibold">Sent to Lab</th>
                 <th className="px-4 py-3 font-semibold">Patient Name</th>
-                <th className="px-4 py-3 font-semibold">Clinic</th>
-                <th className="px-4 py-3 font-semibold">Lab</th>
+                <th className="px-4 py-3 font-semibold">Clinic → Lab</th>
                 <th className="px-4 py-3 font-semibold">Appt Date</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
@@ -1206,22 +1201,17 @@ function DentistDashboard({
             <tbody className="divide-y divide-slate-100">
               {cases.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
                     No cases match the current filters.
                   </td>
                 </tr>
               )}
               {cases.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50/60">
-                  <td className="px-4 py-3.5 align-top font-mono text-xs font-semibold text-slate-700" title={c.id}>
-                    {shortCaseId(c.id)}
-                    {c.remake && (
-                      <div className="mt-1">
-                        <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
-                          <RefreshCcw size={9} /> Remake
-                        </span>
-                      </div>
-                    )}
+                  {/* Case id lives in the details drawer only — the full id is
+                      still on this cell's tooltip for quick cross-reference. */}
+                  <td className="whitespace-nowrap px-4 py-3.5 align-top text-slate-600" title={`Case ${c.id}`}>
+                    {fmtLogDate(c.createdAt ?? c.history?.[0]?.at ?? c.createdDate)}
                   </td>
                   <td className="px-4 py-3.5 align-top">
                     <div className="flex flex-wrap items-baseline gap-x-1.5">
@@ -1229,6 +1219,11 @@ function DentistDashboard({
                       {c.prescription?.rush && (
                         <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
                           <Zap size={9} /> EXPRESS
+                        </span>
+                      )}
+                      {c.remake && (
+                        <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                          <RefreshCcw size={9} /> Remake
                         </span>
                       )}
                     </div>
@@ -1240,17 +1235,25 @@ function DentistDashboard({
                       c.prescription?.category && <div className="mt-0.5 text-[11px] text-slate-400">{c.prescription.category}</div>
                     )}
                   </td>
+                  {/* One column, not two: the green arrow makes the direction
+                      of the work explicit and removes the wide dead gap the
+                      separate Clinic / Lab columns used to leave. */}
                   <td className="px-4 py-3.5 align-top">
-                    <div className="text-slate-700">{clinicsById?.[c.clinicId]?.name ?? "—"}</div>
-                    {orgLocation(clinicsById?.[c.clinicId]) && (
-                      <div className="mt-0.5 text-[11px] text-slate-400">{orgLocation(clinicsById[c.clinicId])}</div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5 align-top">
-                    <div className="text-slate-700">{labById[c.labId]?.name ?? "—"}</div>
-                    {orgLocation(labById[c.labId]) && (
-                      <div className="mt-0.5 text-[11px] text-slate-400">{orgLocation(labById[c.labId])}</div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="text-slate-700">{clinicsById?.[c.clinicId]?.name ?? "—"}</div>
+                        {orgLocation(clinicsById?.[c.clinicId]) && (
+                          <div className="mt-0.5 text-[11px] text-slate-400">{orgLocation(clinicsById[c.clinicId])}</div>
+                        )}
+                      </div>
+                      <ArrowRight size={15} className="shrink-0 text-emerald-500" />
+                      <div className="min-w-0">
+                        <div className="text-slate-700">{labById[c.labId]?.name ?? "—"}</div>
+                        {orgLocation(labById[c.labId]) && (
+                          <div className="mt-0.5 text-[11px] text-slate-400">{orgLocation(labById[c.labId])}</div>
+                        )}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-3.5 align-top whitespace-nowrap">
                     <div className="text-slate-600">{c.appointmentDate}</div>
