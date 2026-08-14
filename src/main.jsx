@@ -12,6 +12,24 @@ import "./index.css";
 // else (dentist/lab logins) pays for.
 const AdminDashboard = lazy(() => import("./AdminDashboard.jsx"));
 
+// Nudge the service worker to check for a new deploy whenever the app comes
+// back to the foreground. iOS installed PWAs poll for SW updates very
+// lazily on their own, which has repeatedly left devices running builds
+// several deploys old (including crashing ones already fixed in production).
+// registerType is "autoUpdate", so once the check downloads a new worker it
+// activates immediately and the next open/reload gets fresh code — no
+// forced mid-session reload, so unsaved form state is never interrupted.
+if ("serviceWorker" in navigator) {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      navigator.serviceWorker
+        .getRegistration()
+        .then((r) => r?.update())
+        .catch(() => {});
+    }
+  });
+}
+
 function PageLoader() {
   return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-400">Loading…</div>;
 }
