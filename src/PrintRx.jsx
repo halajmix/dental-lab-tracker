@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X, Printer, FileText, Zap, Paperclip, MessageCircle, Loader2, Check, Download } from "lucide-react";
 import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, includedSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 import { buildRxPdf } from "./lib/rxPdf.js";
+import { waLink } from "./lib/whatsapp.js";
 
 function downloadFile(file) {
   const url = URL.createObjectURL(file);
@@ -78,12 +79,7 @@ async function buildShare(sheetEl, caseObj, clinic, lab) {
   try {
     const msg = buildRxMessage(caseObj, clinic, lab);
     const phone = normalizePhone(caseObj.patientPhone);
-    // api.whatsapp.com/send, not wa.me — both are official Meta click-to-chat
-    // endpoints, but wa.me has been unreliable (connection resets seen in
-    // testing) while api.whatsapp.com answers consistently.
-    const waUrl = phone
-      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+    const waUrl = waLink(phone, msg);
 
     let file = null;
     let error = null;

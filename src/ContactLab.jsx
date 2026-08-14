@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { X, MessageCircle, Mail, Phone, Copy, Check, Send } from "lucide-react";
 import { toothSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
+import { waLink } from "./lib/whatsapp.js";
 import { STAGES } from "./LifecycleEngine.jsx";
 
 // Digits only, no leading zeros — the format WhatsApp's click-to-chat
@@ -79,13 +80,8 @@ export default function ContactLabModal({ open, caseObj, lab, clinic, onClose })
     : caseObj.prescription?.category ?? "Lab case";
   const subject = `${caseObj.id} — ${caseObj.patientName} · ${subjectRx}`;
 
-  // api.whatsapp.com/send, not wa.me — both are official Meta click-to-chat
-  // endpoints, but wa.me has been unreliable (connection resets seen in
-  // testing) while api.whatsapp.com answers consistently.
   const phone = waPhone(lab?.contact);
-  const waUrl = phone
-    ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(fullMessage)}`
-    : `https://api.whatsapp.com/send?text=${encodeURIComponent(fullMessage)}`;
+  const waUrl = waLink(phone, fullMessage);
   const mailUrl = `mailto:${lab?.email ?? ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(fullMessage)}`;
 
   const copy = async () => {
