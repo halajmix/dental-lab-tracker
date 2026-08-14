@@ -404,8 +404,16 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
         ))}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
-        <svg viewBox={`0 0 ${CHART_W} 210`} className="w-full select-none" style={{ maxHeight: 300 }}>
+      {/* Scrolls horizontally rather than shrinking to fit: letting a
+          32-tooth chart scale down to a phone's width puts each tooth at
+          ~6px, far too small to tap accurately. A floor of 640px keeps
+          teeth at a usable size and the container scrolls instead. */}
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2">
+        <svg
+          viewBox={`0 0 ${CHART_W} 210`}
+          className="select-none"
+          style={{ width: "100%", minWidth: 640, maxHeight: 300 }}
+        >
           <style>{`
             .tooth-empty:hover .glyph { fill:#e2e8f0; stroke:#94a3b8; }
             .tooth-hit { cursor:pointer; }
@@ -484,6 +492,10 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
         {disabled?.size > 0 && (
           <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-sm border border-dashed border-slate-400 bg-slate-200" /> Already in another restoration</span>
         )}
+        {/* Only meaningful on screens narrow enough for the chart to scroll */}
+        <span className="flex items-center gap-1 font-medium text-blue-600 sm:hidden">
+          <ChevronDown size={11} className="-rotate-90" /> Swipe the chart sideways
+        </span>
         <span className="ml-auto font-medium text-slate-600">{notation} notation</span>
       </div>
     </div>
@@ -550,7 +562,11 @@ function MultiSelect({ options, selected, onToggle, placeholder = "Select…" })
         onClick={() => (open ? setOpen(false) : openPanel())}
         className={`${inputCls} flex items-center justify-between gap-2 text-left`}
       >
-        <span className={selected.length ? "truncate text-slate-800" : "text-slate-400"}>
+        {/* min-w-0 is load-bearing: a flex item defaults to min-width:auto,
+            which refuses to shrink below its content width — so `truncate`
+            never engages and a long selection list instead forces this
+            button (and the whole modal body) wider than the viewport. */}
+        <span className={`min-w-0 ${selected.length ? "truncate text-slate-800" : "truncate text-slate-400"}`}>
           {selected.length ? `${selected.length} selected · ${selected.join(", ")}` : placeholder}
         </span>
         <ChevronDown size={16} className={`shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
@@ -689,7 +705,7 @@ function RestorationFields({ draft, onChange, errors }) {
   const changeShadeGuide = (g) => onChange({ shadeGuide: g, vitaShade: g === SHADE_BY_LAB ? SHADE_BY_LAB : SHADE_GUIDES[g][0] });
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <Field label="Material" required>
         <select className={`${inputCls} ${err("material") ? "border-rose-400 ring-rose-100" : ""}`} value={draft.material} onChange={(e) => onChange({ material: e.target.value })}>
           {CATEGORIES[draft.category].materials.map((m) => (
@@ -1278,7 +1294,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative z-10 flex w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92vh] sm:rounded-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white">
               <FileText size={18} />
@@ -1294,7 +1310,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
         </div>
 
         {/* Scroll body */}
-        <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 px-5 py-4">
+        <div className="flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">
           {/* ---------------- STEP 1 · Patient & Lab ---------------- */}
           <Step
             n={1}
@@ -1306,7 +1322,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
             complete={stepComplete(1)}
             invalid={touched && stepInvalid(1)}
           >
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* Multi-clinic: only shown once a dentist actually owns more
                   than one clinic — no clutter for the common single-clinic
                   case, where it just silently uses their default clinic. */}
@@ -1335,7 +1351,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
             {/* Patient ID / WhatsApp are optional and tucked away by default so
                 the form reads as two fields, not four. */}
             {showPatientExtras ? (
-              <div className="mt-3 grid gap-3 border-t border-dashed border-slate-200 pt-3 sm:grid-cols-2">
+              <div className="mt-3 grid grid-cols-1 gap-3 border-t border-dashed border-slate-200 pt-3 sm:grid-cols-2">
                 <Field label="Patient ID">
                   <input className={inputCls} value={patientId} onChange={(e) => setPatientId(e.target.value)} placeholder="PT-00000" />
                 </Field>
@@ -1389,7 +1405,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
           {/* Included — what physically goes to the lab with this case */}
           <section className="mb-6">
             <SectionHeader icon={PackageCheck} n="a" title="Included" subtitle="Tick everything being sent to the lab with this case" />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Items sent with the case" hint="Choose as many as apply">
                 <MultiSelect
                   options={INCLUDED_ITEMS}
@@ -1458,7 +1474,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               )}
 
               {restorations.length > 0 && (
-                <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {restorations.map((r) => (
                     <RestorationCard key={r.id} r={r} notation={notation} onEdit={() => openEditRestoration(r)} onDelete={() => deleteRestoration(r.id)} />
                   ))}
@@ -1578,7 +1594,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
 
               <section>
                 <SectionHeader icon={Layers} n="d" title="Work Order & Materials" subtitle="Restoration category drives the material menu" />
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <Field label="Appliance Type" required>
                     <select className={inputCls} value={category} onChange={(e) => onCategoryChange(e.target.value)}>
                       {APPLIANCE_CATEGORIES.map((c) => (
@@ -1659,7 +1675,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
             invalid={touched && stepInvalid(3)}
           >
           <section>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Deliver to Clinic on" required>
                 <input
                   type="date"
@@ -1698,7 +1714,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
             </div>
 
             {/* TAT + schedule-check summary cards */}
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500"><Clock size={12} /> Estimated Turnaround</p>
                 <p className="mt-0.5 text-lg font-bold text-slate-800">
@@ -1724,7 +1740,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
           {/* Attachments & notes */}
           <section className="mt-6">
             <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach STL scans (simulated) and clinical/shade photos — photos upload for real, the lab sees the actual image" />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* STL scans */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Intraoral Scans (STL)</div>
@@ -1741,8 +1757,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                   {scans.length === 0 && <li className="text-[11px] text-slate-400">No scans attached.</li>}
                   {scans.map((f, i) => (
                     <li key={i} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs ring-1 ring-slate-200">
-                      <span className="flex items-center gap-1.5 truncate text-slate-700"><ScanLine size={13} className="shrink-0 text-blue-500" /> <span className="truncate">{f.name}</span></span>
-                      <span className="ml-2 flex items-center gap-2">
+                      <span className="flex min-w-0 items-center gap-1.5 text-slate-700"><ScanLine size={13} className="shrink-0 text-blue-500" /> <span className="truncate">{f.name}</span></span>
+                      <span className="ml-2 flex shrink-0 items-center gap-2">
                         <span className="text-slate-400">{fmtSize(f.size)}</span>
                         <button type="button" onClick={() => setScans((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-rose-500"><Trash2 size={13} /></button>
                       </span>
@@ -1814,7 +1830,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
         {/* Sticky summary + action bar — always in reach, never scrolls away */}
         <div className={`border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
           {/* live order summary */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-6 py-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-2 text-[11px] sm:px-6">
             {caseMode === "restorations" ? (
               <>
                 <span className="flex items-center gap-1 font-semibold text-slate-700">
@@ -1822,7 +1838,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                   {restorations.reduce((n, r) => n + r.teeth.length, 0)} units
                 </span>
                 <span className="text-slate-400">·</span>
-                <span className="text-slate-600">
+                <span className="min-w-0 truncate text-slate-600">
                   {restorations.length ? `${restorations.length} restoration${restorations.length === 1 ? "" : "s"}: ${restorations.map((r) => r.category).join(", ")}` : "No restorations yet"}
                 </span>
               </>
@@ -1833,7 +1849,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                   {selectedTeeth.length} {selectedTeeth.length === 1 ? "unit" : "units"}
                 </span>
                 <span className="text-slate-400">·</span>
-                <span className="text-slate-600">{category}{material ? ` — ${material}` : ""}</span>
+                <span className="min-w-0 truncate text-slate-600">{category}{material ? ` — ${material}` : ""}</span>
                 {vitaShade && vitaShade !== "N/A" && vitaShade !== REFER && (
                   <>
                     <span className="text-slate-400">·</span>
@@ -1842,7 +1858,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                 )}
               </>
             )}
-            <span className="ml-auto flex items-center gap-3">
+            <span className="ml-auto flex shrink-0 items-center gap-3">
               {rush && (
                 <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 font-bold text-amber-700">
                   <Zap size={10} /> EXPRESS
@@ -1856,7 +1872,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
           </div>
 
           {/* actions */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             {touched && !isValid ? (
               <div className="flex items-start gap-1.5 text-xs text-rose-700">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
@@ -1870,14 +1886,13 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                 {isValid ? "Ready to submit to lab queue." : "Complete required fields (*) to submit."}
               </div>
             )}
-            <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
-                Cancel
-              </button>
+            {/* Stacked full-width on phones (three inline buttons overflow a
+                320px viewport), inline once there's room. */}
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <button
                 type="button"
                 onClick={() => submit()}
-                className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:py-2 ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
               >
                 <Check size={15} /> Submit Prescription
               </button>
@@ -1885,9 +1900,12 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                 type="button"
                 onClick={() => submit({ share: true })}
                 title="Save the case and immediately share the Rx PDF with the patient"
-                className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-3 sm:py-2 ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
               >
                 <MessageCircle size={15} /> Submit &amp; Share
+              </button>
+              <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
+                Cancel
               </button>
             </div>
           </div>

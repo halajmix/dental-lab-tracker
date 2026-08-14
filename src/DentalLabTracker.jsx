@@ -169,8 +169,8 @@ function ProfileMenu({ isDentist, clinic, lab, currentUser, avatarUrl, onSignOut
             <Avatar url={avatarUrl} size={30} />
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-                {isDentist ? <Stethoscope size={13} className="text-blue-600" /> : <Building2 size={13} className="text-blue-600" />}
-                <span className="truncate">{orgName}</span>
+                {isDentist ? <Stethoscope size={13} className="shrink-0 text-blue-600" /> : <Building2 size={13} className="shrink-0 text-blue-600" />}
+                <span className="min-w-0 truncate">{orgName}</span>
               </p>
               <p className="mt-0.5 truncate text-xs text-slate-400">{currentUser} · {isDentist ? "Dentist" : "Lab"}</p>
             </div>
@@ -1708,7 +1708,7 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
       {c.prescription && (
         <div className="mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg bg-slate-50 px-3.5 py-2.5 text-sm ring-1 ring-inset ring-slate-100">
           {c.prescription.restorations?.length ? (
-            <span>
+            <span className="min-w-0">
               <span className="font-medium text-slate-400">Restorations </span>
               <span className="font-bold text-slate-700">
                 {c.prescription.restorations.length} ·{" "}

@@ -31,7 +31,7 @@ import React from "react";
 export function OmanLocationFields({ value, onChange, inputCls, required }) {
   const wilayats = OMAN_REGIONS[value.governorate] ?? [];
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-slate-600">Country</span>
         <input value="Oman" disabled readOnly className={`${inputCls} cursor-not-allowed text-slate-400`} />
