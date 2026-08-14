@@ -2,92 +2,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Printer, FileText, Zap, Paperclip, MessageCircle, Loader2, Check, Download } from "lucide-react";
 import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, includedSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
-
-// Fetch an image URL and convert it to a data URL — same-origin (data:)
-// once loaded, so drawing it to a canvas afterward never taints the canvas
-// regardless of the source's CORS headers (the fetch itself still needs
-// CORS to succeed, same requirement the on-screen thumbnails already have
-// via crossOrigin="anonymous").
-async function fetchImageAsDataUrl(url) {
-  const res = await fetch(url, { mode: "cors" });
-  if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
-  const blob = await res.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error("Failed to read image"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function imageNaturalSize(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => reject(new Error("Failed to load image"));
-    img.src = dataUrl;
-  });
-}
-
-// Render an on-screen element to a multi-page A4 PDF File (no print dialog),
-// then append one FULL dedicated page per clinical/shade photo — scaled and
-// centered to preserve aspect ratio (contain, not cover) rather than the
-// small thumbnail grid already in the main sheet, so the lab can actually
-// inspect each photo at size. html2canvas + jsPDF are ~700kB, so they're
-// loaded on demand at first share.
-async function elementToPdfFile(el, filename, photos = []) {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-    import("html2canvas"),
-    import("jspdf"),
-  ]);
-  const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
-  const imgData = canvas.toDataURL("image/jpeg", 0.95);
-  const pdf = new jsPDF({ unit: "pt", format: "a4" });
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const imgH = (canvas.height * pageW) / canvas.width;
-  let heightLeft = imgH;
-  let position = 0;
-  pdf.addImage(imgData, "JPEG", 0, position, pageW, imgH);
-  heightLeft -= pageH;
-  while (heightLeft > 0) {
-    position -= pageH;
-    pdf.addPage();
-    pdf.addImage(imgData, "JPEG", 0, position, pageW, imgH);
-    heightLeft -= pageH;
-  }
-
-  const MARGIN = 36; // 0.5in
-  const CAPTION_H = 22;
-  for (let i = 0; i < photos.length; i++) {
-    const photo = photos[i];
-    try {
-      const dataUrl = await fetchImageAsDataUrl(photo.url);
-      const { width: iw, height: ih } = await imageNaturalSize(dataUrl);
-      const maxW = pageW - MARGIN * 2;
-      const maxH = pageH - MARGIN * 2 - CAPTION_H;
-      const scale = Math.min(maxW / iw, maxH / ih);
-      const drawW = iw * scale;
-      const drawH = ih * scale;
-      const x = (pageW - drawW) / 2;
-      const y = MARGIN + CAPTION_H + (maxH - drawH) / 2;
-      const format = dataUrl.match(/^data:image\/(\w+);/)?.[1]?.toUpperCase().replace("JPG", "JPEG") || "JPEG";
-
-      pdf.addPage();
-      pdf.setFontSize(10);
-      pdf.setTextColor(120);
-      pdf.text(`Photo ${i + 1} of ${photos.length}${photo.name ? ` — ${photo.name}` : ""}`, MARGIN, MARGIN);
-      pdf.addImage(dataUrl, format, x, y, drawW, drawH);
-    } catch (err) {
-      // One bad photo (fetch/CORS/decode failure) shouldn't sink the whole
-      // PDF — skip its page and keep going.
-      console.error("Failed to add photo page to PDF", photo.name, err);
-    }
-  }
-
-  const blob = pdf.output("blob");
-  return new File([blob], filename, { type: "application/pdf" });
-}
+import { buildRxPdf } from "./lib/rxPdf.js";
 
 function downloadFile(file) {
   const url = URL.createObjectURL(file);
@@ -173,8 +88,10 @@ async function buildShare(sheetEl, caseObj, clinic, lab) {
     let file = null;
     let error = null;
     try {
-      const photos = (caseObj.prescription?.files ?? []).filter((f) => f.kind === "photo" && f.url);
-      if (sheetEl) file = await elementToPdfFile(sheetEl, `prescription-${caseObj.id}.pdf`, photos);
+      // Vector-drawn PDF (crisp selectable text, print-quality) with an
+      // automatic raster-screenshot fallback for non-Latin case data —
+      // see src/lib/rxPdf.js. sheetEl is only consumed by the fallback.
+      file = await buildRxPdf(sheetEl, caseObj, clinic, lab, `prescription-${caseObj.id}.pdf`);
     } catch (e) {
       console.error("PDF generation failed", e);
       error = e?.message || "Could not build the PDF.";
