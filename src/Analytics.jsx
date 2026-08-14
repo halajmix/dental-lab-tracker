@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Clock, Timer, RefreshCcw, DollarSign, Gauge, TrendingUp, CheckCircle2 } from "lucide-react";
+import { Clock, Timer, Gauge, TrendingUp, CheckCircle2 } from "lucide-react";
 import { LAST_STAGE, STAGE_INDEX } from "./LifecycleEngine.jsx";
 import { QualityBreakdown } from "./Remake.jsx";
 
@@ -142,7 +142,7 @@ export function AnalyticsDashboard({ cases, labs }) {
   return (
     <div className="space-y-6">
       {/* summary metric cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3">
         <MetricCard
           icon={Timer}
           tone="text-blue-500"
@@ -156,20 +156,6 @@ export function AnalyticsDashboard({ cases, labs }) {
           label="On-Time Delivery"
           value={pct(overall.onTimeRate)}
           sub="delivered before appointment"
-        />
-        <MetricCard
-          icon={RefreshCcw}
-          tone="text-rose-500"
-          label="Clinic Remake Rate"
-          value={pct(overall.remakeRate)}
-          sub={`${cases.filter((c) => c.remake).length} of ${cases.length} cases`}
-        />
-        <MetricCard
-          icon={DollarSign}
-          tone="text-violet-500"
-          label="Monthly Lab Spend"
-          value={`$${overall.monthlySpend.toLocaleString()}`}
-          sub={`${overall.monthlyVolume} case${overall.monthlyVolume !== 1 ? "s" : ""} this month`}
         />
       </div>
 
