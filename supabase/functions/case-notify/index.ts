@@ -92,6 +92,20 @@ function caseSummaryRows(record: Record<string, unknown>): string {
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
+  // This function runs with "Verify JWT" OFF (the pg_net trigger can't mint
+  // a platform-accepted JWT on this project's new signing keys), which makes
+  // the endpoint publicly reachable — without this check, anyone could POST
+  // a fabricated webhook payload and have the platform email real labs and
+  // clinics with attacker-chosen content. The trigger sends a shared secret
+  // (read from the private.webhook_config table, NOT hardcoded in the
+  // public schema.sql) which must match the CASE_NOTIFY_SECRET function
+  // secret. If the secret isn't configured yet, requests pass (fail-open)
+  // so notifications don't silently stop before setup completes.
+  const expected = Deno.env.get("CASE_NOTIFY_SECRET");
+  if (expected && req.headers.get("x-webhook-secret") !== expected) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+
   let payload: { type?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> };
   try {
     payload = await req.json();

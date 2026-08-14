@@ -26,7 +26,9 @@ const BASE_PRICE = {
 // Full fee breakdown for a case. Rush no longer carries a surcharge — it
 // only shortens turnaround (see PrescriptionForm's effTat) — so fee is base
 // minus any remake credit.
-export function caseFee(c, labs = []) {
+// `_labs` kept for signature stability with callers — pricing no longer
+// varies per lab since the express surcharge was removed.
+export function caseFee(c, _labs = []) {
   const restorations = c.prescription?.restorations;
   const base = restorations?.length
     ? restorations.reduce((sum, r) => sum + (BASE_PRICE[r.category] ?? 400) * (r.teeth?.length || 1), 0)

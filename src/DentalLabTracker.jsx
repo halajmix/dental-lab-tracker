@@ -620,7 +620,9 @@ export default function DentalLabTracker({ auth }) {
         });
       })
       .catch((err) => console.error("Failed to load clinic info", err));
-  }, [cases]);
+    // Including clinicsById is safe, not a loop: once a fetch lands, the
+    // re-run finds `missing` empty and bails at the guard above.
+  }, [cases, clinicsById]);
 
   // Multi-clinic: load every clinic this dentist owns (Settings "My Clinics"
   // + the Rx form's "Sending Clinic" selector). clinics_select already

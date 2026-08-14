@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
 import { clinicFromRow, labFromRow } from "./data.js";
 
@@ -21,12 +21,24 @@ export function useAuth() {
   // component ever mounted (see supabaseClient.js for why that happens).
   const [recovery, setRecovery] = useState(recoveryDetectedEarly);
 
+  // Which auth user the currently shown profile belongs to, and a sequence
+  // number so a slow, superseded load can never overwrite a newer one
+  // (Supabase fires auth events in bursts — token refresh, tab focus).
+  const loadedUserRef = useRef(null);
+  const loadSeqRef = useRef(0);
+
   const loadProfile = useCallback(async (userId) => {
+    const seq = ++loadSeqRef.current;
+    const fresh = () => seq === loadSeqRef.current;
+
     const { data: prof } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+    if (!fresh()) return;
     setProfile(prof ?? null);
+    loadedUserRef.current = userId;
 
     if (prof?.clinic_id) {
       const { data: c } = await supabase.from("clinics").select("*").eq("id", prof.clinic_id).maybeSingle();
+      if (!fresh()) return;
       setClinic(c ? clinicFromRow(c) : null);
     } else {
       setClinic(null);
@@ -34,6 +46,7 @@ export function useAuth() {
 
     if (prof?.lab_id) {
       const { data: l } = await supabase.from("labs").select("*").eq("id", prof.lab_id).maybeSingle();
+      if (!fresh()) return;
       setLab(l ? labFromRow(l) : null);
     } else {
       setLab(null);
@@ -58,9 +71,19 @@ export function useAuth() {
       if (event === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(next);
       if (next?.user) {
-        setLoading(true);
-        loadProfile(next.user.id).finally(() => !cancelled && setLoading(false));
+        // Same signed-in user (routine token refresh / tab refocus — fires
+        // constantly on phones): refresh the profile silently. Toggling
+        // `loading` here made AuthGate unmount the whole app and flash the
+        // full-screen spinner on every refocus. A genuinely different user
+        // (sign-in, impersonation swap) still gets the loading gate.
+        if (next.user.id === loadedUserRef.current) {
+          loadProfile(next.user.id);
+        } else {
+          setLoading(true);
+          loadProfile(next.user.id).finally(() => !cancelled && setLoading(false));
+        }
       } else {
+        loadedUserRef.current = null;
         setProfile(null);
         setClinic(null);
         setLab(null);

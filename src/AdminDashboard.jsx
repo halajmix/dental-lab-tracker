@@ -110,7 +110,6 @@ export default function AdminDashboard({ auth }) {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const now = new Date();

@@ -202,18 +202,11 @@ async function buildShare(sheetEl, caseObj, clinic, lab) {
 /*  Mini tooth diagram for the printout                                */
 /* ================================================================== */
 
-function ToothDiagram({ prescription }) {
-  const notation = prescription?.notation ?? "FDI";
-  // Union of every restoration's teeth in cart mode — the diagram is a
-  // whole-case-at-a-glance reference, not per-restoration.
-  const teeth = prescription?.restorations?.length
-    ? prescription.restorations.flatMap((r) => r.teeth)
-    : prescription?.teeth ?? [];
-  const roleOf = {};
-  teeth.forEach((t) => (roleOf[t.universal] = t.role));
-  const label = (u) => (notation === "FDI" ? UNIVERSAL_TO_FDI[u] : u);
-
-  const Row = ({ teeth }) => (
+// Module-scope, not declared inside ToothDiagram's render: a component
+// created during render gets a new identity every pass, so React unmounts
+// and remounts its whole subtree instead of reconciling it.
+function DiagramRow({ teeth, roleOf, notation }) {
+  return (
     <div className="flex justify-center gap-[2px]">
       {teeth.map((u) => {
         const role = roleOf[u];
@@ -226,18 +219,29 @@ function ToothDiagram({ prescription }) {
             className="flex h-6 w-6 items-center justify-center rounded border text-[9px] font-bold"
             style={{ background: fill, color, borderColor: role ? fill : "#cbd5e1" }}
           >
-            {label(u)}
+            {notation === "FDI" ? UNIVERSAL_TO_FDI[u] : u}
           </div>
         );
       })}
     </div>
   );
+}
+
+function ToothDiagram({ prescription }) {
+  const notation = prescription?.notation ?? "FDI";
+  // Union of every restoration's teeth in cart mode — the diagram is a
+  // whole-case-at-a-glance reference, not per-restoration.
+  const teeth = prescription?.restorations?.length
+    ? prescription.restorations.flatMap((r) => r.teeth)
+    : prescription?.teeth ?? [];
+  const roleOf = {};
+  teeth.forEach((t) => (roleOf[t.universal] = t.role));
 
   return (
     <div className="space-y-1">
-      <Row teeth={UPPER_ROW} />
+      <DiagramRow teeth={UPPER_ROW} roleOf={roleOf} notation={notation} />
       <div className="text-center text-[8px] uppercase tracking-widest text-slate-400">— occlusal midline —</div>
-      <Row teeth={LOWER_ROW} />
+      <DiagramRow teeth={LOWER_ROW} roleOf={roleOf} notation={notation} />
       <p className="pt-1 text-center text-[10px] text-slate-500">
         {notation} notation · Restored: {teeth.map((t) => (notation === "FDI" ? t.fdi : t.universal) + (t.role === "pontic" ? "(p)" : "")).join(", ") || "—"}
       </p>

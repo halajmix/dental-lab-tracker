@@ -952,7 +952,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     .sort((a, b) => a - b)
     .map((u) => ({ universal: u, fdi: UNIVERSAL_TO_FDI[u], role: selection[u] }));
 
-  const hasPontics = selectedTeeth.some((t) => t.role === "pontic");
   const isRefer = category === REFER_CATEGORY; // spec fields collapse to "Refer to notes"
   const isSplint = SPLINT_CATEGORIES.includes(category); // no material / shade
   const isImplant = IMPLANT_CATEGORIES.includes(category); // needs system + abutment specs
@@ -1126,10 +1125,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
       if (!HAS_STUMP.includes(c) || stumpShade === REFER) setStumpShade("N/A");
     }
   };
-
-  // Stump shade only matters for translucent materials on a prepped tooth.
-  const showStump =
-    HAS_STUMP.includes(category) && AESTHETIC_MATERIALS.includes(material) && !isRefer;
 
   /* ---------------- file handling ---------------- */
   // STL scans are still simulated — there's no in-browser way to preview or

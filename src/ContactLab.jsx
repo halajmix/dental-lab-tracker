@@ -11,7 +11,7 @@ const waPhone = (p) => (p || "").replace(/\D/g, "").replace(/^0+/, "");
  * Build the case context block that heads every message to the lab, so the
  * technician never has to look the case up before reading the request.
  */
-export function buildCaseContext(caseObj, clinic) {
+export function buildCaseContext(caseObj) {
   const rx = caseObj.prescription;
   const stage = STAGES[caseObj.stageIndex];
   const lines = [
@@ -71,7 +71,7 @@ export default function ContactLabModal({ open, caseObj, lab, clinic, onClose })
 
   if (!open || !caseObj) return null;
 
-  const context = buildCaseContext(caseObj, clinic);
+  const context = buildCaseContext(caseObj);
   const signature = `— ${clinic.dentist}, ${clinic.name}`;
   const fullMessage = [context, "", note.trim() || "(your message)", "", signature].join("\n");
   const subjectRx = caseObj.prescription?.restorations?.length

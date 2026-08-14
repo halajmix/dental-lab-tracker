@@ -622,3 +622,57 @@ create policy "cases_delete_own_clinic" on cases for delete
     clinic_id = my_clinic_id()
     or clinic_id in (select my_owned_clinic_ids())
   );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 14 — shared secret for the case-notify webhook                 */
+/*                                                                       */
+/*  case-notify runs with "Verify JWT" OFF (the pg_net trigger can't     */
+/*  mint a platform-accepted JWT on this project's JWT signing keys), so */
+/*  the endpoint is publicly reachable. The trigger now sends a shared   */
+/*  secret header the function checks against its CASE_NOTIFY_SECRET     */
+/*  secret. The value lives in a private schema table with no API grants */
+/*  — deliberately NOT in this file, which is in a public GitHub repo.   */
+/*  Setup (one time, done in the dashboard):                             */
+/*    1. insert the secret:                                              */
+/*       insert into private.webhook_config (key, value)                 */
+/*         values ('case_notify_secret', '<random value>')               */
+/*         on conflict (key) do update set value = excluded.value;       */
+/*    2. add the same value as Edge Function secret CASE_NOTIFY_SECRET.  */
+/* --------------------------------------------------------------------- */
+
+create schema if not exists private;
+
+create table if not exists private.webhook_config (
+  key text primary key,
+  value text not null
+);
+
+-- No grants to anon/authenticated: only definer functions can read it.
+revoke all on private.webhook_config from anon, authenticated;
+
+create or replace function notify_case_webhook()
+returns trigger
+security definer
+set search_path = public, private
+as $$
+declare
+  secret text;
+begin
+  select value into secret from private.webhook_config where key = 'case_notify_secret';
+  perform net.http_post(
+    url := 'https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/case-notify',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-webhook-secret', coalesce(secret, '')
+    ),
+    body := jsonb_build_object(
+      'type', TG_OP,
+      'table', TG_TABLE_NAME,
+      'schema', TG_TABLE_SCHEMA,
+      'record', to_jsonb(NEW),
+      'old_record', case when TG_OP = 'UPDATE' then to_jsonb(OLD) else null end
+    )
+  );
+  return NEW;
+end;
+$$ language plpgsql;

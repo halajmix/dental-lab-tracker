@@ -439,7 +439,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
   const [email, setEmail] = useState(userEmail || "");
   const [displayName, setDisplayName] = useState("");
 
-  React.useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       const { data } = await supabase
