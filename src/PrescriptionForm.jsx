@@ -904,6 +904,17 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
   const [touched, setTouched] = useState(false);
   const [step, setStep] = useState(1); // 1 = Patient & Lab, 2 = Clinical, 3 = Logistics
 
+  // Brief green confirmation on the card that was just added/updated.
+  // MUST stay above the `if (!open)` early return below — hooks declared
+  // after it would only run while the modal is open, so the hook count
+  // would change between renders (React error #310).
+  const [justAddedId, setJustAddedId] = useState(null);
+  useEffect(() => {
+    if (!justAddedId) return;
+    const t = setTimeout(() => setJustAddedId(null), 2200);
+    return () => clearTimeout(t);
+  }, [justAddedId]);
+
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
 
   if (!open) return null;
@@ -1016,13 +1027,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
   // silently unless "Add to Case" is clicked, which is easy to miss since
   // the chart selection looks like progress on its own.
   const draftDirty = draftOpen && draftTeeth.length > 0;
-  // Brief green confirmation on the card that was just added/updated.
-  const [justAddedId, setJustAddedId] = useState(null);
-  useEffect(() => {
-    if (!justAddedId) return;
-    const t = setTimeout(() => setJustAddedId(null), 2200);
-    return () => clearTimeout(t);
-  }, [justAddedId]);
 
   const openAddRestoration = () => {
     setDraft(emptyDraft());
