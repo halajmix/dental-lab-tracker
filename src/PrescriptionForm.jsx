@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Check,
@@ -204,7 +205,7 @@ const SHADE_GUIDES = {
 // photos/notes). Collapses the Shade dropdown entirely rather than listing
 // values for it, so it has no entry in SHADE_GUIDES itself.
 export const SHADE_BY_LAB = "Shade by Lab";
-const SHADE_GUIDE_NAMES = [...Object.keys(SHADE_GUIDES), SHADE_BY_LAB];
+const SHADE_GUIDE_NAMES = [SHADE_BY_LAB, ...Object.keys(SHADE_GUIDES)];
 
 const STUMP_SHADES = ["N/A", "ND1", "ND2", "ND3", "ND4", "ND5", "ND6", "ND7", "ND8", "ND9"];
 
@@ -504,27 +505,49 @@ const inputCls =
  */
 function MultiSelect({ options, selected, onToggle, placeholder = "Select…" }) {
   const [open, setOpen] = useState(false);
-  const boxRef = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+
+  // Portaled to document.body rather than a plain absolutely-positioned
+  // child: this form lives inside a modal with `overflow-y-auto`/
+  // `overflow-hidden` ancestors, which clip an in-place dropdown panel
+  // whenever it's opened near the bottom of the scrolled view. Same
+  // pattern already used for CaseActionsMenu's dropdown in
+  // DentalLabTracker.jsx — position from the trigger's own rect, close on
+  // scroll/resize since a stale anchor is worse than just closing.
+  const openPanel = () => {
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    setOpen(true);
+  };
 
   useEffect(() => {
     if (!open) return;
     const onDocDown = (e) => {
-      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+      if (panelRef.current?.contains(e.target) || btnRef.current?.contains(e.target)) return;
+      setOpen(false);
     };
     const onEsc = (e) => e.key === "Escape" && setOpen(false);
+    const close = () => setOpen(false);
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onEsc);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onEsc);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
     };
   }, [open]);
 
   return (
-    <div className="relative" ref={boxRef}>
+    <div className="relative">
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? setOpen(false) : openPanel())}
         className={`${inputCls} flex items-center justify-between gap-2 text-left`}
       >
         <span className={selected.length ? "truncate text-slate-800" : "text-slate-400"}>
@@ -533,32 +556,50 @@ function MultiSelect({ options, selected, onToggle, placeholder = "Select…" })
         <ChevronDown size={16} className={`shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
       </button>
 
-      {open && (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
-          {options.map((opt) => {
-            const checked = selected.includes(opt);
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => onToggle(opt)}
-                className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition ${
-                  checked ? "bg-blue-50 font-semibold text-blue-800" : "text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                <span
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                    checked ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white"
-                  }`}
-                >
-                  {checked && <Check size={11} strokeWidth={3} />}
-                </span>
-                {opt}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+            className="z-50 flex max-h-72 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl"
+          >
+            <div className="overflow-y-auto py-1">
+              {options.map((opt) => {
+                const checked = selected.includes(opt);
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => onToggle(opt)}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition ${
+                      checked ? "bg-blue-50 font-semibold text-blue-800" : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                        checked ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white"
+                      }`}
+                    >
+                      {checked && <Check size={11} strokeWidth={3} />}
+                    </span>
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Explicit close action — picking items doesn't auto-close the
+                panel (several can be picked in a row), so there needs to be
+                a deliberate way to collapse it besides click-outside/Escape. */}
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="shrink-0 border-t border-slate-100 bg-slate-50 px-3 py-2 text-center text-sm font-semibold text-blue-600 hover:bg-slate-100"
+            >
+              Done
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -1093,6 +1134,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     material: caseMode === "appliance" && !isSplint && !material,
     implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
     abutmentType: caseMode === "appliance" && isImplant && !abutmentType,
+    insertionDate: !insertionDate,
     photosUploading,
   };
   const isValid = !Object.values(errors).some(Boolean);
@@ -1107,6 +1149,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
     material: "Material",
     implantSystem: "Implant brand",
     abutmentType: "Abutment size",
+    insertionDate: "Deliver to Clinic date",
     photosUploading: "Photos still uploading",
   };
   const missing = Object.entries(errors)
@@ -1189,7 +1232,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const stepErrors = {
     1: ["patientName", "labId"],
     2: ["restorations", "teeth", "material", "implantSystem", "abutmentType"],
-    3: [],
+    3: ["insertionDate"],
   };
   const stepInvalid = (n) => stepErrors[n].some((k) => errors[k]);
   const stepComplete = (n) => !stepInvalid(n);
@@ -1590,12 +1633,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
             open={step === 3}
             onToggle={() => setStep(step === 3 ? 0 : 3)}
             complete={stepComplete(3)}
-            invalid={false}
+            invalid={touched && stepInvalid(3)}
           >
           <section>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Deliver to Clinic on">
-                <input type="date" className={inputCls} value={insertionDate} onChange={(e) => setInsertionDate(e.target.value)} />
+              <Field label="Deliver to Clinic on" required>
+                <input
+                  type="date"
+                  required
+                  className={`${inputCls} ${err("insertionDate") ? "border-rose-400 ring-rose-100" : ""}`}
+                  value={insertionDate}
+                  onChange={(e) => setInsertionDate(e.target.value)}
+                />
               </Field>
               <Field label="Preferred Delivery Time">
                 <select className={inputCls} value={deliveryTime} onChange={(e) => setDeliveryTime(e.target.value)}>
@@ -1687,7 +1736,10 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
                 </div>
                 <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
                   <ImageIcon size={13} /> Choose or take photos
-                  <input type="file" accept="image/*" multiple capture="environment" className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
+                  {/* No `capture` attribute — that forces mobile browsers straight
+                      into the camera, skipping the "Camera or Photo Library"
+                      chooser. Plain accept="image/*" gives the normal picker. */}
+                  <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
                 </label>
                 {photos.length === 0 ? (
                   <p className="mt-3 text-[11px] text-slate-400">No photos attached — the lab only sees what's uploaded here.</p>

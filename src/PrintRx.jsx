@@ -3,9 +3,39 @@ import { createPortal } from "react-dom";
 import { X, Printer, FileText, Zap, Paperclip, MessageCircle, Loader2, Check, Download } from "lucide-react";
 import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, includedSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 
-// Render an on-screen element to a multi-page A4 PDF File (no print dialog).
-// html2canvas + jsPDF are ~700kB, so they're loaded on demand at first share.
-async function elementToPdfFile(el, filename) {
+// Fetch an image URL and convert it to a data URL — same-origin (data:)
+// once loaded, so drawing it to a canvas afterward never taints the canvas
+// regardless of the source's CORS headers (the fetch itself still needs
+// CORS to succeed, same requirement the on-screen thumbnails already have
+// via crossOrigin="anonymous").
+async function fetchImageAsDataUrl(url) {
+  const res = await fetch(url, { mode: "cors" });
+  if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Failed to read image"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function imageNaturalSize(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error("Failed to load image"));
+    img.src = dataUrl;
+  });
+}
+
+// Render an on-screen element to a multi-page A4 PDF File (no print dialog),
+// then append one FULL dedicated page per clinical/shade photo — scaled and
+// centered to preserve aspect ratio (contain, not cover) rather than the
+// small thumbnail grid already in the main sheet, so the lab can actually
+// inspect each photo at size. html2canvas + jsPDF are ~700kB, so they're
+// loaded on demand at first share.
+async function elementToPdfFile(el, filename, photos = []) {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import("html2canvas"),
     import("jspdf"),
@@ -26,6 +56,35 @@ async function elementToPdfFile(el, filename) {
     pdf.addImage(imgData, "JPEG", 0, position, pageW, imgH);
     heightLeft -= pageH;
   }
+
+  const MARGIN = 36; // 0.5in
+  const CAPTION_H = 22;
+  for (let i = 0; i < photos.length; i++) {
+    const photo = photos[i];
+    try {
+      const dataUrl = await fetchImageAsDataUrl(photo.url);
+      const { width: iw, height: ih } = await imageNaturalSize(dataUrl);
+      const maxW = pageW - MARGIN * 2;
+      const maxH = pageH - MARGIN * 2 - CAPTION_H;
+      const scale = Math.min(maxW / iw, maxH / ih);
+      const drawW = iw * scale;
+      const drawH = ih * scale;
+      const x = (pageW - drawW) / 2;
+      const y = MARGIN + CAPTION_H + (maxH - drawH) / 2;
+      const format = dataUrl.match(/^data:image\/(\w+);/)?.[1]?.toUpperCase().replace("JPG", "JPEG") || "JPEG";
+
+      pdf.addPage();
+      pdf.setFontSize(10);
+      pdf.setTextColor(120);
+      pdf.text(`Photo ${i + 1} of ${photos.length}${photo.name ? ` — ${photo.name}` : ""}`, MARGIN, MARGIN);
+      pdf.addImage(dataUrl, format, x, y, drawW, drawH);
+    } catch (err) {
+      // One bad photo (fetch/CORS/decode failure) shouldn't sink the whole
+      // PDF — skip its page and keep going.
+      console.error("Failed to add photo page to PDF", photo.name, err);
+    }
+  }
+
   const blob = pdf.output("blob");
   return new File([blob], filename, { type: "application/pdf" });
 }
@@ -47,11 +106,16 @@ const normalizePhone = (p) => {
   return digits.replace(/^0+/, "");
 };
 
-// Build a plain-text prescription summary for the WhatsApp message.
+// Build a plain-text prescription summary for the WhatsApp message. Guards
+// every clinic/lab field with a fallback — this used to dereference
+// clinic.name/clinic.dentist directly, which threw synchronously if clinic
+// was ever null/incomplete, outside buildShare's only try/catch. That threw
+// an unhandled rejection with zero visible feedback: the share panel just
+// never appeared, no error, nothing (the reported "Share does nothing" bug).
 function buildRxMessage(caseObj, clinic, lab) {
   const rx = caseObj.prescription;
   const lines = [
-    `*${clinic.name}* — Laboratory Prescription`,
+    `*${clinic?.name ?? "Clinic"}* — Laboratory Prescription`,
     `Patient: ${caseObj.patientName} (${caseObj.patientId})`,
     `Case: ${caseObj.id}`,
     `Lab: ${lab?.name ?? "—"}`,
@@ -76,7 +140,7 @@ function buildRxMessage(caseObj, clinic, lab) {
     if (rx.rush) lines.push(`Express order`);
     if (rx.notes) lines.push(`Notes: ${rx.notes}`);
   }
-  lines.push("", `Dentist: ${clinic.dentist}`, `The detailed prescription PDF is attached.`);
+  lines.push("", `Dentist: ${clinic?.dentist ?? "—"}`, `The detailed prescription PDF is attached.`);
   return lines.join("\n");
 }
 
@@ -90,36 +154,48 @@ function buildRxMessage(caseObj, clinic, lab) {
  * return the details and let the UI render a real link for the user to click.
  */
 async function buildShare(sheetEl, caseObj, clinic, lab) {
-  const msg = buildRxMessage(caseObj, clinic, lab);
-  const phone = normalizePhone(caseObj.patientPhone);
-  // api.whatsapp.com/send, not wa.me — both are official Meta click-to-chat
-  // endpoints, but wa.me has been unreliable (connection resets seen in
-  // testing) while api.whatsapp.com answers consistently.
-  const waUrl = phone
-    ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`
-    : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
-
-  let file = null;
-  let error = null;
+  // The whole thing is one try/catch now — previously only PDF generation
+  // was guarded; a throw anywhere else (message building, phone
+  // normalizing) was an unhandled rejection with no visible result at all.
+  // This always resolves to a usable { shared: false, ... } shape, even in
+  // total failure, so the UI always has something to show instead of
+  // silently doing nothing.
   try {
-    if (sheetEl) file = await elementToPdfFile(sheetEl, `prescription-${caseObj.id}.pdf`);
-  } catch (e) {
-    console.error("PDF generation failed", e);
-    error = e?.message || "Could not build the PDF.";
-  }
+    const msg = buildRxMessage(caseObj, clinic, lab);
+    const phone = normalizePhone(caseObj.patientPhone);
+    // api.whatsapp.com/send, not wa.me — both are official Meta click-to-chat
+    // endpoints, but wa.me has been unreliable (connection resets seen in
+    // testing) while api.whatsapp.com answers consistently.
+    const waUrl = phone
+      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
 
-  // Native share sheet: attaches the PDF itself (iOS/Android/Safari).
-  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    let file = null;
+    let error = null;
     try {
-      await navigator.share({ files: [file], title: `Prescription ${caseObj.id}`, text: msg });
-      return { shared: true };
+      const photos = (caseObj.prescription?.files ?? []).filter((f) => f.kind === "photo" && f.url);
+      if (sheetEl) file = await elementToPdfFile(sheetEl, `prescription-${caseObj.id}.pdf`, photos);
     } catch (e) {
-      if (e?.name === "AbortError") return { shared: true }; // user cancelled
-      // fall through to the manual panel
+      console.error("PDF generation failed", e);
+      error = e?.message || "Could not build the PDF.";
     }
-  }
 
-  return { shared: false, file, waUrl, msg, phone, error };
+    // Native share sheet: attaches the PDF itself (iOS/Android/Safari).
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: `Prescription ${caseObj.id}`, text: msg });
+        return { shared: true };
+      } catch (e) {
+        if (e?.name === "AbortError") return { shared: true }; // user cancelled
+        // fall through to the manual panel
+      }
+    }
+
+    return { shared: false, file, waUrl, msg, phone, error };
+  } catch (e) {
+    console.error("Building the share failed", e);
+    return { shared: false, file: null, waUrl: null, msg: "", phone: null, error: e?.message || "Couldn't prepare the share." };
+  }
 }
 
 /* ================================================================== */
@@ -291,7 +367,7 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
 
             {share.error && (
               <p className="rounded-lg bg-rose-100 px-3 py-2 text-[11px] font-medium text-rose-700">
-                PDF could not be generated: {share.error} — you can still send the details as text.
+                {share.waUrl ? `PDF could not be generated: ${share.error} — you can still send the details as text.` : `Couldn't prepare the share: ${share.error}`}
               </p>
             )}
 
@@ -304,21 +380,27 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
                   <Download size={15} /> 1 · Download PDF
                 </button>
               )}
-              {/* real anchor → user gesture → never blocked */}
-              <a
-                href={share.waUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-              >
-                <MessageCircle size={15} /> 2 · Open WhatsApp chat
-              </a>
-              <button
-                onClick={() => navigator.clipboard?.writeText(share.msg)}
-                className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
-              >
-                <Paperclip size={15} /> Copy message text
-              </button>
+              {/* real anchor → user gesture → never blocked. share.waUrl can be
+                  null only in the total-failure case (message building itself
+                  threw) — nothing to link to then. */}
+              {share.waUrl && (
+                <a
+                  href={share.waUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                >
+                  <MessageCircle size={15} /> 2 · Open WhatsApp chat
+                </a>
+              )}
+              {share.msg && (
+                <button
+                  onClick={() => navigator.clipboard?.writeText(share.msg)}
+                  className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                >
+                  <Paperclip size={15} /> Copy message text
+                </button>
+              )}
             </div>
           </div>
         </div>
