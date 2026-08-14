@@ -14,6 +14,8 @@ export const labFromRow = (r) => ({
   contact: r.contact ?? "",
   email: r.email ?? "",
   address: r.address ?? "",
+  governorate: r.governorate ?? "",
+  wilayat: r.wilayat ?? "",
   tat: r.tat,
   procedureTats: r.procedure_tats ?? {},
   ownerId: r.owner_id,
@@ -44,6 +46,8 @@ export const clinicFromRow = (r) => ({
   id: r.id,
   name: r.name,
   address: r.address ?? "",
+  governorate: r.governorate ?? "",
+  wilayat: r.wilayat ?? "",
   contact: r.contact ?? "",
   license: r.license ?? "",
   dentist: r.dentist ?? "",
@@ -66,6 +70,45 @@ export async function fetchAllClinics() {
   const { data, error } = await supabase.from("clinics").select("*").order("created_at", { ascending: false });
   if (error) throw error;
   return data.map(clinicFromRow);
+}
+
+// Every clinic this dentist owns (multi-clinic support) — "clinics_select"
+// already matches on owner_id=auth.uid(), no new policy needed for this read.
+export async function fetchClinicsByOwner(userId) {
+  const { data, error } = await supabase.from("clinics").select("*").eq("owner_id", userId).order("created_at");
+  if (error) throw error;
+  return data.map(clinicFromRow);
+}
+
+export async function insertClinic(ownerId, data) {
+  const { data: row, error } = await supabase
+    .from("clinics")
+    .insert({
+      owner_id: ownerId,
+      name: data.name,
+      dentist: data.dentist ?? "",
+      contact: data.contact ?? "",
+      email: data.email ?? "",
+      governorate: data.governorate ?? "",
+      wilayat: data.wilayat ?? "",
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return clinicFromRow(row);
+}
+
+export async function updateClinic(clinicId, patch) {
+  const dbPatch = {};
+  if (patch.name !== undefined) dbPatch.name = patch.name;
+  if (patch.dentist !== undefined) dbPatch.dentist = patch.dentist;
+  if (patch.contact !== undefined) dbPatch.contact = patch.contact;
+  if (patch.email !== undefined) dbPatch.email = patch.email;
+  if (patch.governorate !== undefined) dbPatch.governorate = patch.governorate;
+  if (patch.wilayat !== undefined) dbPatch.wilayat = patch.wilayat;
+  const { data, error } = await supabase.from("clinics").update(dbPatch).eq("id", clinicId).select().single();
+  if (error) throw error;
+  return clinicFromRow(data);
 }
 
 const caseToRow = (data) => ({
@@ -98,11 +141,13 @@ export async function fetchLabs() {
 
 // Lab self-service settings (phone, standard TAT, per-procedure TATs).
 // RLS: only the owning lab account (or creating clinic) can update.
-export async function updateLab(labId, { contact, tat, procedureTats }) {
+export async function updateLab(labId, { contact, tat, procedureTats, governorate, wilayat }) {
   const patch = {};
   if (contact !== undefined) patch.contact = contact;
   if (tat !== undefined) patch.tat = tat;
   if (procedureTats !== undefined) patch.procedure_tats = procedureTats;
+  if (governorate !== undefined) patch.governorate = governorate;
+  if (wilayat !== undefined) patch.wilayat = wilayat;
   const { data, error } = await supabase.from("labs").update(patch).eq("id", labId).select().single();
   if (error) throw error;
   return labFromRow(data);

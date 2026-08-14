@@ -798,7 +798,7 @@ const emptyDraft = () => ({
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, labs, onSave, userId }) {
+export default function PrescriptionForm({ open, onClose, labs, onSave, userId, clinics = [], defaultClinicId = null }) {
   const [notation, setNotation] = useState("FDI");
   const [mode, setMode] = useState("unit");
   const [selection, setSelection] = useState({}); // { universal: 'unit'|'pontic' }
@@ -807,6 +807,15 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const [patientId, setPatientId] = useState("");
   const [patientPhone, setPatientPhone] = useState("");
   const [showPatientExtras, setShowPatientExtras] = useState(false);
+
+  // Multi-clinic: which of the dentist's owned clinics this case is sent
+  // from. Only surfaced in the UI when they own more than one — defaults
+  // to their profile's default clinic otherwise, with zero visible change.
+  const [selectedClinicId, setSelectedClinicId] = useState(defaultClinicId);
+  useEffect(() => {
+    if (defaultClinicId && !selectedClinicId) setSelectedClinicId(defaultClinicId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultClinicId]);
 
   // What is physically going to the lab with this case.
   const [included, setIncluded] = useState([]);
@@ -1159,6 +1168,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
   const reset = () => {
     setNotation("FDI"); setMode("unit"); setSelection({});
     setPatientName(""); setPatientId(""); setPatientPhone(""); setShowPatientExtras(false);
+    setSelectedClinicId(defaultClinicId);
     setIncluded([]); setIncludedOther("");
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
@@ -1218,6 +1228,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
         appointmentDate: insertionDate || "—",
         deliveryTime,
         labId,
+        clinicId: selectedClinicId || defaultClinicId,
         prescription,
       },
       opts
@@ -1296,6 +1307,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId }
             invalid={touched && stepInvalid(1)}
           >
             <div className="grid gap-3 sm:grid-cols-2">
+              {/* Multi-clinic: only shown once a dentist actually owns more
+                  than one clinic — no clutter for the common single-clinic
+                  case, where it just silently uses their default clinic. */}
+              {clinics.length > 1 && (
+                <Field label="Sending Clinic" required>
+                  <select className={inputCls} value={selectedClinicId ?? ""} onChange={(e) => setSelectedClinicId(e.target.value)}>
+                    {clinics.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               <Field label="Patient Name" required>
                 <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
               </Field>

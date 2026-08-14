@@ -60,11 +60,15 @@ import {
   updateCase,
   subscribeCases,
   fetchClinicsByIds,
+  fetchClinicsByOwner,
+  insertClinic,
+  updateClinic,
   caseFromRow,
   updateProfile,
   uploadAvatar,
   updateLab,
 } from "./lib/data.js";
+import { OmanLocationFields } from "./lib/omanRegions.jsx";
 
 /* ------------------------------------------------------------------ */
 /*  Small shared UI pieces                                             */
@@ -560,6 +564,7 @@ export default function DentalLabTracker({ auth }) {
   const [labs, setLabs] = useState([]);
   const [cases, setCases] = useState([]);
   const [clinicsById, setClinicsById] = useState({});
+  const [myClinics, setMyClinics] = useState([]); // multi-clinic: every clinic this dentist owns
   const [loadingData, setLoadingData] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -618,8 +623,23 @@ export default function DentalLabTracker({ auth }) {
       .catch((err) => console.error("Failed to load clinic info", err));
   }, [cases]);
 
+  // Multi-clinic: load every clinic this dentist owns (Settings "My Clinics"
+  // + the Rx form's "Sending Clinic" selector). clinics_select already
+  // matches owner_id=auth.uid(), so no new policy is needed for this read.
+  useEffect(() => {
+    if (!isDentist || !profile.id) return;
+    let cancelled = false;
+    fetchClinicsByOwner(profile.id)
+      .then((rows) => !cancelled && setMyClinics(rows))
+      .catch((err) => console.error("Failed to load owned clinics", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [isDentist, profile.id]);
+
   // Modals
   const [showLabModal, setShowLabModal] = useState(false);
+  const [clinicModal, setClinicModal] = useState(null); // { editing: clinicObj | null } | null
   const [showCaseModal, setShowCaseModal] = useState(false);
   // Admin actions (lab directory, SLA analytics) live off the main dashboard.
   const [showSettings, setShowSettings] = useState(false);
@@ -715,9 +735,30 @@ export default function DentalLabTracker({ auth }) {
     }
   };
 
+  // Multi-clinic: same form (AddClinicModal) handles both create and edit —
+  // editingId present means update in place, absent means insert + append.
+  const saveClinic = async (data, editingId) => {
+    try {
+      if (editingId) {
+        const saved = await updateClinic(editingId, data);
+        setMyClinics((p) => p.map((c) => (c.id === editingId ? saved : c)));
+      } else {
+        const saved = await insertClinic(auth.session.user.id, data);
+        setMyClinics((p) => [...p, saved]);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Couldn't save the clinic — " + err.message);
+    }
+  };
+
   const addCase = async (data, opts = {}) => {
+    // Multi-clinic: the Rx form's "Sending Clinic" selector (only shown when
+    // the dentist owns more than one) passes clinicId explicitly; falls
+    // back to the profile's default clinic for everyone else.
+    const { clinicId, ...caseFields } = data;
     const newCaseData = {
-      ...data,
+      ...caseFields,
       createdDate: new Date().toISOString().slice(0, 10),
       stageIndex: STAGE_INDEX.STILL_AT_CLINIC, // Rx submitted, work still at clinic (20%)
       handover: null,
@@ -725,7 +766,7 @@ export default function DentalLabTracker({ auth }) {
       history: [logEntry("created", STAGE_INDEX.STILL_AT_CLINIC, currentUser, "dentist")],
     };
     try {
-      const saved = await insertCase(clinic.id, newCaseData);
+      const saved = await insertCase(clinicId || clinic.id, newCaseData);
       setCases((p) => [saved, ...p]);
       // "Submit & Share" → jump straight into the share flow for the new case.
       if (opts.share) {
@@ -867,12 +908,22 @@ export default function DentalLabTracker({ auth }) {
       <ProfileSettingsModal open={showProfileSettings} onClose={() => setShowProfileSettings(false)} auth={auth} />
       {isDentist && <AddLabModal open={showLabModal} onClose={() => setShowLabModal(false)} onSave={addLab} />}
       {isDentist && (
+        <AddClinicModal
+          open={!!clinicModal}
+          editing={clinicModal?.editing ?? null}
+          onClose={() => setClinicModal(null)}
+          onSave={saveClinic}
+        />
+      )}
+      {isDentist && (
         <PrescriptionForm
           open={showCaseModal}
           onClose={() => setShowCaseModal(false)}
           onSave={addCase}
           labs={labs}
           userId={auth.session?.user?.id}
+          clinics={myClinics}
+          defaultClinicId={clinic?.id}
         />
       )}
 
@@ -881,6 +932,41 @@ export default function DentalLabTracker({ auth }) {
         <SlideOver open={showSettings} onClose={() => setShowSettings(false)} title="Settings" icon={Settings}>
           <div className="space-y-6">
             <div>
+              <div className="mb-2.5 flex items-center justify-between">
+                <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <Stethoscope size={13} /> My Clinics ({myClinics.length})
+                </h4>
+                <button
+                  onClick={() => { setClinicModal({ editing: null }); setShowSettings(false); }}
+                  className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
+                >
+                  <Plus size={13} /> Add Clinic
+                </button>
+              </div>
+              <div className="space-y-2">
+                {myClinics.length === 0 && <p className="text-sm text-slate-400">Loading…</p>}
+                {myClinics.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setClinicModal({ editing: c }); setShowSettings(false); }}
+                    className="block w-full rounded-lg border border-slate-200 p-3 text-left hover:border-blue-300 hover:bg-blue-50/40"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-800">{c.name}</p>
+                      {c.id === clinic?.id && (
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
+                          Default
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {[c.wilayat, c.governorate].filter(Boolean).join(", ") || "No location set"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="border-t border-slate-100 pt-4">
               <div className="mb-2.5 flex items-center justify-between">
                 <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <Building2 size={13} /> Registered Labs ({labs.length})
@@ -1786,6 +1872,93 @@ function AddLabModal({ open, onClose, onSave }) {
   );
 }
 
+/**
+ * Multi-clinic support: add a new clinic under the same dentist account, or
+ * edit an existing one (name/contact/email/location). `editing` present ->
+ * update in place; absent -> insert. Governorate/Wilayat use the same
+ * OmanLocationFields as LabSettingsDrawer.
+ */
+function AddClinicModal({ open, onClose, editing, onSave }) {
+  const [name, setName] = useState("");
+  const [dentist, setDentist] = useState("");
+  const [contact, setContact] = useState("");
+  const [email, setEmail] = useState("");
+  const [location, setLocation] = useState({ governorate: "", wilayat: "" });
+
+  // Init ONLY on open (not on `editing` directly) — same pattern as
+  // LabSettingsDrawer/ProfileSettingsModal: `editing` gets a new identity on
+  // every parent re-render, which would wipe unsaved edits mid-typing if it
+  // were a dependency here.
+  useEffect(() => {
+    if (!open) return;
+    setName(editing?.name ?? "");
+    setDentist(editing?.dentist ?? "");
+    setContact(editing?.contact ?? "");
+    setEmail(editing?.email ?? "");
+    setLocation({ governorate: editing?.governorate ?? "", wilayat: editing?.wilayat ?? "" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave(
+      {
+        name: name.trim(),
+        dentist: dentist.trim(),
+        contact: contact.trim(),
+        email: email.trim(),
+        governorate: location.governorate,
+        wilayat: location.wilayat,
+      },
+      editing?.id ?? null
+    );
+    onClose();
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={editing ? "Edit Clinic" : "Add Clinic"}>
+      <form onSubmit={submit} className="space-y-4">
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-semibold text-slate-700">Clinic Name</span>
+          <input
+            className={`${lightInputCls} py-3.5 text-base font-medium placeholder:font-normal`}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Muscat Smile Dental Clinic"
+            autoFocus
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-semibold text-slate-700">Dentist Name</span>
+          <input className={lightInputCls} value={dentist} onChange={(e) => setDentist(e.target.value)} placeholder="Dr. A. Chen, BDS" />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-slate-500">Phone</span>
+          <input className={lightInputCls} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="00968 9000 0000" inputMode="tel" />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-slate-500">Email</span>
+          <input type="email" className={lightInputCls} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="care@clinic.com" />
+        </label>
+        <OmanLocationFields value={location} onChange={(patch) => setLocation((l) => ({ ...l, ...patch }))} inputCls={lightInputCls} />
+
+        <div className="flex items-center justify-between pt-2">
+          <button type="button" onClick={onClose} className="text-sm font-semibold text-slate-500 hover:text-slate-700">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/30 transition hover:bg-blue-700"
+          >
+            {editing ? "Save Changes" : "Add Clinic"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Lab Settings — contact/turnaround info (moved off the dashboard    */
 /*  header) plus a per-procedure turnaround time list. Each procedure  */
@@ -1797,6 +1970,7 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
   const [contact, setContact] = useState("");
   const [tat, setTat] = useState(5);
   const [procTats, setProcTats] = useState({});
+  const [location, setLocation] = useState({ governorate: "", wilayat: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -1809,6 +1983,7 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
     setContact(lab.contact ?? "");
     setTat(lab.tat ?? 5);
     setProcTats(lab.procedureTats ?? {});
+    setLocation({ governorate: lab.governorate ?? "", wilayat: lab.wilayat ?? "" });
     setError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -1831,6 +2006,8 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
         contact: contact.trim(),
         tat: Math.max(1, Number(tat) || 1),
         procedureTats: procTats,
+        governorate: location.governorate,
+        wilayat: location.wilayat,
       });
       await onSaved();
       onClose();
@@ -1855,6 +2032,7 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
               <span className="mb-1 block text-xs font-medium text-slate-600">Standard turn around (days)</span>
               <input type="number" min={1} value={tat} onChange={(e) => setTat(e.target.value)} className={lightInputCls} />
             </label>
+            <OmanLocationFields value={location} onChange={(patch) => setLocation((l) => ({ ...l, ...patch }))} inputCls={lightInputCls} />
           </div>
         </div>
 

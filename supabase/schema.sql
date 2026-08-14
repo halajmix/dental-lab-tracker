@@ -558,3 +558,51 @@ drop trigger if exists cases_notify_webhook on cases;
 create trigger cases_notify_webhook
   after insert or update on cases
   for each row execute function notify_case_webhook();
+
+/* --------------------------------------------------------------------- */
+/*  Phase 13 — multi-clinic support + Oman governorate/wilayat fields    */
+/*                                                                       */
+/*  clinics.owner_id was never unique — nothing stopped a dentist owning */
+/*  several clinic rows, but cases_select/insert/update/delete only ever */
+/*  matched a case against the profile's single default clinic_id, so a  */
+/*  dentist could never see or submit a case under a second clinic they  */
+/*  own. Broadened to also match any clinic owned by the caller.         */
+/*  clinics_select already covered "owner_id = auth.uid()", so the       */
+/*  Settings "My Clinics" list needs no policy change — only the cases   */
+/*  policies were the actual gap.                                        */
+/* --------------------------------------------------------------------- */
+
+alter table clinics add column if not exists governorate text default '';
+alter table clinics add column if not exists wilayat text default '';
+alter table labs add column if not exists governorate text default '';
+alter table labs add column if not exists wilayat text default '';
+
+drop policy if exists "cases_select" on cases;
+create policy "cases_select" on cases for select
+  using (
+    clinic_id = my_clinic_id()
+    or clinic_id in (select id from clinics where owner_id = auth.uid())
+    or lab_id = my_lab_id()
+  );
+
+drop policy if exists "cases_insert_own_clinic" on cases;
+create policy "cases_insert_own_clinic" on cases for insert
+  with check (
+    clinic_id = my_clinic_id()
+    or clinic_id in (select id from clinics where owner_id = auth.uid())
+  );
+
+drop policy if exists "cases_update" on cases;
+create policy "cases_update" on cases for update
+  using (
+    clinic_id = my_clinic_id()
+    or clinic_id in (select id from clinics where owner_id = auth.uid())
+    or lab_id = my_lab_id()
+  );
+
+drop policy if exists "cases_delete_own_clinic" on cases;
+create policy "cases_delete_own_clinic" on cases for delete
+  using (
+    clinic_id = my_clinic_id()
+    or clinic_id in (select id from clinics where owner_id = auth.uid())
+  );
