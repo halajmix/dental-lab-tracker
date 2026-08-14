@@ -676,3 +676,42 @@ begin
   return NEW;
 end;
 $$ language plpgsql;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 15 — case_notes catches up with multi-clinic (Phase 13)        */
+/*                                                                       */
+/*  Phase 13 broadened the cases policies so a dentist who owns several  */
+/*  clinics can see cases sent under any of them, but case_notes kept    */
+/*  matching only the profile's single default clinic. On a case from a  */
+/*  secondary clinic the notes thread read as empty (lab messages        */
+/*  invisible) and posting failed the insert policy. Same fix: also      */
+/*  accept any clinic the caller owns.                                   */
+/* --------------------------------------------------------------------- */
+
+drop policy if exists "case_notes_select" on case_notes;
+create policy "case_notes_select" on case_notes for select
+  using (
+    exists (
+      select 1 from cases c
+      where c.id = case_notes.case_id
+        and (
+          c.clinic_id = my_clinic_id()
+          or c.clinic_id in (select my_owned_clinic_ids())
+          or c.lab_id = my_lab_id()
+        )
+    )
+  );
+
+drop policy if exists "case_notes_insert" on case_notes;
+create policy "case_notes_insert" on case_notes for insert
+  with check (
+    exists (
+      select 1 from cases c
+      where c.id = case_notes.case_id
+        and (
+          c.clinic_id = my_clinic_id()
+          or c.clinic_id in (select my_owned_clinic_ids())
+          or c.lab_id = my_lab_id()
+        )
+    )
+  );
