@@ -54,7 +54,6 @@ import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
 import {
   fetchLabs,
-  insertLab,
   fetchCases,
   insertCase,
   updateCase,
@@ -638,7 +637,6 @@ export default function DentalLabTracker({ auth }) {
   }, [isDentist, profile.id]);
 
   // Modals
-  const [showLabModal, setShowLabModal] = useState(false);
   const [clinicModal, setClinicModal] = useState(null); // { editing: clinicObj | null } | null
   const [showCaseModal, setShowCaseModal] = useState(false);
   // Admin actions (lab directory, SLA analytics) live off the main dashboard.
@@ -651,7 +649,15 @@ export default function DentalLabTracker({ auth }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [query, setQuery] = useState("");
 
+  // labById intentionally indexes ALL labs, including unclaimed placeholder
+  // rows: existing cases may still point at one, and their name must keep
+  // resolving on the dashboard even though it's no longer selectable.
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
+
+  // Only labs that actually registered on the platform (a real lab account
+  // owns the row) can be picked for new work or listed as partners —
+  // dentists can no longer create placeholder lab rows themselves.
+  const registeredLabs = useMemo(() => labs.filter((l) => l.ownerId), [labs]);
 
   // Which case's lifecycle drawer is open.
   const [drawerCaseId, setDrawerCaseId] = useState(null);
@@ -723,17 +729,7 @@ export default function DentalLabTracker({ auth }) {
     persist(caseId, { remake: { ...data }, history: [...(c.history ?? []), logEntry("remake", c.stageIndex, by, currentRole, label)] });
   };
 
-  /* ---------------- Add lab / add case ---------------- */
-
-  const addLab = async (data) => {
-    try {
-      const saved = await insertLab(clinic.id, data);
-      setLabs((p) => [...p, saved]);
-    } catch (err) {
-      console.error(err);
-      alert("Couldn't save the lab — " + err.message);
-    }
-  };
+  /* ---------------- Add clinic / add case ---------------- */
 
   // Multi-clinic: same form (AddClinicModal) handles both create and edit —
   // editingId present means update in place, absent means insert + append.
@@ -875,6 +871,7 @@ export default function DentalLabTracker({ auth }) {
         ) : isDentist ? (
           <DentistDashboard
             labById={labById}
+            clinicsById={clinicsById}
             cases={filteredDentistCases}
             allCases={cases}
             countBase={searchedDentistCases}
@@ -906,7 +903,6 @@ export default function DentalLabTracker({ auth }) {
 
       {/* ------------------------- Modals ------------------------- */}
       <ProfileSettingsModal open={showProfileSettings} onClose={() => setShowProfileSettings(false)} auth={auth} />
-      {isDentist && <AddLabModal open={showLabModal} onClose={() => setShowLabModal(false)} onSave={addLab} />}
       {isDentist && (
         <AddClinicModal
           open={!!clinicModal}
@@ -920,7 +916,7 @@ export default function DentalLabTracker({ auth }) {
           open={showCaseModal}
           onClose={() => setShowCaseModal(false)}
           onSave={addCase}
-          labs={labs}
+          labs={registeredLabs}
           userId={auth.session?.user?.id}
           clinics={myClinics}
           defaultClinicId={clinic?.id}
@@ -967,23 +963,23 @@ export default function DentalLabTracker({ auth }) {
               </div>
             </div>
             <div className="border-t border-slate-100 pt-4">
-              <div className="mb-2.5 flex items-center justify-between">
+              <div className="mb-2.5">
                 <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <Building2 size={13} /> Registered Labs ({labs.length})
+                  <Building2 size={13} /> Registered Labs ({registeredLabs.length})
                 </h4>
-                <button
-                  onClick={() => { setShowLabModal(true); setShowSettings(false); }}
-                  className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
-                >
-                  <Plus size={13} /> Add Lab
-                </button>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Read-only directory of labs registered on Dr-Crown. Pick which one receives a case in the prescription form.
+                </p>
               </div>
               <div className="space-y-2">
-                {labs.length === 0 && <p className="text-sm text-slate-400">No labs registered yet.</p>}
-                {labs.map((l) => (
+                {registeredLabs.length === 0 && <p className="text-sm text-slate-400">No registered labs on the platform yet.</p>}
+                {registeredLabs.map((l) => (
                   <div key={l.id} className="rounded-lg border border-slate-200 p-3">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-800">{l.name}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800">{l.name}</p>
+                        {orgLocation(l) && <p className="mt-0.5 text-[11px] text-slate-400">{orgLocation(l)}</p>}
+                      </div>
                       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
                         <Clock size={11} /> {l.tat}d Turn around time
                       </span>
@@ -1106,8 +1102,20 @@ function FilterPill({ active, onClick, label, count, tone }) {
   );
 }
 
+// Case ids are "C-" + a base36 timestamp + 2 random chars — long and mostly
+// noise. The tail is the distinguishing part, so that's what's shown; the
+// full id stays available on hover/title for cross-referencing with the lab.
+const shortCaseId = (id) => (id?.length > 8 ? `…${id.slice(-6)}` : id ?? "—");
+
+// Clinics and labs both carry governorate/wilayat now; `address` predates
+// those and is still empty for every org created through the app, so fall
+// back to it only if it was somehow filled in.
+const orgLocation = (org) =>
+  [org?.wilayat, org?.governorate].filter(Boolean).join(", ") || org?.address || "";
+
 function DentistDashboard({
   labById,
+  clinicsById,
   cases,
   allCases,
   countBase,
@@ -1184,9 +1192,10 @@ function DentistDashboard({
           <table className="w-full text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 font-semibold">Case ID</th>
+                <th className="px-4 py-3 font-semibold">Case</th>
                 <th className="px-4 py-3 font-semibold">Patient Name</th>
-                <th className="px-4 py-3 font-semibold">Lab Name</th>
+                <th className="px-4 py-3 font-semibold">Clinic</th>
+                <th className="px-4 py-3 font-semibold">Lab</th>
                 <th className="px-4 py-3 font-semibold">Appt Date</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
@@ -1195,15 +1204,15 @@ function DentistDashboard({
             <tbody className="divide-y divide-slate-100">
               {cases.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
                     No cases match the current filters.
                   </td>
                 </tr>
               )}
               {cases.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50/60">
-                  <td className="px-4 py-3.5 align-top font-semibold text-slate-800">
-                    {c.id}
+                  <td className="px-4 py-3.5 align-top font-mono text-xs font-semibold text-slate-700" title={c.id}>
+                    {shortCaseId(c.id)}
                     {c.remake && (
                       <div className="mt-1">
                         <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
@@ -1229,7 +1238,18 @@ function DentistDashboard({
                       c.prescription?.category && <div className="mt-0.5 text-[11px] text-slate-400">{c.prescription.category}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3.5 align-top text-slate-600">{labById[c.labId]?.name ?? "—"}</td>
+                  <td className="px-4 py-3.5 align-top">
+                    <div className="text-slate-700">{clinicsById?.[c.clinicId]?.name ?? "—"}</div>
+                    {orgLocation(clinicsById?.[c.clinicId]) && (
+                      <div className="mt-0.5 text-[11px] text-slate-400">{orgLocation(clinicsById[c.clinicId])}</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 align-top">
+                    <div className="text-slate-700">{labById[c.labId]?.name ?? "—"}</div>
+                    {orgLocation(labById[c.labId]) && (
+                      <div className="mt-0.5 text-[11px] text-slate-400">{orgLocation(labById[c.labId])}</div>
+                    )}
+                  </td>
                   <td className="px-4 py-3.5 align-top whitespace-nowrap">
                     <div className="text-slate-600">{c.appointmentDate}</div>
                     <AppointmentBadge caseObj={c} className="mt-1" />
@@ -1764,113 +1784,15 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
 }
 
 /* ------------------------------------------------------------------ */
-/*  Add-Lab modal                                                      */
+/*  Add-Clinic modal                                                   */
 /* ------------------------------------------------------------------ */
 
 // Light, borderless input — sits on a soft gray fill until focused, when it
-// lifts to white with a colored ring. Used by AddLabModal, ProfileSettingsModal
-// and LabSettingsDrawer. text-base (16px) below sm: avoids iOS Safari's
-// force-zoom-on-focus for any input under 16px.
+// lifts to white with a colored ring. Used by AddClinicModal,
+// ProfileSettingsModal and LabSettingsDrawer. text-base (16px) below sm:
+// avoids iOS Safari's force-zoom-on-focus for any input under 16px.
 const lightInputCls =
   "w-full rounded-xl border border-transparent bg-gray-50 px-3.5 py-2.5 text-base sm:text-sm text-slate-800 outline-none transition focus:bg-white focus:ring-2 focus:ring-blue-500";
-
-function AddLabModal({ open, onClose, onSave }) {
-  const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
-  const [email, setEmail] = useState("");
-  const [tat, setTat] = useState(5);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  const reset = () => {
-    setName("");
-    setContact("");
-    setEmail("");
-    setTat(5);
-    setShowAdvanced(false);
-  };
-
-  const submit = (e) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    onSave({
-      name: name.trim(),
-      contact: contact.trim() || "—",
-      email: email.trim(),
-      tat: Number(tat) || 1,
-    });
-    reset();
-    onClose();
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title="Add Laboratory">
-      <form onSubmit={submit} className="space-y-4">
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-semibold text-slate-700">Laboratory Name</span>
-          <input
-            className={`${lightInputCls} py-3.5 text-base font-medium placeholder:font-normal`}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Summit Prosthetics"
-            autoFocus
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-semibold text-slate-700">Phone Number</span>
-          <input
-            className={lightInputCls}
-            value={contact}
-            onChange={(e) => setContact(e.target.value)}
-            placeholder="00968 9000 0000"
-            inputMode="tel"
-          />
-        </label>
-
-        {showAdvanced ? (
-          <div className="space-y-3.5 rounded-xl border border-dashed border-gray-200 p-3.5">
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-medium text-slate-500">Email</span>
-              <input type="email" className={lightInputCls} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="orders@lab.com" />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-medium text-slate-500">Default Turnaround (Days)</span>
-              <input type="number" min={1} className={lightInputCls} value={tat} onChange={(e) => setTat(e.target.value)} />
-            </label>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(false)}
-              className="flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-600"
-            >
-              <ChevronDown size={13} className="rotate-180" /> Hide advanced settings
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setShowAdvanced(true)}
-            className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:underline"
-          >
-            <ChevronDown size={14} /> Show advanced settings
-            <span className="font-normal text-slate-400">(email, turnaround)</span>
-          </button>
-        )}
-
-        <div className="flex items-center justify-between pt-2">
-          <button type="button" onClick={onClose} className="text-sm font-semibold text-slate-500 hover:text-slate-700">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/30 transition hover:bg-blue-700"
-          >
-            Save Lab
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
 
 /**
  * Multi-clinic support: add a new clinic under the same dentist account, or
