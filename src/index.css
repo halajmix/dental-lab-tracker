@@ -1,3 +1,18 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* iOS Safari renders <input type="date"> with a native intrinsic width and
+   centered value text that both ignore width:100% — the field overflows its
+   card off the right edge of the screen (seen live on the Rx form's
+   "Deliver to Clinic on"). Stripping the native appearance makes it obey
+   the layout like every other input; the ::-webkit pseudo re-anchors the
+   value text left to match. Desktop browsers are unaffected. */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+}
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+}
