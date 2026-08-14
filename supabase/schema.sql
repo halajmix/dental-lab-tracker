@@ -118,6 +118,22 @@ as $$
   select lab_id from profiles where id = auth.uid();
 $$;
 
+-- Multi-clinic (Phase 13): every clinic the caller owns. SECURITY DEFINER is
+-- what matters here, not just style — an inline "select id from clinics
+-- where owner_id = auth.uid()" directly inside a cases RLS policy runs
+-- under the caller's own RLS-restricted context, which re-triggers
+-- clinics_select (it queries cases right back for the lab-visibility
+-- branch) -> infinite recursion. A security definer function's internal
+-- query bypasses RLS instead of re-entering it, same reason my_clinic_id()/
+-- my_lab_id() above are written this way rather than inlined.
+create or replace function my_owned_clinic_ids()
+returns setof uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select id from clinics where owner_id = auth.uid();
+$$;
+
 -- profiles: a user can see and manage only their own profile row.
 drop policy if exists "profiles_select_own" on profiles;
 create policy "profiles_select_own" on profiles for select
@@ -581,7 +597,7 @@ drop policy if exists "cases_select" on cases;
 create policy "cases_select" on cases for select
   using (
     clinic_id = my_clinic_id()
-    or clinic_id in (select id from clinics where owner_id = auth.uid())
+    or clinic_id in (select my_owned_clinic_ids())
     or lab_id = my_lab_id()
   );
 
@@ -589,14 +605,14 @@ drop policy if exists "cases_insert_own_clinic" on cases;
 create policy "cases_insert_own_clinic" on cases for insert
   with check (
     clinic_id = my_clinic_id()
-    or clinic_id in (select id from clinics where owner_id = auth.uid())
+    or clinic_id in (select my_owned_clinic_ids())
   );
 
 drop policy if exists "cases_update" on cases;
 create policy "cases_update" on cases for update
   using (
     clinic_id = my_clinic_id()
-    or clinic_id in (select id from clinics where owner_id = auth.uid())
+    or clinic_id in (select my_owned_clinic_ids())
     or lab_id = my_lab_id()
   );
 
@@ -604,5 +620,5 @@ drop policy if exists "cases_delete_own_clinic" on cases;
 create policy "cases_delete_own_clinic" on cases for delete
   using (
     clinic_id = my_clinic_id()
-    or clinic_id in (select id from clinics where owner_id = auth.uid())
+    or clinic_id in (select my_owned_clinic_ids())
   );
