@@ -66,13 +66,37 @@ async function fetchImageAsDataUrl(url) {
   });
 }
 
-function imageNaturalSize(dataUrl) {
+function loadImage(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Failed to load image"));
     img.src = dataUrl;
   });
+}
+
+// Re-encode through a canvas before handing the image to jsPDF. This is
+// what actually locks the aspect ratio: phone photos carry an EXIF
+// rotation flag — the browser reports the *rotated* dimensions (which is
+// what we measure and scale by), but jsPDF draws the *raw* pixels,
+// ignoring EXIF. A portrait iPhone shot therefore came out stretched into
+// the wrong-shaped box. Drawing to a canvas applies the orientation and
+// produces pixels whose dimensions are exactly what we measured. Also
+// downscales anything over MAX_PX on its long edge — a 12MP capture far
+// exceeds what an A4 page can show and only bloats the file.
+async function normalizePhoto(dataUrl) {
+  const MAX_PX = 2200;
+  const img = await loadImage(dataUrl);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  const scale = Math.min(1, MAX_PX / Math.max(w, h));
+  const cw = Math.max(1, Math.round(w * scale));
+  const ch = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = cw;
+  canvas.height = ch;
+  canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+  return { dataUrl: canvas.toDataURL("image/jpeg", 0.92), width: cw, height: ch };
 }
 
 // One full dedicated A4 page per clinical/shade photo — scaled and centered
@@ -82,8 +106,10 @@ async function appendPhotoPages(pdf, photos) {
   for (let i = 0; i < photos.length; i++) {
     const photo = photos[i];
     try {
-      const dataUrl = await fetchImageAsDataUrl(photo.url);
-      const { width: iw, height: ih } = await imageNaturalSize(dataUrl);
+      const raw = await fetchImageAsDataUrl(photo.url);
+      // Canvas-normalized: EXIF orientation baked in, so the drawn pixels'
+      // aspect ratio is exactly the measured one — contain, never stretch.
+      const { dataUrl, width: iw, height: ih } = await normalizePhoto(raw);
       const maxW = A4W - M * 2;
       const maxH = A4H - M * 2 - CAPTION_H;
       const scale = Math.min(maxW / iw, maxH / ih);
@@ -91,14 +117,13 @@ async function appendPhotoPages(pdf, photos) {
       const drawH = ih * scale;
       const x = (A4W - drawW) / 2;
       const y = M + CAPTION_H + (maxH - drawH) / 2;
-      const format = dataUrl.match(/^data:image\/(\w+);/)?.[1]?.toUpperCase().replace("JPG", "JPEG") || "JPEG";
 
       pdf.addPage();
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
       pdf.setTextColor(...MUTED);
       pdf.text(`Photo ${i + 1} of ${photos.length}${photo.name ? ` — ${photo.name}` : ""}`, M, M);
-      pdf.addImage(dataUrl, format, x, y, drawW, drawH);
+      pdf.addImage(dataUrl, "JPEG", x, y, drawW, drawH);
     } catch (err) {
       // One bad photo shouldn't sink the whole PDF — skip its page.
       console.error("Failed to add photo page to PDF", photo.name, err);
