@@ -655,8 +655,21 @@ function Field({ label, children, hint, required }) {
  * at a glance without expanding everything.
  */
 function Step({ n, title, subtitle, summary, open, onToggle, complete, invalid, children }) {
+  const ref = useRef(null);
+  const wasOpen = useRef(open);
+  // Moving between steps collapses a tall section above this one, which
+  // leaves the modal's scroll offset pointing deep into the newly opened
+  // step (the user lands at its bottom). When THIS step transitions to
+  // open, snap its header to the top of the scroll area. Initial mount
+  // doesn't scroll — wasOpen starts equal to open.
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      requestAnimationFrame(() => ref.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    }
+    wasOpen.current = open;
+  }, [open]);
   return (
-    <section className={`overflow-hidden rounded-xl border transition ${open ? "border-blue-200 bg-white shadow-sm" : "border-slate-200 bg-white"}`}>
+    <section ref={ref} className={`scroll-mt-2 overflow-hidden rounded-xl border transition ${open ? "border-blue-200 bg-white shadow-sm" : "border-slate-200 bg-white"}`}>
       <button
         type="button"
         onClick={onToggle}
