@@ -19,6 +19,7 @@ import {
   Shield,
   Wrench,
   UserCog,
+  Crown,
 } from "lucide-react";
 import {
   fetchAllClinics,
@@ -30,6 +31,7 @@ import {
   adminDeleteCase,
   adminSetLabStatus,
   adminSetLabRoles,
+  adminTransferLabOwnership,
   adminFetchPriceSchedules,
   fetchLabRoster,
 } from "./lib/data.js";
@@ -573,6 +575,8 @@ export default function AdminDashboard({ auth }) {
 function LabStaffRoles({ labs }) {
   const claimedLabs = labs.filter((l) => l.ownerId);
   const [labId, setLabId] = useState("");
+  const [ownerId, setOwnerId] = useState(""); // tracked locally so a transfer reflects without a full reload
+  const [confirmOwner, setConfirmOwner] = useState(null); // userId pending transfer confirm
   const [roster, setRoster] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -580,6 +584,8 @@ function LabStaffRoles({ labs }) {
 
   const loadRoster = (id) => {
     setLabId(id);
+    setOwnerId(labs.find((l) => l.id === id)?.ownerId ?? "");
+    setConfirmOwner(null);
     setRoster(null);
     setError("");
     setMessage("");
@@ -587,6 +593,23 @@ function LabStaffRoles({ labs }) {
     fetchLabRoster(id)
       .then(setRoster)
       .catch((err) => setError(err.message));
+  };
+
+  const makeOwner = async (person) => {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    setConfirmOwner(null);
+    try {
+      await adminTransferLabOwnership(labId, person.userId);
+      setOwnerId(person.userId);
+      setMessage(`${person.name} now owns this lab. Demote the previous owner's roles below if needed.`);
+      fetchLabRoster(labId).then(setRoster).catch(() => {});
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const toggleRole = async (person, role) => {
@@ -645,6 +668,7 @@ function LabStaffRoles({ labs }) {
               <th className="px-5 py-2">Status</th>
               <th className="px-5 py-2">Lab Admin</th>
               <th className="px-5 py-2">Technician</th>
+              <th className="px-5 py-2 text-right">Ownership</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -656,11 +680,14 @@ function LabStaffRoles({ labs }) {
                 </td>
                 <td className="px-5 py-2.5 text-xs font-semibold uppercase text-slate-500">{p.status.replace("_", "-")}</td>
                 <td className="px-5 py-2.5">
-                  <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-violet-700">
+                  <label
+                    className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-violet-700"
+                    title={p.userId === ownerId ? "The owner is always an admin — transfer ownership first" : undefined}
+                  >
                     <input
                       type="checkbox"
                       checked={p.roles.includes("lab_admin")}
-                      disabled={busy}
+                      disabled={busy || p.userId === ownerId}
                       onChange={() => toggleRole(p, "lab_admin")}
                       className="h-4 w-4 accent-violet-600"
                     />
@@ -672,12 +699,46 @@ function LabStaffRoles({ labs }) {
                     <input
                       type="checkbox"
                       checked={p.roles.includes("lab_tech")}
-                      disabled={busy}
+                      disabled={busy || p.userId === ownerId}
                       onChange={() => toggleRole(p, "lab_tech")}
                       className="h-4 w-4 accent-blue-600"
                     />
                     <Wrench size={12} />
                   </label>
+                </td>
+                <td className="px-5 py-2.5">
+                  <div className="flex justify-end">
+                    {p.userId === ownerId ? (
+                      <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                        <Crown size={11} /> Owner
+                      </span>
+                    ) : confirmOwner === p.userId ? (
+                      <span className="flex items-center gap-1 text-xs">
+                        <button
+                          onClick={() => makeOwner(p)}
+                          disabled={busy}
+                          className="rounded-lg bg-amber-600 px-2 py-1 font-semibold text-white hover:bg-amber-700"
+                        >
+                          Confirm transfer
+                        </button>
+                        <button
+                          onClick={() => setConfirmOwner(null)}
+                          className="rounded-lg px-2 py-1 font-semibold text-slate-500 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmOwner(p.userId)}
+                        disabled={busy}
+                        className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                        title="Make this member the lab owner"
+                      >
+                        <Crown size={11} /> Make owner
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

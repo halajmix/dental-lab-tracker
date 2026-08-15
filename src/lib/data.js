@@ -597,6 +597,10 @@ export async function adminSetLabRoles(userId, labId, roles) {
   await callAdminAction("set-lab-role", { userId, labId, roles });
 }
 
+export async function adminTransferLabOwnership(labId, newOwnerId) {
+  await callAdminAction("transfer-lab-ownership", { labId, newOwnerId });
+}
+
 // Cross-tenant price sheet inspection — plain RLS reads via is_admin().
 export async function adminFetchPriceSchedules() {
   const { data, error } = await supabase

@@ -27,6 +27,12 @@
  *                    (e.g. upgrade a tech to dual-role). At least one role
  *                    required — removing someone entirely is a suspension,
  *                    not a row deletion.
+ *   transfer-lab-ownership — { labId, newOwnerId } -> hands labs.owner_id to
+ *                    another existing member (for labs registered by a
+ *                    technician where the real owner signed up later). The
+ *                    labs trigger auto-grants the new owner dual-role rows;
+ *                    the OLD owner keeps their current roles and becomes a
+ *                    normal member — demote them with set-lab-role after.
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -188,6 +194,24 @@ Deno.serve(async (req) => {
             if (error) throw error;
           }
         }
+        return json({ ok: true });
+      }
+
+      case "transfer-lab-ownership": {
+        const labId = String(body.labId ?? "");
+        const newOwnerId = String(body.newOwnerId ?? "");
+        if (!labId || !newOwnerId) return json({ error: "labId and newOwnerId required" }, 400);
+
+        // The new owner must already be a signed-up member of this lab.
+        const { data: prof } = await admin.from("profiles").select("lab_id, role").eq("id", newOwnerId).maybeSingle();
+        if (prof?.role !== "lab" || prof?.lab_id !== labId) {
+          return json({ error: "new owner must be an existing member of this lab" }, 400);
+        }
+
+        const { error } = await admin.from("labs").update({ owner_id: newOwnerId }).eq("id", labId);
+        if (error) throw error;
+        // labs_owner_membership trigger grants the new owner active
+        // lab_admin + lab_tech rows automatically; nothing else to do.
         return json({ ok: true });
       }
 
