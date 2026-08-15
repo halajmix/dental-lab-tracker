@@ -193,12 +193,18 @@ Deno.serve(async (req) => {
       const recipient = (lab?.notify_email ?? "").trim() || lab?.email;
       if (!recipient) return json({ ok: true, skipped: "lab has no email on file" });
 
+      // Dentist ticked "Request a lab pick-up" on the Rx form.
+      const rxData = (record.prescription ?? {}) as Record<string, unknown>;
+      const pickupLine = rxData.pickupRequested
+        ? `<p style="margin:10px 0;padding:8px 12px;background:#eff6ff;border-radius:8px;color:#1d4ed8;font-weight:600">&#128666; Pick-up requested — the clinic asks you to collect this case.</p>`
+        : "";
+
       const emailed = await sendEmail(
         recipient,
-        `New case from ${clinic?.name ?? "a clinic"} — ${record.patient_name}`,
+        `New case from ${clinic?.name ?? "a clinic"} — ${record.patient_name}${rxData.pickupRequested ? " (pick-up requested)" : ""}`,
         emailShell(
           `New case sent to ${lab.name}`,
-          `<p style="color:#475569">${clinic?.name ?? "A clinic"} just sent you a new case, case ID <b>${record.id}</b>.</p>${caseSummaryRows(record)}`,
+          `<p style="color:#475569">${clinic?.name ?? "A clinic"} just sent you a new case, case ID <b>${record.id}</b>.</p>${pickupLine}${caseSummaryRows(record)}`,
         ),
       );
       return json({ ok: true, emailed });
