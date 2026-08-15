@@ -244,6 +244,53 @@ export async function fetchMyLabMemberships(userId, labId) {
   return data ?? [];
 }
 
+// Full roster for the Technicians / Staff views — one entry per person,
+// dual-role rows collapsed into a roles[] array. Profile names come from
+// the profiles_select_lab_members policy (Phase 18).
+export async function fetchLabRoster(labId) {
+  const { data: members, error } = await supabase
+    .from("lab_members")
+    .select("*")
+    .eq("lab_id", labId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+
+  const ids = [...new Set(members.map((m) => m.user_id).filter(Boolean))];
+  let profilesById = {};
+  if (ids.length) {
+    const { data: profs } = await supabase.from("profiles").select("id, name, avatar_url").in("id", ids);
+    profilesById = Object.fromEntries((profs ?? []).map((p) => [p.id, p]));
+  }
+
+  const byPerson = new Map();
+  for (const m of members) {
+    const key = m.user_id ?? `invite:${(m.email || "").toLowerCase()}`;
+    const entry = byPerson.get(key) ?? {
+      userId: m.user_id,
+      email: m.email ?? "",
+      name: profilesById[m.user_id]?.name || m.email || "—",
+      avatarUrl: profilesById[m.user_id]?.avatar_url ?? null,
+      roles: [],
+      status: m.status,
+      memberRowIds: [],
+    };
+    if (!entry.roles.includes(m.role)) entry.roles.push(m.role);
+    entry.memberRowIds.push(m.id);
+    // Any suspended row means the person is locked out — mirror RLS.
+    if (m.status === "suspended") entry.status = "suspended";
+    byPerson.set(key, entry);
+  }
+  return [...byPerson.values()];
+}
+
+// Fires the pricing trigger on every draft case of the caller's lab.
+// Returns how many cases were re-priced.
+export async function repriceUnbilledCases() {
+  const { data, error } = await supabase.rpc("reprice_unbilled_cases");
+  if (error) throw error;
+  return data;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Price schedules (Phase 17) — lab price lists + per-clinic rules.    */
 /*  All writes are lab_admin-gated by RLS; actual case pricing happens  */

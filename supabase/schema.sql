@@ -1145,3 +1145,40 @@ drop trigger if exists cases_price on cases;
 create trigger cases_price
   before insert or update of prescription, remake, lab_id on cases
   for each row execute function price_case();
+
+/* --------------------------------------------------------------------- */
+/*  Phase 18 — reprice RPC + lab roster visibility                       */
+/* --------------------------------------------------------------------- */
+
+-- One-click "re-price unbilled cases" for the Price Lists tab. The no-op
+-- "set prescription = prescription" exists purely to fire the cases_price
+-- trigger on every draft case of the caller's lab. SECURITY DEFINER so it
+-- can touch all the lab's rows in one statement; scope + role are checked
+-- explicitly first. Issued/paid invoices stay frozen (trigger + WHERE).
+create or replace function reprice_unbilled_cases()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n integer;
+begin
+  if my_lab_id() is null or not is_lab_admin() then
+    raise exception 'Only an active lab admin can re-price cases';
+  end if;
+  update cases
+     set prescription = prescription
+   where lab_id = my_lab_id()
+     and invoice_status = 'draft';
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Lab members can see their co-members' profiles — needed for the
+-- technician roster (names/avatars). Scoped to the caller's own lab;
+-- my_lab_id() already nulls out for suspended members.
+drop policy if exists "profiles_select_lab_members" on profiles;
+create policy "profiles_select_lab_members" on profiles for select
+  using (lab_id is not null and lab_id = my_lab_id());

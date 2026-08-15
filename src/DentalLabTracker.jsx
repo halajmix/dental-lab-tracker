@@ -54,7 +54,7 @@ import {
   isUrgent,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics } from "./Analytics.jsx";
-import { PriceListsManager } from "./LabAdmin.jsx";
+import { PriceListsManager, OverviewDashboard, TechniciansPanel } from "./LabAdmin.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import ContactLabModal from "./ContactLab.jsx";
@@ -602,12 +602,10 @@ const ADMIN_TABS = [
 ];
 
 const ADMIN_PLACEHOLDERS = {
-  overview: "Revenue, outstanding balances, AOV, remake rate and intake-vs-completed charts arrive with the pricing engine.",
-  technicians: "Live technician workload, output and remake tracking, plus batch case re-assignment.",
   staff: "Invite technicians by email and manage active / suspended / read-only access.",
 };
 
-function LabAdminWorkspace({ queue, lab, clinicsById }) {
+function LabAdminWorkspace({ queue, lab, clinicsById, cases }) {
   const [tab, setTab] = useState("queue");
   const active = ADMIN_TABS.find((t) => t.id === tab) ?? ADMIN_TABS[0];
   return (
@@ -627,6 +625,10 @@ function LabAdminWorkspace({ queue, lab, clinicsById }) {
       </nav>
       {tab === "queue" ? (
         queue
+      ) : tab === "overview" ? (
+        <OverviewDashboard cases={cases} />
+      ) : tab === "technicians" ? (
+        <TechniciansPanel lab={lab} cases={cases} />
       ) : tab === "prices" ? (
         <PriceListsManager lab={lab} clinicsById={clinicsById} />
       ) : (
@@ -1050,7 +1052,7 @@ export default function DentalLabTracker({ auth }) {
             />
           );
           return activeWorkspace === "admin" ? (
-            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} />
+            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} cases={labQueue} />
           ) : (
             labDashboard
           );

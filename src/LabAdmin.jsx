@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Tags,
   Plus,
@@ -8,9 +9,20 @@ import {
   Star,
   AlertTriangle,
   Building2,
+  DollarSign,
+  Wallet,
+  TrendingUp,
+  CheckCheck,
+  RefreshCcw,
+  Users,
+  UserCheck,
+  X,
+  Shield,
+  Wrench,
 } from "lucide-react";
 import { CATEGORY_NAMES } from "./PrescriptionForm.jsx";
-import { BASE_PRICE } from "./Analytics.jsx";
+import { BASE_PRICE, caseFee } from "./Analytics.jsx";
+import { STAGE_INDEX } from "./LifecycleEngine.jsx";
 import {
   fetchPriceSchedules,
   createPriceSchedule,
@@ -22,7 +34,29 @@ import {
   fetchClinicPriceRules,
   upsertClinicPriceRule,
   deleteClinicPriceRule,
+  fetchLabRoster,
+  repriceUnbilledCases,
+  updateCase,
 } from "./lib/data.js";
+
+/* ================================================================== */
+/*  Shared helpers — completion dates, units, money                    */
+/* ================================================================== */
+
+// First timestamp a case reached a given stage (same rule as Analytics).
+const reachedDate = (c, stage) => {
+  const e = (c.history ?? []).find((h) => h.toStage === stage && (h.action === "advance" || h.action === "created"));
+  return e ? new Date(e.at) : null;
+};
+const completedAt = (c) => reachedDate(c, STAGE_INDEX.WORK_COMPLETE);
+
+// Billable units on a case = teeth per restoration (min 1), matching the
+// pricing trigger's math.
+const caseUnits = (c) => {
+  const rest = c.prescription?.restorations;
+  if (rest?.length) return rest.reduce((n, r) => n + (r.teeth?.length || 1), 0);
+  return c.prescription?.teeth?.length || 1;
+};
 
 /* ================================================================== */
 /*  Price Lists manager — Lab Admin workspace (Phase 17)               */
@@ -405,6 +439,7 @@ export function PriceListsManager({ lab, clinicsById }) {
   const [busy, setBusy] = useState(false);
   const [addingList, setAddingList] = useState(false);
   const [newListName, setNewListName] = useState("");
+  const [repriceState, setRepriceState] = useState({ confirming: false, message: "" });
 
   const load = () => {
     Promise.all([fetchPriceSchedules(lab.id), fetchClinicPriceRules(lab.id)])
@@ -573,8 +608,655 @@ export function PriceListsManager({ lab, clinicsById }) {
               </div>
             )}
           </div>
+
+          {/* Re-price every draft case at current rates. Issued/paid
+              invoices are frozen server-side, so this can't rewrite
+              anything already billed. */}
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <RefreshCcw size={15} className="shrink-0 text-blue-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-slate-700">Re-price unbilled cases</p>
+              <p className="text-xs text-slate-400">
+                Applies your current price lists to every case not yet issued or paid — including cases created
+                before pricing existed.
+              </p>
+            </div>
+            {repriceState.message && <p className="text-xs font-semibold text-emerald-600">{repriceState.message}</p>}
+            {repriceState.confirming ? (
+              <span className="flex items-center gap-1.5">
+                <button
+                  onClick={() =>
+                    mutate(async () => {
+                      const n = await repriceUnbilledCases();
+                      setRepriceState({ confirming: false, message: `Re-priced ${n} case${n === 1 ? "" : "s"}.` });
+                    })
+                  }
+                  disabled={busy}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+                >
+                  {busy ? "Working…" : "Yes, re-price"}
+                </button>
+                <button
+                  onClick={() => setRepriceState({ confirming: false, message: "" })}
+                  className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setRepriceState({ confirming: true, message: "" })}
+                disabled={busy}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-blue-300 hover:text-blue-700"
+              >
+                Re-price now
+              </button>
+            )}
+          </div>
         </>
       )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Charts — hand-rolled SVG, validated categorical palette            */
+/*  (slots in fixed order; "Other" is neutral, never a series hue)     */
+/* ================================================================== */
+
+const SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"];
+const OTHER_COLOR = "#898781";
+const fmtOMR = (n) => `${fmtMoney(n)} OMR`;
+
+function LineChart({ labels, series }) {
+  const [hover, setHover] = useState(null);
+  const W = 760;
+  const H = 240;
+  const padL = 40;
+  const padR = 96; // room for direct end-labels
+  const padT = 14;
+  const padB = 28;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const n = labels.length;
+  const maxY = Math.max(1, ...series.flatMap((s) => s.values));
+  const yMax = Math.max(4, Math.ceil(maxY / 4) * 4);
+  const x = (i) => padL + (n <= 1 ? innerW / 2 : (i * innerW) / (n - 1));
+  const y = (v) => padT + innerH * (1 - v / yMax);
+  const tickEvery = Math.max(1, Math.ceil(n / 6));
+
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * W;
+    const i = Math.round(((px - padL) / innerW) * (n - 1));
+    setHover(Math.max(0, Math.min(n - 1, i)));
+  };
+
+  return (
+    <div className="relative">
+      <div className="mb-2 flex flex-wrap gap-4">
+        {series.map((s, si) => (
+          <span key={s.name} className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: SERIES_COLORS[si] }} />
+            {s.name}
+          </span>
+        ))}
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full"
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+      >
+        {[1, 2, 3, 4].map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y((yMax / 4) * t)} y2={y((yMax / 4) * t)} stroke="#e2e8f0" strokeWidth="1" />
+            <text x={padL - 6} y={y((yMax / 4) * t) + 3} textAnchor="end" fontSize="10" fill="#898781">
+              {(yMax / 4) * t}
+            </text>
+          </g>
+        ))}
+        <line x1={padL} x2={W - padR} y1={y(0)} y2={y(0)} stroke="#c3c2b7" strokeWidth="1" />
+        {labels.map((lb, i) =>
+          i % tickEvery === 0 ? (
+            <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize="10" fill="#898781">
+              {lb}
+            </text>
+          ) : null
+        )}
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={padT} y2={y(0)} stroke="#cbd5e1" strokeDasharray="3 3" />}
+        {series.map((s, si) => (
+          <g key={s.name}>
+            <polyline
+              points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
+              fill="none"
+              stroke={SERIES_COLORS[si]}
+              strokeWidth="2"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            {n > 0 && (
+              <g>
+                <circle cx={x(n - 1)} cy={y(s.values[n - 1])} r="3" fill={SERIES_COLORS[si]} />
+                <text x={x(n - 1) + 7} y={y(s.values[n - 1]) + 3} fontSize="11" fill="#52514e">
+                  {s.name}
+                </text>
+              </g>
+            )}
+            {hover != null && (
+              <circle cx={x(hover)} cy={y(s.values[hover])} r="4" fill={SERIES_COLORS[si]} stroke="#ffffff" strokeWidth="2" />
+            )}
+          </g>
+        ))}
+      </svg>
+      {hover != null && (
+        <div
+          className="pointer-events-none absolute top-8 z-10 -translate-x-1/2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 shadow-md"
+          style={{ left: `${(x(hover) / W) * 100}%` }}
+        >
+          <p className="text-[10px] font-semibold text-slate-400">{labels[hover]}</p>
+          {series.map((s, si) => (
+            <p key={s.name} className="flex items-center gap-1.5 text-xs text-slate-700">
+              <span className="h-2 w-2 rounded-full" style={{ background: SERIES_COLORS[si] }} />
+              {s.name}: <span className="font-semibold">{s.values[hover]}</span>
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DonutChart({ slices, centerLabel }) {
+  const [hover, setHover] = useState(null);
+  const total = slices.reduce((a, s) => a + s.value, 0);
+  const R = 56;
+  const C = 2 * Math.PI * R;
+  const gap = 2;
+  let acc = 0;
+  const segments = slices.map((s) => {
+    const len = total > 0 ? (s.value / total) * C : 0;
+    const seg = { ...s, offset: acc, len };
+    acc += len;
+    return seg;
+  });
+  const shown = hover != null ? segments[hover] : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-5">
+      <svg viewBox="0 0 160 160" className="h-40 w-40 shrink-0">
+        <g transform="rotate(-90 80 80)">
+          {segments.map((s, i) => (
+            <circle
+              key={s.label}
+              cx="80"
+              cy="80"
+              r={R}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={hover === i ? 30 : 26}
+              strokeDasharray={`${Math.max(0.1, s.len - gap)} ${C - Math.max(0.1, s.len - gap)}`}
+              strokeDashoffset={-s.offset}
+              style={{ cursor: "pointer", transition: "stroke-width 120ms" }}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+            />
+          ))}
+        </g>
+        <text x="80" y="76" textAnchor="middle" fontSize="12" fill="#52514e">
+          {shown ? `${total > 0 ? Math.round((shown.value / total) * 100) : 0}%` : centerLabel}
+        </text>
+        <text x="80" y="94" textAnchor="middle" fontSize="13" fontWeight="700" fill="#0b0b0b">
+          {fmtMoney(shown ? shown.value : total)}
+        </text>
+      </svg>
+      {/* value-labeled legend doubles as the table view */}
+      <div className="min-w-0 flex-1 space-y-1">
+        {segments.map((s, i) => (
+          <div
+            key={s.label}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+            className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-xs ${hover === i ? "bg-slate-50" : ""}`}
+          >
+            <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
+            <span className={`min-w-0 flex-1 truncate ${hover === i ? "font-semibold text-slate-800" : "text-slate-600"}`}>
+              {s.label}
+            </span>
+            <span className="font-semibold text-slate-700">{fmtMoney(s.value)}</span>
+            <span className="w-9 text-right text-slate-400">
+              {total > 0 ? `${Math.round((s.value / total) * 100)}%` : "—"}
+            </span>
+          </div>
+        ))}
+        {segments.length === 0 && <p className="text-xs text-slate-400">No revenue in this period yet.</p>}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Overview — executive analytics (Lab Admin workspace)               */
+/* ================================================================== */
+
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const RANGE_PRESETS = [
+  { id: "7d", label: "7 days" },
+  { id: "month", label: "This month" },
+  { id: "quarter", label: "Quarter" },
+  { id: "year", label: "Year" },
+  { id: "custom", label: "Custom" },
+];
+
+function rangeBounds(preset, custom) {
+  const now = new Date();
+  const endToday = new Date(startOfDay(now).getTime() + 86_400_000 - 1);
+  if (preset === "7d") return { from: new Date(startOfDay(now).getTime() - 6 * 86_400_000), to: endToday };
+  if (preset === "quarter")
+    return { from: new Date(now.getFullYear(), now.getMonth() - (now.getMonth() % 3), 1), to: endToday };
+  if (preset === "year") return { from: new Date(now.getFullYear(), 0, 1), to: endToday };
+  if (preset === "custom") {
+    const from = custom.from ? new Date(custom.from + "T00:00:00") : new Date(now.getFullYear(), now.getMonth(), 1);
+    const to = custom.to ? new Date(custom.to + "T23:59:59") : endToday;
+    return from <= to ? { from, to } : { from: to, to: from };
+  }
+  return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: endToday };
+}
+
+function StatCard({ icon: Icon, label, value, sub }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center gap-2 text-slate-400">
+        <Icon size={14} />
+        <p className="text-[10px] font-bold uppercase tracking-wide">{label}</p>
+      </div>
+      <p className="mt-1.5 text-xl font-bold text-slate-800">{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-slate-400">{sub}</p>}
+    </div>
+  );
+}
+
+function revenueByCategory(cases) {
+  const map = {};
+  for (const c of cases) {
+    const total = caseFee(c).total;
+    const rest = c.prescription?.restorations;
+    if (rest?.length) {
+      const weights = rest.map((r) => (BASE_PRICE[r.category] ?? 400) * (r.teeth?.length || 1));
+      const wSum = weights.reduce((a, b) => a + b, 0) || 1;
+      rest.forEach((r, i) => {
+        map[r.category] = (map[r.category] ?? 0) + (total * weights[i]) / wSum;
+      });
+    } else {
+      const cat = c.prescription?.category || "Uncategorised";
+      map[cat] = (map[cat] ?? 0) + total;
+    }
+  }
+  return map;
+}
+
+export function OverviewDashboard({ cases }) {
+  const [preset, setPreset] = useState("month");
+  const [custom, setCustom] = useState({ from: "", to: "" });
+  const { from, to } = rangeBounds(preset, custom);
+
+  const stats = useMemo(() => {
+    const inRange = (d) => d && d >= from && d <= to;
+    const completed = cases.filter((c) => inRange(completedAt(c)));
+    const revenue = completed.reduce((s, c) => s + caseFee(c).total, 0);
+    const outstanding = cases
+      .filter((c) => completedAt(c) && c.invoiceStatus !== "paid")
+      .reduce((s, c) => s + caseFee(c).total, 0);
+    const remakes = completed.filter((c) => c.remake).length;
+    const hasEstimates = completed.some((c) => !caseFee(c).priced);
+
+    // daily buckets (weekly past ~3 months to keep the chart readable)
+    const dayMs = 86_400_000;
+    const spanDays = Math.max(1, Math.round((to - from) / dayMs));
+    const weekly = spanDays > 92;
+    const bucketMs = weekly ? 7 * dayMs : dayMs;
+    const bucketCount = Math.max(1, Math.ceil((to - from) / bucketMs));
+    const labels = [];
+    const intake = new Array(bucketCount).fill(0);
+    const done = new Array(bucketCount).fill(0);
+    for (let i = 0; i < bucketCount; i++) {
+      const d = new Date(from.getTime() + i * bucketMs);
+      labels.push(d.toLocaleDateString(undefined, { day: "numeric", month: "short" }));
+    }
+    const bucketOf = (d) => Math.min(bucketCount - 1, Math.max(0, Math.floor((d - from) / bucketMs)));
+    for (const c of cases) {
+      const created = c.createdAt ? new Date(c.createdAt) : null;
+      if (inRange(created)) intake[bucketOf(created)] += 1;
+      const fin = completedAt(c);
+      if (inRange(fin)) done[bucketOf(fin)] += 1;
+    }
+
+    const byCat = revenueByCategory(completed);
+    const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+    const top = sorted.slice(0, 5).map(([label, value], i) => ({ label, value, color: SERIES_COLORS[i] }));
+    const otherSum = sorted.slice(5).reduce((s, [, v]) => s + v, 0);
+    if (otherSum > 0) top.push({ label: "Other", value: otherSum, color: OTHER_COLOR });
+
+    return { completed, revenue, outstanding, remakes, hasEstimates, labels, intake, done, donut: top };
+  }, [cases, from.getTime(), to.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const aov = stats.completed.length ? stats.revenue / stats.completed.length : 0;
+  const remakeRate = stats.completed.length ? (stats.remakes / stats.completed.length) * 100 : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {RANGE_PRESETS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setPreset(p.id)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+              preset === p.id ? "bg-blue-600 text-white shadow-sm" : "bg-white text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+        {preset === "custom" && (
+          <span className="flex items-center gap-1.5">
+            <input
+              type="date"
+              value={custom.from}
+              onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+            />
+            <span className="text-xs text-slate-400">→</span>
+            <input
+              type="date"
+              value={custom.to}
+              onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+            />
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard icon={DollarSign} label="Gross revenue" value={fmtOMR(stats.revenue)} sub="completed in period" />
+        <StatCard icon={Wallet} label="Uncollected" value={fmtOMR(stats.outstanding)} sub="all time, not yet paid" />
+        <StatCard icon={TrendingUp} label="Avg order value" value={fmtOMR(aov)} />
+        <StatCard icon={CheckCheck} label="Cases completed" value={stats.completed.length} />
+        <StatCard icon={RefreshCcw} label="Remake rate" value={`${remakeRate.toFixed(1)}%`} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-3">
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Case intake vs completed</h3>
+          <LineChart
+            labels={stats.labels}
+            series={[
+              { name: "Intake", values: stats.intake },
+              { name: "Completed", values: stats.done },
+            ]}
+          />
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-2">
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Revenue by restoration type</h3>
+          <DonutChart slices={stats.donut} centerLabel="Total OMR" />
+        </div>
+      </div>
+
+      {stats.hasEstimates && (
+        <p className="text-[11px] text-slate-400">
+          * Includes estimated fees for cases created before your price lists — use “Re-price unbilled cases” in
+          Price Lists to apply real rates.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Technicians — roster, output, batch re-assignment                  */
+/* ================================================================== */
+
+const STATUS_CHIP = {
+  active: "bg-emerald-100 text-emerald-700",
+  read_only: "bg-amber-100 text-amber-700",
+  suspended: "bg-rose-100 text-rose-700",
+  invited: "bg-slate-100 text-slate-500",
+};
+
+function AssignModal({ open, onClose, techs, cases, techNameById }) {
+  const [selected, setSelected] = useState({});
+  const [target, setTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setSelected({});
+      setTarget("");
+      setError("");
+    }
+  }, [open]);
+
+  if (!open) return null;
+  const chosen = Object.keys(selected).filter((id) => selected[id]);
+
+  const assign = async () => {
+    if (!target || !chosen.length || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      for (const id of chosen) {
+        await updateCase(id, { assignedTechId: target === "__none" ? null : target });
+      }
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+          <UserCheck size={16} className="text-blue-600" />
+          <h3 className="text-sm font-bold text-slate-800">Re-assign cases</h3>
+          <button onClick={onClose} className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {cases.length === 0 && <p className="px-3 py-8 text-center text-sm text-slate-400">No active cases.</p>}
+          {cases.map((c) => (
+            <label
+              key={c.id}
+              className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 ${selected[c.id] ? "bg-blue-50" : "hover:bg-slate-50"}`}
+            >
+              <input
+                type="checkbox"
+                checked={!!selected[c.id]}
+                onChange={(e) => setSelected((s) => ({ ...s, [c.id]: e.target.checked }))}
+                className="h-4 w-4 accent-blue-600"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-slate-700">{c.patientName}</span>
+                <span className="block truncate text-xs text-slate-400">
+                  {caseUnits(c)} unit{caseUnits(c) === 1 ? "" : "s"} ·{" "}
+                  {c.assignedTechId ? techNameById[c.assignedTechId] ?? "Assigned" : "Unassigned"}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {error && <p className="border-t border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600">{error}</p>}
+        <div className="flex items-center gap-2 border-t border-slate-100 p-3">
+          <select
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+          >
+            <option value="">Assign to…</option>
+            {techs.map((t) => (
+              <option key={t.userId} value={t.userId}>
+                {t.name}
+              </option>
+            ))}
+            <option value="__none">— Unassign —</option>
+          </select>
+          <button
+            onClick={assign}
+            disabled={busy || !target || !chosen.length}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+          >
+            {busy ? "Assigning…" : `Assign ${chosen.length || ""}`}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+export function TechniciansPanel({ lab, cases }) {
+  const [roster, setRoster] = useState(null);
+  const [error, setError] = useState("");
+  const [assignOpen, setAssignOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLabRoster(lab.id)
+      .then((r) => !cancelled && setRoster(r))
+      .catch((err) => !cancelled && setError(err.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [lab.id]);
+
+  const techs = (roster ?? []).filter((p) => p.userId && p.roles.includes("lab_tech"));
+  const techNameById = Object.fromEntries(techs.map((t) => [t.userId, t.name]));
+  const activeCases = cases.filter((c) => c.stageIndex < STAGE_INDEX.WORK_COMPLETE);
+  const unassigned = activeCases.filter((c) => !c.assignedTechId);
+
+  const now = new Date();
+  const dayStart = startOfDay(now);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+
+  const rows = techs.map((t) => {
+    const assigned = cases.filter((c) => c.assignedTechId === t.userId);
+    const finished = assigned
+      .map((c) => ({ c, at: completedAt(c) }))
+      .filter((x) => x.at);
+    const unitsSince = (since) => finished.filter((x) => x.at >= since).reduce((s, x) => s + caseUnits(x.c), 0);
+    const laborMonth = finished.filter((x) => x.at >= monthStart).reduce((s, x) => s + caseFee(x.c).total, 0);
+    return {
+      ...t,
+      activeLoad: assigned.filter((c) => c.stageIndex < STAGE_INDEX.WORK_COMPLETE).length,
+      unitsDay: unitsSince(dayStart),
+      unitsMonth: unitsSince(monthStart),
+      unitsYear: unitsSince(yearStart),
+      laborMonth,
+      remakeRate: finished.length ? (finished.filter((x) => x.c.remake).length / finished.length) * 100 : null,
+    };
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Users size={16} className="text-blue-600" />
+          <h3 className="text-sm font-bold text-slate-800">Technician workload</h3>
+        </div>
+        <p className="text-xs text-slate-400">
+          {unassigned.length} unassigned active case{unassigned.length === 1 ? "" : "s"}
+        </p>
+        <button
+          onClick={() => setAssignOpen(true)}
+          className="ml-auto flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+        >
+          <UserCheck size={15} /> Re-assign cases
+        </button>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          <AlertTriangle size={15} className="shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead>
+              <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <th className="px-3 py-2.5">Technician</th>
+                <th className="px-2 py-2.5 text-right">Active load</th>
+                <th className="px-2 py-2.5 text-right">Units today</th>
+                <th className="px-2 py-2.5 text-right">Month</th>
+                <th className="px-2 py-2.5 text-right">Year</th>
+                <th className="px-2 py-2.5 text-right">Value (month)</th>
+                <th className="px-2 py-2.5 text-right">Remake %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roster === null && !error && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">
+                    Loading roster…
+                  </td>
+                </tr>
+              )}
+              {roster !== null && rows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">
+                    No technicians yet — invite your team from the Staff tab.
+                  </td>
+                </tr>
+              )}
+              {rows.map((t) => (
+                <tr key={t.userId} className="border-t border-slate-100">
+                  <td className="min-w-0 px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-slate-700">{t.name}</span>
+                        <span className="mt-0.5 flex items-center gap-1">
+                          {t.roles.includes("lab_admin") && (
+                            <span className="flex items-center gap-0.5 rounded bg-violet-100 px-1 py-px text-[9px] font-bold uppercase text-violet-600">
+                              <Shield size={9} /> Admin
+                            </span>
+                          )}
+                          <span className="flex items-center gap-0.5 rounded bg-blue-100 px-1 py-px text-[9px] font-bold uppercase text-blue-600">
+                            <Wrench size={9} /> Tech
+                          </span>
+                          <span className={`rounded px-1 py-px text-[9px] font-bold uppercase ${STATUS_CHIP[t.status] ?? STATUS_CHIP.invited}`}>
+                            {t.status.replace("_", "-")}
+                          </span>
+                        </span>
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2.5 text-right text-sm font-semibold text-slate-700">{t.activeLoad}</td>
+                  <td className="px-2 py-2.5 text-right text-sm text-slate-600">{t.unitsDay}</td>
+                  <td className="px-2 py-2.5 text-right text-sm text-slate-600">{t.unitsMonth}</td>
+                  <td className="px-2 py-2.5 text-right text-sm text-slate-600">{t.unitsYear}</td>
+                  <td className="px-2 py-2.5 text-right text-sm text-slate-600">{fmtMoney(t.laborMonth)}</td>
+                  <td className="px-2 py-2.5 text-right text-sm text-slate-600">
+                    {t.remakeRate == null ? "—" : `${t.remakeRate.toFixed(1)}%`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <AssignModal
+        open={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        techs={techs}
+        cases={activeCases}
+        techNameById={techNameById}
+      />
     </div>
   );
 }
