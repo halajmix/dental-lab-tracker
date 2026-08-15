@@ -21,6 +21,8 @@ export const labFromRow = (r) => ({
   ownerId: r.owner_id,
   createdByClinicId: r.created_by_clinic_id,
   status: r.status ?? "active",
+  // Who receives new-case emails; "" = the lab's general contact email.
+  notifyEmail: r.notify_email ?? "",
 });
 
 export const caseFromRow = (r) => ({
@@ -152,13 +154,14 @@ export async function fetchLabs() {
 
 // Lab self-service settings (phone, standard TAT, per-procedure TATs).
 // RLS: only the owning lab account (or creating clinic) can update.
-export async function updateLab(labId, { contact, tat, procedureTats, governorate, wilayat }) {
+export async function updateLab(labId, { contact, tat, procedureTats, governorate, wilayat, notifyEmail }) {
   const patch = {};
   if (contact !== undefined) patch.contact = contact;
   if (tat !== undefined) patch.tat = tat;
   if (procedureTats !== undefined) patch.procedure_tats = procedureTats;
   if (governorate !== undefined) patch.governorate = governorate;
   if (wilayat !== undefined) patch.wilayat = wilayat;
+  if (notifyEmail !== undefined) patch.notify_email = notifyEmail;
   const { data, error } = await supabase.from("labs").update(patch).eq("id", labId).select().single();
   if (error) throw error;
   return labFromRow(data);

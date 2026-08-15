@@ -125,13 +125,16 @@ Deno.serve(async (req) => {
       if (!record.lab_id) return json({ ok: true, skipped: "no lab assigned" });
 
       const [{ data: lab }, { data: clinic }] = await Promise.all([
-        admin.from("labs").select("name, email").eq("id", record.lab_id).maybeSingle(),
+        // notify_email: the recipient the lab admin designated in Lab
+        // Settings (themselves or a technician); empty = general lab email.
+        admin.from("labs").select("name, email, notify_email").eq("id", record.lab_id).maybeSingle(),
         admin.from("clinics").select("name").eq("id", record.clinic_id).maybeSingle(),
       ]);
-      if (!lab?.email) return json({ ok: true, skipped: "lab has no email on file" });
+      const recipient = (lab?.notify_email ?? "").trim() || lab?.email;
+      if (!recipient) return json({ ok: true, skipped: "lab has no email on file" });
 
       const emailed = await sendEmail(
-        lab.email,
+        recipient,
         `New case from ${clinic?.name ?? "a clinic"} — ${record.patient_name}`,
         emailShell(
           `New case sent to ${lab.name}`,

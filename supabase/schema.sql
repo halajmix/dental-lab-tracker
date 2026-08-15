@@ -1332,6 +1332,18 @@ as $$
                  and m.status = 'active');
 $$;
 
+/* --------------------------------------------------------------------- */
+/*  Phase 20 — designated case-notification recipient                    */
+/*                                                                       */
+/*  The lab admin picks ONE address (their own or a technician's, from   */
+/*  the roster in Lab Settings) to receive new-case emails. Empty means  */
+/*  fall back to the lab's general contact email, which is what every    */
+/*  lab effectively used before this column existed. Writable via the    */
+/*  existing admin-gated labs update policy; read by case-notify.        */
+/* --------------------------------------------------------------------- */
+
+alter table labs add column if not exists notify_email text not null default '';
+
 -- The claim flow needs its own branch again: at claim time the lab has no
 -- owner and the claimer holds no membership rows, so neither the owner
 -- branch nor is_lab_admin() can pass — but their profile already points

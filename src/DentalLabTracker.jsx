@@ -73,6 +73,7 @@ import {
   updateProfile,
   uploadAvatar,
   updateLab,
+  fetchLabRoster,
 } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 
@@ -2026,6 +2027,8 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
   const [tat, setTat] = useState(5);
   const [procTats, setProcTats] = useState({});
   const [location, setLocation] = useState({ governorate: "", wilayat: "" });
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [roster, setRoster] = useState([]); // for the notification-recipient picker
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -2039,7 +2042,11 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
     setTat(lab.tat ?? 5);
     setProcTats(lab.procedureTats ?? {});
     setLocation({ governorate: lab.governorate ?? "", wilayat: lab.wilayat ?? "" });
+    setNotifyEmail(lab.notifyEmail ?? "");
     setError("");
+    fetchLabRoster(lab.id)
+      .then((r) => setRoster(r.filter((p) => p.userId && p.email && p.status !== "suspended")))
+      .catch(() => setRoster([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -2063,6 +2070,7 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
         procedureTats: procTats,
         governorate: location.governorate,
         wilayat: location.wilayat,
+        notifyEmail,
       });
       await onSaved();
       onClose();
@@ -2089,6 +2097,26 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
             </label>
             <OmanLocationFields value={location} onChange={(patch) => setLocation((l) => ({ ...l, ...patch }))} inputCls={lightInputCls} />
           </div>
+        </div>
+
+        <div className="border-t border-slate-100 pt-4">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Case notifications</h4>
+          <p className="mb-2.5 text-[11px] text-slate-400">
+            Who gets the email when a dentist sends a new case. One recipient — pick yourself or a technician.
+          </p>
+          <select value={notifyEmail} onChange={(e) => setNotifyEmail(e.target.value)} className={lightInputCls}>
+            <option value="">Lab contact email{lab.email ? ` (${lab.email})` : ""}</option>
+            {[...new Map(roster.map((p) => [p.email.toLowerCase(), p])).values()]
+              .filter((p) => p.email.toLowerCase() !== (lab.email ?? "").toLowerCase())
+              .map((p) => (
+                <option key={p.email} value={p.email}>
+                  {p.name} ({p.email})
+                </option>
+              ))}
+            {notifyEmail && !roster.some((p) => p.email.toLowerCase() === notifyEmail.toLowerCase()) && (
+              <option value={notifyEmail}>{notifyEmail} — no longer on the roster</option>
+            )}
+          </select>
         </div>
 
         <div className="border-t border-slate-100 pt-4">
