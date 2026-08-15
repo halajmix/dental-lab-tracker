@@ -34,6 +34,25 @@ function PageLoader() {
   return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-400">Loading…</div>;
 }
 
+// Site-wide credit line — rendered outside the AuthGate so it shows on the
+// login screen and inside every role's dashboard alike.
+function SiteFooter() {
+  return (
+    <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
+      Developed and powered by{" "}
+      <a
+        href="https://paradiseharbours.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-blue-600 hover:underline"
+      >
+        paradiseharbours.com
+      </a>
+      , a purely Omani Company.
+    </footer>
+  );
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
@@ -54,6 +73,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           )
         }
       </AuthGate>
+      <SiteFooter />
     </ErrorBoundary>
   </React.StrictMode>
 );
