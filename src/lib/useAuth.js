@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
-import { clinicFromRow, labFromRow } from "./data.js";
+import { clinicFromRow, labFromRow, fetchMyLabMemberships } from "./data.js";
 
 /**
  * Session + profile/org loader. `profile` carries the role; `clinic`/`lab`
@@ -12,6 +12,10 @@ export function useAuth() {
   const [profile, setProfile] = useState(undefined);
   const [clinic, setClinic] = useState(null);
   const [lab, setLab] = useState(null);
+  // Lab staff RBAC rows for this user in their lab (Phase 16). null for
+  // non-lab users; [] means "no rows", which RLS treats as a legacy owner
+  // with full access — the client mirrors that.
+  const [labMemberships, setLabMemberships] = useState(null);
   const [loading, setLoading] = useState(true);
   // True once Supabase reports a PASSWORD_RECOVERY event (user clicked a
   // "reset password" email link) — the recovery link signs them in with a
@@ -48,8 +52,20 @@ export function useAuth() {
       const { data: l } = await supabase.from("labs").select("*").eq("id", prof.lab_id).maybeSingle();
       if (!fresh()) return;
       setLab(l ? labFromRow(l) : null);
+      // Fail-soft: if lab_members doesn't exist yet (schema phase not run)
+      // or the read fails, fall back to [] = legacy full access, matching
+      // what RLS enforces for a user with no membership rows.
+      let memberships = [];
+      try {
+        memberships = await fetchMyLabMemberships(userId, prof.lab_id);
+      } catch {
+        memberships = [];
+      }
+      if (!fresh()) return;
+      setLabMemberships(memberships);
     } else {
       setLab(null);
+      setLabMemberships(null);
     }
   }, []);
 
@@ -87,6 +103,7 @@ export function useAuth() {
         setProfile(null);
         setClinic(null);
         setLab(null);
+        setLabMemberships(null);
         setLoading(false);
       }
     });
@@ -107,5 +124,5 @@ export function useAuth() {
   // drop into the normal signed-in app (or Onboarding, if profile is null).
   const clearRecovery = () => setRecovery(false);
 
-  return { session, profile, clinic, lab, loading, recovery, refreshProfile, signOut, clearRecovery };
+  return { session, profile, clinic, lab, labMemberships, loading, recovery, refreshProfile, signOut, clearRecovery };
 }

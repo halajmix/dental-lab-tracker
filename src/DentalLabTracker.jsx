@@ -35,6 +35,12 @@ import {
   Image as ImageIcon,
   History as HistoryIcon,
   ScanLine,
+  Shield,
+  Wrench,
+  LayoutDashboard,
+  Users,
+  Tags,
+  UserPlus,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 import DeviceManagement from "./DeviceManagement.jsx";
@@ -547,13 +553,150 @@ function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvanc
 }
 
 /* ------------------------------------------------------------------ */
+/*  Lab workspace RBAC (Phase 16) — dual-role users (lab_admin +       */
+/*  lab_tech) switch between an Admin workspace and the tech queue.    */
+/* ------------------------------------------------------------------ */
+
+// Segmented workspace control, shown only to dual-role lab users.
+function WorkspaceSwitcher({ workspace, onChange }) {
+  const seg = (id, Icon, label) => (
+    <button
+      key={id}
+      onClick={() => onChange(id)}
+      className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
+        workspace === id ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+      }`}
+      title={`Switch workspace: ${label}`}
+    >
+      <Icon size={14} />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+  return (
+    <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-slate-100 p-0.5">
+      {seg("admin", Shield, "Lab Admin")}
+      {seg("tech", Wrench, "Technician")}
+    </div>
+  );
+}
+
+function ComingSoonCard({ icon: Icon, title, blurb }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+        <Icon size={22} />
+      </div>
+      <h3 className="text-sm font-bold text-slate-700">{title}</h3>
+      <p className="max-w-sm text-sm text-slate-500">{blurb}</p>
+    </div>
+  );
+}
+
+const ADMIN_TABS = [
+  { id: "queue", label: "Case Queue", icon: ClipboardCheck },
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "technicians", label: "Technicians", icon: Users },
+  { id: "prices", label: "Price Lists", icon: Tags },
+  { id: "staff", label: "Staff", icon: UserPlus },
+];
+
+const ADMIN_PLACEHOLDERS = {
+  overview: "Revenue, outstanding balances, AOV, remake rate and intake-vs-completed charts arrive with the pricing engine.",
+  technicians: "Live technician workload, output and remake tracking, plus batch case re-assignment.",
+  prices: "Master price list and per-clinic tier rates that drive automatic case invoicing.",
+  staff: "Invite technicians by email and manage active / suspended / read-only access.",
+};
+
+function LabAdminWorkspace({ queue }) {
+  const [tab, setTab] = useState("queue");
+  const active = ADMIN_TABS.find((t) => t.id === tab) ?? ADMIN_TABS[0];
+  return (
+    <div>
+      <nav className="mb-5 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
+        {ADMIN_TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+              tab === id ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+            }`}
+          >
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </nav>
+      {tab === "queue" ? (
+        queue
+      ) : (
+        <ComingSoonCard icon={active.icon} title={`${active.label} — coming soon`} blurb={ADMIN_PLACEHOLDERS[tab]} />
+      )}
+    </div>
+  );
+}
+
+function SuspendedScreen({ labName, onSignOut }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-6 py-20 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+        <AlertTriangle size={22} />
+      </div>
+      <div>
+        <h3 className="text-sm font-bold text-rose-700">Account suspended</h3>
+        <p className="mt-1 max-w-sm text-sm text-rose-600">
+          Your access to {labName || "this lab"} has been suspended. Contact your lab administrator.
+        </p>
+      </div>
+      <button
+        onClick={onSignOut}
+        className="flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+      >
+        <LogOut size={15} /> Sign out
+      </button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main component — data now lives in Supabase, scoped per account    */
 /*  by RLS (a clinic sees only its cases, a lab sees only its own).    */
 /* ------------------------------------------------------------------ */
 
 export default function DentalLabTracker({ auth }) {
-  const { profile, clinic, lab, signOut, refreshProfile } = auth;
+  const { profile, clinic, lab, labMemberships, signOut, refreshProfile } = auth;
   const isDentist = profile.role === "dentist";
+
+  // ---- Lab staff RBAC (Phase 16) ----
+  // No membership rows = legacy owner account; RLS grants those full
+  // access, so the client mirrors that as dual-role.
+  const memberships = labMemberships ?? [];
+  const isLegacyLabOwner = !isDentist && memberships.length === 0;
+  const activeRoles = memberships
+    .filter((m) => m.status === "active" || m.status === "read_only")
+    .map((m) => m.role);
+  const hasAdminRole = !isDentist && (isLegacyLabOwner || activeRoles.includes("lab_admin"));
+  const hasTechRole = !isDentist && (isLegacyLabOwner || activeRoles.includes("lab_tech"));
+  const isDualLab = hasAdminRole && hasTechRole;
+  // Mirrors RLS: my_lab_id() nulls out when ANY membership row is suspended.
+  const isSuspended = !isDentist && memberships.some((m) => m.status === "suspended");
+
+  const [workspacePref, setWorkspacePref] = useState(() => {
+    try {
+      return localStorage.getItem("drcrown.workspace") || "tech";
+    } catch {
+      return "tech";
+    }
+  });
+  const switchWorkspace = (w) => {
+    setWorkspacePref(w);
+    try {
+      localStorage.setItem("drcrown.workspace", w);
+    } catch {
+      /* private mode — non-persistent preference is fine */
+    }
+  };
+  // Single-role members are pinned to their one workspace regardless of
+  // any stale stored preference.
+  const activeWorkspace = hasAdminRole ? (hasTechRole ? workspacePref : "admin") : "tech";
 
   const [labs, setLabs] = useState([]);
   const [cases, setCases] = useState([]);
@@ -829,13 +972,18 @@ export default function DentalLabTracker({ auth }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowSettings(true)}
-              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              title="Settings"
-            >
-              <Settings size={18} />
-            </button>
+            {isDualLab && !isSuspended && (
+              <WorkspaceSwitcher workspace={activeWorkspace} onChange={switchWorkspace} />
+            )}
+            {(isDentist || hasAdminRole) && (
+              <button
+                onClick={() => setShowSettings(true)}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                title="Settings"
+              >
+                <Settings size={18} />
+              </button>
+            )}
             <ProfileMenu
               isDentist={isDentist}
               clinic={clinic}
@@ -883,19 +1031,24 @@ export default function DentalLabTracker({ auth }) {
             onContactLab={setContactCaseId}
             onExportCsv={() => exportCasesCSV(filteredDentistCases, labs, clinic?.dentist, "dentatrack-clinic-cases.csv")}
           />
-        ) : (
-          <LabDashboard
-            lab={lab}
-            queue={labQueue}
-            clinicsById={clinicsById}
-            onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
-            onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
-            onOpenCase={setDrawerCaseId}
-            onLogRemake={setRemakeCaseId}
-            onSetInvoiceNumber={setInvoiceNumber}
-            onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
-          />
-        )}
+        ) : isSuspended ? (
+          <SuspendedScreen labName={lab?.name} onSignOut={signOut} />
+        ) : (() => {
+          const labDashboard = (
+            <LabDashboard
+              lab={lab}
+              queue={labQueue}
+              clinicsById={clinicsById}
+              onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
+              onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
+              onOpenCase={setDrawerCaseId}
+              onLogRemake={setRemakeCaseId}
+              onSetInvoiceNumber={setInvoiceNumber}
+              onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
+            />
+          );
+          return activeWorkspace === "admin" ? <LabAdminWorkspace queue={labDashboard} /> : labDashboard;
+        })()}
       </main>
 
       {/* ------------------------- Modals ------------------------- */}
@@ -1020,7 +1173,7 @@ export default function DentalLabTracker({ auth }) {
           <AnalyticsDashboard cases={cases} labs={labs} />
         </Modal>
       )}
-      {!isDentist && lab && (
+      {!isDentist && lab && hasAdminRole && (
         <LabSettingsDrawer
           open={showSettings}
           onClose={() => setShowSettings(false)}

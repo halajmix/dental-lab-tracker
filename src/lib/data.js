@@ -43,6 +43,13 @@ export const caseFromRow = (r) => ({
   // Full timestamp of when the case was submitted (created_date above is
   // date-only) — drives the dentist table's "Sent to Lab" column.
   createdAt: r.created_at ?? null,
+  // Phase 16 RBAC/financial columns. Fee fields stay null until the
+  // Phase 17 pricing trigger prices the case.
+  assignedTechId: r.assigned_tech_id ?? null,
+  baseFee: r.base_fee ?? null,
+  adjustments: r.adjustments ?? [],
+  totalPrice: r.total_price ?? null,
+  invoiceStatus: r.invoice_status ?? "draft",
 });
 
 export const clinicFromRow = (r) => ({
@@ -207,6 +214,8 @@ const PATCH_KEY_MAP = {
   remake: "remake",
   history: "history",
   invoiceNumber: "invoice_number",
+  assignedTechId: "assigned_tech_id",
+  invoiceStatus: "invoice_status",
 };
 
 export async function updateCase(id, patch) {
@@ -217,6 +226,22 @@ export async function updateCase(id, patch) {
   const { data, error } = await supabase.from("cases").update(dbPatch).eq("id", id).select().single();
   if (error) throw error;
   return caseFromRow(data);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Lab staff RBAC (Phase 16) — a user's membership rows in their lab.  */
+/*  Dual-role users have two rows (lab_admin + lab_tech). No rows at    */
+/*  all means a legacy owner account, which RLS treats as full access.  */
+/* ------------------------------------------------------------------ */
+
+export async function fetchMyLabMemberships(userId, labId) {
+  const { data, error } = await supabase
+    .from("lab_members")
+    .select("role, status")
+    .eq("user_id", userId)
+    .eq("lab_id", labId);
+  if (error) throw error;
+  return data ?? [];
 }
 
 /* ------------------------------------------------------------------ */

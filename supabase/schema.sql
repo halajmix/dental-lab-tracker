@@ -715,3 +715,207 @@ create policy "case_notes_insert" on case_notes for insert
         )
     )
   );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 16 — lab staff RBAC: lab_admin / lab_tech roles + dual-role    */
+/*                                                                       */
+/*  A lab is no longer a single account. lab_members is a junction of    */
+/*  (lab, user, role); a dual-role user (owner who both manages and      */
+/*  benches) simply has two rows. Visibility still flows through         */
+/*  profiles.lab_id / my_lab_id() exactly as before — a joining tech     */
+/*  gets profiles.lab_id set like any lab user — so no existing SELECT   */
+/*  policy changes. What this phase adds on top:                         */
+/*    - my_lab_id() returns null for suspended members (kills access);   */
+/*    - lab_write_allowed() gates write policies for read-only members;  */
+/*    - is_lab_admin() gates lab-settings writes to admins.              */
+/*  Users with NO membership rows (legacy owners, mid-claim users) keep  */
+/*  full access — the backfill + labs trigger below make that rare.     */
+/* --------------------------------------------------------------------- */
+
+create table if not exists lab_members (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid not null references labs(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,  -- null until an invite is claimed (Phase 19)
+  email text not null default '',                            -- invite email, matched at signup
+  role text not null check (role in ('lab_admin', 'lab_tech')),
+  status text not null default 'invited'
+    check (status in ('invited', 'active', 'suspended', 'read_only')),
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists lab_members_user_role_key
+  on lab_members (lab_id, user_id, role) where user_id is not null;
+create unique index if not exists lab_members_invite_key
+  on lab_members (lab_id, lower(email), role) where user_id is null;
+create index if not exists lab_members_user_idx on lab_members (user_id);
+create index if not exists lab_members_email_idx on lab_members (lower(email));
+
+alter table lab_members enable row level security;
+
+-- Suspension wins over everything: any suspended membership row for the
+-- caller's lab nulls out my_lab_id(), which every lab-side policy keys on.
+create or replace function my_lab_id()
+returns uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select p.lab_id from profiles p
+  where p.id = auth.uid()
+    and not exists (
+      select 1 from lab_members m
+      where m.user_id = auth.uid()
+        and m.lab_id = p.lab_id
+        and m.status = 'suspended'
+    );
+$$;
+
+-- Write gate: legacy users with no membership rows keep writing; otherwise
+-- at least one 'active' row is required (a read_only-only member reads but
+-- never writes).
+create or replace function lab_write_allowed()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select
+    not exists (
+      select 1 from lab_members m
+      where m.user_id = auth.uid()
+        and m.lab_id = (select lab_id from profiles where id = auth.uid())
+    )
+    or exists (
+      select 1 from lab_members m
+      where m.user_id = auth.uid()
+        and m.lab_id = (select lab_id from profiles where id = auth.uid())
+        and m.status = 'active'
+    );
+$$;
+
+-- Admin gate for lab-settings / roster / pricing writes. The no-rows
+-- fallback keeps the original claim flow working: at claim time the new
+-- owner has a profile but no membership rows yet (the labs trigger below
+-- creates them the moment owner_id lands).
+create or replace function is_lab_admin()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select
+    not exists (
+      select 1 from lab_members m
+      where m.user_id = auth.uid()
+        and m.lab_id = (select lab_id from profiles where id = auth.uid())
+    )
+    or exists (
+      select 1 from lab_members m
+      where m.user_id = auth.uid()
+        and m.lab_id = (select lab_id from profiles where id = auth.uid())
+        and m.role = 'lab_admin' and m.status = 'active'
+    );
+$$;
+
+-- Members read their lab's roster (and always their own rows, even while
+-- suspended, so the client can explain the suspension); a signing-up user
+-- reads invites addressed to their email; platform admin inspects all.
+drop policy if exists "lab_members_select" on lab_members;
+create policy "lab_members_select" on lab_members for select
+  using (
+    user_id = auth.uid()
+    or lab_id = my_lab_id()
+    or (user_id is null and lower(email) = lower(coalesce(auth.jwt()->>'email', '')))
+    or is_admin()
+  );
+
+drop policy if exists "lab_members_insert_admin" on lab_members;
+create policy "lab_members_insert_admin" on lab_members for insert
+  with check (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "lab_members_update_admin" on lab_members;
+create policy "lab_members_update_admin" on lab_members for update
+  using (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "lab_members_delete_admin" on lab_members;
+create policy "lab_members_delete_admin" on lab_members for delete
+  using (lab_id = my_lab_id() and is_lab_admin());
+
+-- Whenever a lab gains an owner (registration or the claim flow), that
+-- owner becomes a dual-role active member. SECURITY DEFINER because the
+-- claiming user isn't a lab_admin yet — chicken and egg otherwise.
+create or replace function backfill_owner_membership()
+returns trigger
+security definer
+set search_path = public
+as $$
+begin
+  -- OLD is unassigned on INSERT — TG_OP must be checked first.
+  if new.owner_id is not null
+     and (TG_OP = 'INSERT' or new.owner_id is distinct from old.owner_id) then
+    insert into lab_members (lab_id, user_id, email, role, status)
+    select new.id, new.owner_id,
+           coalesce((select email from auth.users where id = new.owner_id), ''),
+           r.role, 'active'
+    from (values ('lab_admin'), ('lab_tech')) as r(role)
+    on conflict (lab_id, user_id, role) where user_id is not null do nothing;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists labs_owner_membership on labs;
+create trigger labs_owner_membership
+  after insert or update of owner_id on labs
+  for each row execute function backfill_owner_membership();
+
+-- One-time backfill: every existing lab owner becomes dual-role active.
+insert into lab_members (lab_id, user_id, email, role, status)
+select l.id, l.owner_id, coalesce(u.email, ''), r.role, 'active'
+from labs l
+join auth.users u on u.id = l.owner_id
+cross join (values ('lab_admin'), ('lab_tech')) as r(role)
+where l.owner_id is not null
+on conflict (lab_id, user_id, role) where user_id is not null do nothing;
+
+-- Cases: technician assignment + financial breakdown (populated by the
+-- Phase 17 pricing engine; columns land now so the app can ship reads).
+alter table cases add column if not exists assigned_tech_id uuid references auth.users(id) on delete set null;
+alter table cases add column if not exists base_fee numeric;
+alter table cases add column if not exists adjustments jsonb not null default '[]'::jsonb;
+alter table cases add column if not exists total_price numeric;
+alter table cases add column if not exists invoice_status text not null default 'draft'
+  check (invoice_status in ('draft', 'issued', 'paid'));
+create index if not exists cases_assigned_tech_idx on cases (assigned_tech_id);
+
+-- Lab-side writes now respect read_only status (suspended is already dead
+-- via my_lab_id() returning null).
+drop policy if exists "cases_update" on cases;
+create policy "cases_update" on cases for update
+  using (
+    clinic_id = my_clinic_id()
+    or clinic_id in (select my_owned_clinic_ids())
+    or (lab_id = my_lab_id() and lab_write_allowed())
+  );
+
+drop policy if exists "case_notes_insert" on case_notes;
+create policy "case_notes_insert" on case_notes for insert
+  with check (
+    exists (
+      select 1 from cases c
+      where c.id = case_notes.case_id
+        and (
+          c.clinic_id = my_clinic_id()
+          or c.clinic_id in (select my_owned_clinic_ids())
+          or (c.lab_id = my_lab_id() and lab_write_allowed())
+        )
+    )
+  );
+
+-- Lab settings (name, TATs, pricing to come) are admin-only now. The
+-- owner_id and creator-clinic branches are unchanged; the staff branch
+-- tightens from "any member" to "active lab_admin".
+drop policy if exists "labs_update_owner_or_creator" on labs;
+create policy "labs_update_owner_or_creator" on labs for update
+  using (
+    owner_id = auth.uid()
+    or created_by_clinic_id = my_clinic_id()
+    or (id = my_lab_id() and is_lab_admin())
+  );
