@@ -16,6 +16,7 @@ import {
   RefreshCcw,
   Users,
   UserCheck,
+  UserPlus,
   X,
   Shield,
   Wrench,
@@ -37,6 +38,9 @@ import {
   fetchLabRoster,
   repriceUnbilledCases,
   updateCase,
+  inviteLabMember,
+  setMemberStatus,
+  deleteInviteRows,
 } from "./lib/data.js";
 
 /* ================================================================== */
@@ -1257,6 +1261,210 @@ export function TechniciansPanel({ lab, cases }) {
         cases={activeCases}
         techNameById={techNameById}
       />
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Staff — invites + access control (Phase 19)                        */
+/* ================================================================== */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function StaffPanel({ lab, meId }) {
+  const [roster, setRoster] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRoles, setInviteRoles] = useState({ lab_admin: false, lab_tech: true });
+
+  const load = () => {
+    fetchLabRoster(lab.id)
+      .then((r) => {
+        setRoster(r);
+        setError("");
+      })
+      .catch((err) => setError(err.message));
+  };
+  useEffect(load, [lab.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mutate = async (fn) => {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const invite = () => {
+    const email = inviteEmail.trim();
+    const roles = Object.keys(inviteRoles).filter((r) => inviteRoles[r]);
+    if (!EMAIL_RE.test(email) || !roles.length) return;
+    mutate(() => inviteLabMember(lab.id, email, roles));
+    setInviteEmail("");
+    setInviteRoles({ lab_admin: false, lab_tech: true });
+  };
+
+  const people = roster ?? [];
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          <AlertTriangle size={15} className="shrink-0" /> {error}
+        </div>
+      )}
+
+      {/* invite */}
+      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+        <div className="flex items-center gap-2">
+          <UserPlus size={15} className="text-blue-600" />
+          <h3 className="text-sm font-bold text-slate-800">Invite a team member</h3>
+        </div>
+        <p className="mt-1 text-xs text-slate-400">
+          When someone signs up with this email and picks “Laboratory”, they'll be offered to join {lab.name}{" "}
+          automatically.
+        </p>
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <input
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="technician@example.com"
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:bg-white"
+          />
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-slate-600">
+            <input
+              type="checkbox"
+              checked={inviteRoles.lab_tech}
+              onChange={(e) => setInviteRoles((r) => ({ ...r, lab_tech: e.target.checked }))}
+              className="h-3.5 w-3.5 accent-blue-600"
+            />
+            Technician
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-slate-600">
+            <input
+              type="checkbox"
+              checked={inviteRoles.lab_admin}
+              onChange={(e) => setInviteRoles((r) => ({ ...r, lab_admin: e.target.checked }))}
+              className="h-3.5 w-3.5 accent-blue-600"
+            />
+            Lab Admin
+          </label>
+          <button
+            onClick={invite}
+            disabled={busy || !EMAIL_RE.test(inviteEmail.trim()) || (!inviteRoles.lab_admin && !inviteRoles.lab_tech)}
+            className="rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+          >
+            Invite
+          </button>
+        </div>
+      </div>
+
+      {/* roster */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px]">
+            <thead>
+              <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <th className="px-3 py-2.5">Member</th>
+                <th className="px-2 py-2.5">Roles</th>
+                <th className="px-2 py-2.5">Access</th>
+                <th className="px-2 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {roster === null && !error && (
+                <tr>
+                  <td colSpan={4} className="px-3 py-8 text-center text-sm text-slate-400">Loading roster…</td>
+                </tr>
+              )}
+              {roster !== null && people.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-3 py-8 text-center text-sm text-slate-400">
+                    No staff yet — send your first invite above.
+                  </td>
+                </tr>
+              )}
+              {people.map((p) => {
+                const isInvitePending = !p.userId;
+                const isOwner = p.userId && p.userId === lab.ownerId;
+                const isSelf = p.userId && p.userId === meId;
+                const locked = isOwner || isSelf;
+                return (
+                  <tr key={p.userId ?? p.email} className="border-t border-slate-100">
+                    <td className="min-w-0 px-3 py-2.5">
+                      <p className="truncate text-sm font-medium text-slate-700">
+                        {p.name}
+                        {isOwner && <span className="ml-1.5 text-[10px] font-bold uppercase text-amber-600">Owner</span>}
+                        {isSelf && !isOwner && <span className="ml-1.5 text-[10px] font-bold uppercase text-slate-400">You</span>}
+                      </p>
+                      <p className="truncate text-xs text-slate-400">{p.email || "—"}</p>
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <span className="flex items-center gap-1">
+                        {p.roles.includes("lab_admin") && (
+                          <span className="flex items-center gap-0.5 rounded bg-violet-100 px-1 py-px text-[9px] font-bold uppercase text-violet-600">
+                            <Shield size={9} /> Admin
+                          </span>
+                        )}
+                        {p.roles.includes("lab_tech") && (
+                          <span className="flex items-center gap-0.5 rounded bg-blue-100 px-1 py-px text-[9px] font-bold uppercase text-blue-600">
+                            <Wrench size={9} /> Tech
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2.5">
+                      {isInvitePending ? (
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${STATUS_CHIP.invited}`}>
+                          Invited — awaiting signup
+                        </span>
+                      ) : locked ? (
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${STATUS_CHIP[p.status] ?? STATUS_CHIP.invited}`}>
+                          {p.status.replace("_", "-")}
+                        </span>
+                      ) : (
+                        <select
+                          value={p.status}
+                          disabled={busy}
+                          onChange={(e) => mutate(() => setMemberStatus(p.memberRowIds, e.target.value))}
+                          className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-semibold outline-none focus:border-blue-400 focus:bg-white"
+                        >
+                          <option value="active">Active</option>
+                          <option value="read_only">Read-only</option>
+                          <option value="suspended">Suspended</option>
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-2 py-2.5 text-right">
+                      {isInvitePending && (
+                        <button
+                          onClick={() => mutate(() => deleteInviteRows(p.memberRowIds))}
+                          disabled={busy}
+                          className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
+                          title="Cancel invite"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-400">
+        Suspended members lose all access instantly; read-only members can view but not change anything. The owner
+        and your own row can't be locked out from here.
+      </p>
     </div>
   );
 }

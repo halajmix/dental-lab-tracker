@@ -14,8 +14,25 @@ import {
   Mail,
   AlertTriangle,
   X,
+  Power,
+  Tags,
+  Shield,
+  Wrench,
+  UserCog,
 } from "lucide-react";
-import { fetchAllClinics, fetchLabs, fetchCases, adminListUsers, adminDeleteAccount, adminDeleteOrg, adminDeleteCase } from "./lib/data.js";
+import {
+  fetchAllClinics,
+  fetchLabs,
+  fetchCases,
+  adminListUsers,
+  adminDeleteAccount,
+  adminDeleteOrg,
+  adminDeleteCase,
+  adminSetLabStatus,
+  adminSetLabRoles,
+  adminFetchPriceSchedules,
+  fetchLabRoster,
+} from "./lib/data.js";
 import { startImpersonation } from "./lib/impersonate.js";
 import { STAGES } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard } from "./Analytics.jsx";
@@ -351,12 +368,13 @@ export default function AdminDashboard({ auth }) {
                       <th className="px-5 py-2">Email</th>
                       <th className="px-5 py-2">Cases assigned</th>
                       <th className="px-5 py-2">Login</th>
+                      <th className="px-5 py-2">Status</th>
                       <th className="px-5 py-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {labs.length === 0 && (
-                      <tr><td colSpan={5} className="px-5 py-6 text-center text-slate-400">No labs yet.</td></tr>
+                      <tr><td colSpan={6} className="px-5 py-6 text-center text-slate-400">No labs yet.</td></tr>
                     )}
                     {labs.map((l) => (
                       <tr key={l.id} className="hover:bg-slate-50/60">
@@ -371,7 +389,35 @@ export default function AdminDashboard({ auth }) {
                           )}
                         </td>
                         <td className="px-5 py-2.5">
+                          {l.status === "suspended" ? (
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Suspended</span>
+                          ) : (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Active</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-2.5">
                           <div className="flex justify-end gap-1.5">
+                            {l.ownerId && (
+                              <button
+                                onClick={() =>
+                                  l.status === "suspended"
+                                    ? runAction(() => adminSetLabStatus(l.id, "active"))
+                                    : setConfirmTarget({
+                                        message: `Suspend "${l.name}"? Every member of this lab loses access instantly until re-activated; dentists can no longer send them cases.`,
+                                        run: () => adminSetLabStatus(l.id, "suspended"),
+                                      })
+                                }
+                                disabled={busy}
+                                className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold disabled:opacity-60 ${
+                                  l.status === "suspended"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                    : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                }`}
+                                title={l.status === "suspended" ? "Re-activate this lab" : "Suspend this lab"}
+                              >
+                                <Power size={12} /> {l.status === "suspended" ? "Activate" : "Suspend"}
+                              </button>
+                            )}
                             {l.ownerId && (
                               <button
                                 onClick={() => viewAs(l.ownerId)}
@@ -397,6 +443,12 @@ export default function AdminDashboard({ auth }) {
                 </table>
               </div>
             </div>
+
+            {/* ---------------------- Lab staff role override ---------------------- */}
+            <LabStaffRoles labs={labs} />
+
+            {/* ---------------------- Price sheet inspection ---------------------- */}
+            <PriceSheets labById={labById} />
 
             {/* ---------------------- Cases ops table ---------------------- */}
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -508,6 +560,192 @@ export default function AdminDashboard({ auth }) {
         onCancel={() => setConfirmTarget(null)}
         onConfirm={() => confirmTarget && runAction(confirmTarget.run)}
       />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Lab staff role override (Phase 19) — grant/revoke dual-role on any  */
+/*  lab member. Mutations go through admin-actions (service role);      */
+/*  reads are plain is_admin() RLS.                                     */
+/* ------------------------------------------------------------------ */
+
+function LabStaffRoles({ labs }) {
+  const claimedLabs = labs.filter((l) => l.ownerId);
+  const [labId, setLabId] = useState("");
+  const [roster, setRoster] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const loadRoster = (id) => {
+    setLabId(id);
+    setRoster(null);
+    setError("");
+    setMessage("");
+    if (!id) return;
+    fetchLabRoster(id)
+      .then(setRoster)
+      .catch((err) => setError(err.message));
+  };
+
+  const toggleRole = async (person, role) => {
+    const has = person.roles.includes(role);
+    const next = has ? person.roles.filter((r) => r !== role) : [...person.roles, role];
+    if (!next.length) {
+      setError("A member needs at least one role — suspend them from the lab's Staff tab instead.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await adminSetLabRoles(person.userId, labId, next);
+      setMessage(`${person.name} is now ${next.map((r) => (r === "lab_admin" ? "Lab Admin" : "Technician")).join(" + ")}.`);
+      fetchLabRoster(labId).then(setRoster).catch(() => {});
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const members = (roster ?? []).filter((p) => p.userId);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-3">
+        <UserCog size={15} className="text-violet-500" />
+        <h3 className="text-sm font-bold text-slate-800">Lab staff roles</h3>
+        <span className="text-[11px] text-slate-400">grant or revoke dual-role access</span>
+        <select
+          value={labId}
+          onChange={(e) => loadRoster(e.target.value)}
+          className="ml-auto rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-semibold outline-none focus:border-violet-400 focus:bg-white"
+        >
+          <option value="">Pick a lab…</option>
+          {claimedLabs.map((l) => (
+            <option key={l.id} value={l.id}>{l.name}</option>
+          ))}
+        </select>
+      </div>
+      {error && <p className="border-b border-rose-100 bg-rose-50 px-5 py-2 text-xs font-medium text-rose-700">{error}</p>}
+      {message && <p className="border-b border-emerald-100 bg-emerald-50 px-5 py-2 text-xs font-medium text-emerald-700">{message}</p>}
+      {labId === "" ? (
+        <p className="px-5 py-6 text-center text-sm text-slate-400">Pick a lab to see its members.</p>
+      ) : roster === null && !error ? (
+        <p className="px-5 py-6 text-center text-sm text-slate-400">Loading roster…</p>
+      ) : members.length === 0 ? (
+        <p className="px-5 py-6 text-center text-sm text-slate-400">No signed-up members in this lab yet.</p>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="px-5 py-2">Member</th>
+              <th className="px-5 py-2">Status</th>
+              <th className="px-5 py-2">Lab Admin</th>
+              <th className="px-5 py-2">Technician</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {members.map((p) => (
+              <tr key={p.userId} className="hover:bg-slate-50/60">
+                <td className="px-5 py-2.5">
+                  <p className="font-semibold text-slate-800">{p.name}</p>
+                  <p className="text-xs text-slate-400">{p.email || "—"}</p>
+                </td>
+                <td className="px-5 py-2.5 text-xs font-semibold uppercase text-slate-500">{p.status.replace("_", "-")}</td>
+                <td className="px-5 py-2.5">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-violet-700">
+                    <input
+                      type="checkbox"
+                      checked={p.roles.includes("lab_admin")}
+                      disabled={busy}
+                      onChange={() => toggleRole(p, "lab_admin")}
+                      className="h-4 w-4 accent-violet-600"
+                    />
+                    <Shield size={12} />
+                  </label>
+                </td>
+                <td className="px-5 py-2.5">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-blue-700">
+                    <input
+                      type="checkbox"
+                      checked={p.roles.includes("lab_tech")}
+                      disabled={busy}
+                      onChange={() => toggleRole(p, "lab_tech")}
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                    <Wrench size={12} />
+                  </label>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Global price sheet inspection (Phase 19) — read-only, is_admin RLS  */
+/* ------------------------------------------------------------------ */
+
+function PriceSheets({ labById }) {
+  const [schedules, setSchedules] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    adminFetchPriceSchedules()
+      .then(setSchedules)
+      .catch((err) => setError(err.message));
+  }, []);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+        <Tags size={15} className="text-blue-500" />
+        <h3 className="text-sm font-bold text-slate-800">Lab price sheets ({schedules?.length ?? "…"})</h3>
+        <span className="text-[11px] text-slate-400">read-only inspection</span>
+      </div>
+      {error && <p className="px-5 py-3 text-xs font-medium text-rose-700">{error}</p>}
+      {schedules !== null && schedules.length === 0 && (
+        <p className="px-5 py-6 text-center text-sm text-slate-400">No lab has created a price list yet.</p>
+      )}
+      {(schedules ?? []).map((s) => (
+        <details key={s.id} className="group border-b border-slate-100 last:border-b-0">
+          <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-5 py-3 text-sm hover:bg-slate-50/60">
+            <span className="font-semibold text-slate-800">{labById[s.labId]?.name ?? "Unknown lab"}</span>
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-600">{s.name}</span>
+            {s.isDefault && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">Default</span>
+            )}
+            <span className="ml-auto text-xs text-slate-400">{s.items.length} items</span>
+          </summary>
+          <div className="overflow-x-auto px-5 pb-4">
+            <table className="w-full min-w-[360px] text-left text-sm">
+              <thead className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="py-1.5 pr-3">Restoration</th>
+                  <th className="py-1.5 pr-3">Code</th>
+                  <th className="py-1.5 text-right">Price (OMR)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {s.items.map((it) => (
+                  <tr key={it.id}>
+                    <td className="py-1.5 pr-3 text-slate-700">{it.category}</td>
+                    <td className="py-1.5 pr-3 text-slate-400">{it.code || "—"}</td>
+                    <td className="py-1.5 text-right tabular-nums text-slate-700">{it.basePrice}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      ))}
     </div>
   );
 }

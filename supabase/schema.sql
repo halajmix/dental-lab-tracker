@@ -1182,3 +1182,165 @@ $$;
 drop policy if exists "profiles_select_lab_members" on profiles;
 create policy "profiles_select_lab_members" on profiles for select
   using (lab_id is not null and lab_id = my_lab_id());
+
+/* --------------------------------------------------------------------- */
+/*  Phase 19 — staff invites, org-join validation, lab deactivation      */
+/*                                                                       */
+/*  SECURITY FIX included: since Phase 5, profiles_insert/update only    */
+/*  checked id = auth.uid() — nothing server-side stopped a signup from  */
+/*  pointing profiles.lab_id/clinic_id at ANY org and reading its data   */
+/*  through my_lab_id()/my_clinic_id() (the claim flow was client-side   */
+/*  only). can_join_lab()/can_join_clinic() close that: an org pointer   */
+/*  is only writable when you own the org, are already a member, hold a  */
+/*  matching email invite, or the org is a legitimately claimable        */
+/*  orphan.                                                              */
+/* --------------------------------------------------------------------- */
+
+create or replace function can_join_lab(target uuid)
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select
+    -- you own it, or it's an unclaimed lab (the original claim flow)
+    exists (select 1 from labs l where l.id = target
+            and (l.owner_id = auth.uid() or l.owner_id is null))
+    -- you're already on its roster
+    or exists (select 1 from lab_members m where m.lab_id = target and m.user_id = auth.uid())
+    -- or you hold an invite addressed to your login email
+    or exists (select 1 from lab_members m where m.lab_id = target and m.user_id is null
+               and lower(m.email) = lower(coalesce(auth.jwt()->>'email', '')));
+$$;
+
+create or replace function can_join_clinic(target uuid)
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from clinics c
+    where c.id = target
+      and (
+        c.owner_id = auth.uid()
+        -- orphaned clinic (owner login deleted): claimable by email match,
+        -- or freely when no email was ever recorded on the row
+        or (c.owner_id is null
+            and (lower(coalesce(c.email, '')) = lower(coalesce(auth.jwt()->>'email', ''))
+                 or coalesce(c.email, '') = ''))
+      )
+  );
+$$;
+
+drop policy if exists "profiles_insert_own" on profiles;
+create policy "profiles_insert_own" on profiles for insert
+  with check (
+    id = auth.uid()
+    and (clinic_id is null or can_join_clinic(clinic_id))
+    and (lab_id is null or can_join_lab(lab_id))
+  );
+
+drop policy if exists "profiles_update_own" on profiles;
+create policy "profiles_update_own" on profiles for update
+  using (id = auth.uid())
+  with check (
+    id = auth.uid()
+    and (clinic_id is null or can_join_clinic(clinic_id))
+    and (lab_id is null or can_join_lab(lab_id))
+  );
+
+-- Invite claim: the invited person (matched by login email) may take an
+-- unclaimed row. The guard trigger pins everything except user_id —
+-- a claim can never change its own role or lab, and always lands active.
+drop policy if exists "lab_members_claim_invite" on lab_members;
+create policy "lab_members_claim_invite" on lab_members for update
+  using (user_id is null and lower(email) = lower(coalesce(auth.jwt()->>'email', '')))
+  with check (user_id = auth.uid());
+
+create or replace function guard_invite_claim()
+returns trigger
+as $$
+begin
+  if old.user_id is null and new.user_id is not null
+     and new.user_id = auth.uid()
+     and current_setting('role', true) is distinct from 'service_role' then
+    if new.role is distinct from old.role or new.lab_id is distinct from old.lab_id then
+      raise exception 'invite claim cannot change role or lab';
+    end if;
+    new.status := 'active';
+    new.email := old.email;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists lab_members_guard_claim on lab_members;
+create trigger lab_members_guard_claim
+  before update on lab_members
+  for each row execute function guard_invite_claim();
+
+-- Tenant deactivation: a suspended lab goes fully dark for its members.
+alter table labs add column if not exists status text not null default 'active'
+  check (status in ('active', 'suspended'));
+
+create or replace function my_lab_id()
+returns uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select p.lab_id from profiles p
+  join labs l on l.id = p.lab_id
+  where p.id = auth.uid()
+    and l.status = 'active'
+    and not exists (
+      select 1 from lab_members m
+      where m.user_id = auth.uid()
+        and m.lab_id = p.lab_id
+        and m.status = 'suspended'
+    );
+$$;
+
+-- Now that the Staff tab manages membership rows, the old "no rows = full
+-- access" fallback is retired in favor of an explicit owner check —
+-- otherwise removing someone's rows would GRANT them access. ("Remove"
+-- in the UI suspends rather than deletes for the same reason; only
+-- unclaimed invites are ever hard-deleted.)
+create or replace function is_lab_admin()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select
+    exists (select 1 from labs l join profiles p on p.lab_id = l.id
+            where p.id = auth.uid() and l.owner_id = auth.uid())
+    or exists (select 1 from lab_members m
+               where m.user_id = auth.uid()
+                 and m.lab_id = (select lab_id from profiles where id = auth.uid())
+                 and m.role = 'lab_admin' and m.status = 'active');
+$$;
+
+create or replace function lab_write_allowed()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select
+    exists (select 1 from labs l join profiles p on p.lab_id = l.id
+            where p.id = auth.uid() and l.owner_id = auth.uid())
+    or exists (select 1 from lab_members m
+               where m.user_id = auth.uid()
+                 and m.lab_id = (select lab_id from profiles where id = auth.uid())
+                 and m.status = 'active');
+$$;
+
+-- The claim flow needs its own branch again: at claim time the lab has no
+-- owner and the claimer holds no membership rows, so neither the owner
+-- branch nor is_lab_admin() can pass — but their profile already points
+-- at the (validated, claimable) lab.
+drop policy if exists "labs_update_owner_or_creator" on labs;
+create policy "labs_update_owner_or_creator" on labs for update
+  using (
+    owner_id = auth.uid()
+    or created_by_clinic_id = my_clinic_id()
+    or (owner_id is null and id = my_lab_id())
+    or (id = my_lab_id() and is_lab_admin())
+  );

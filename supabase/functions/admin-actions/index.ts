@@ -19,6 +19,14 @@
  *   delete-org     — { orgType: "clinic"|"lab", id } -> deletes an org row
  *                    directly (for unclaimed/orphaned test rows with no login)
  *   delete-case    — { caseId } -> deletes one case row
+ *   set-lab-status — { labId, status: "active"|"suspended" } -> tenant on/off;
+ *                    a suspended lab's members lose all data access via
+ *                    my_lab_id() until re-activated
+ *   set-lab-role   — { userId, labId, roles: ["lab_admin"?, "lab_tech"?] } ->
+ *                    sync a member's lab_members rows to exactly those roles
+ *                    (e.g. upgrade a tech to dual-role). At least one role
+ *                    required — removing someone entirely is a suspension,
+ *                    not a row deletion.
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -131,6 +139,55 @@ Deno.serve(async (req) => {
         if (!caseId) return json({ error: "caseId required" }, 400);
         const { error } = await admin.from("cases").delete().eq("id", caseId);
         if (error) throw error;
+        return json({ ok: true });
+      }
+
+      case "set-lab-status": {
+        const labId = String(body.labId ?? "");
+        const status = String(body.status ?? "");
+        if (!labId || (status !== "active" && status !== "suspended")) {
+          return json({ error: "labId and status (active|suspended) required" }, 400);
+        }
+        const { error } = await admin.from("labs").update({ status }).eq("id", labId);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+
+      case "set-lab-role": {
+        const userId = String(body.userId ?? "");
+        const labId = String(body.labId ?? "");
+        const roles = Array.isArray(body.roles)
+          ? body.roles.filter((r: unknown) => r === "lab_admin" || r === "lab_tech")
+          : [];
+        if (!userId || !labId) return json({ error: "userId and labId required" }, 400);
+        if (!roles.length) return json({ error: "at least one role required" }, 400);
+
+        const { data: prof } = await admin.from("profiles").select("lab_id").eq("id", userId).maybeSingle();
+        if (prof?.lab_id !== labId) return json({ error: "user is not a member of this lab" }, 400);
+
+        const { data: target } = await admin.auth.admin.getUserById(userId);
+        const email = target?.user?.email ?? "";
+
+        const { data: existing } = await admin
+          .from("lab_members")
+          .select("id, role")
+          .eq("lab_id", labId)
+          .eq("user_id", userId);
+        const have = new Set((existing ?? []).map((r) => r.role));
+        for (const r of roles) {
+          if (!have.has(r)) {
+            const { error } = await admin
+              .from("lab_members")
+              .insert({ lab_id: labId, user_id: userId, email, role: r, status: "active" });
+            if (error) throw error;
+          }
+        }
+        for (const row of existing ?? []) {
+          if (!roles.includes(row.role)) {
+            const { error } = await admin.from("lab_members").delete().eq("id", row.id);
+            if (error) throw error;
+          }
+        }
         return json({ ok: true });
       }
 

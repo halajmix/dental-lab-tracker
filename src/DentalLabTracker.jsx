@@ -54,7 +54,7 @@ import {
   isUrgent,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics } from "./Analytics.jsx";
-import { PriceListsManager, OverviewDashboard, TechniciansPanel } from "./LabAdmin.jsx";
+import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel } from "./LabAdmin.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import ContactLabModal from "./ContactLab.jsx";
@@ -581,18 +581,6 @@ function WorkspaceSwitcher({ workspace, onChange }) {
   );
 }
 
-function ComingSoonCard({ icon: Icon, title, blurb }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-        <Icon size={22} />
-      </div>
-      <h3 className="text-sm font-bold text-slate-700">{title}</h3>
-      <p className="max-w-sm text-sm text-slate-500">{blurb}</p>
-    </div>
-  );
-}
-
 const ADMIN_TABS = [
   { id: "queue", label: "Case Queue", icon: ClipboardCheck },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -601,13 +589,8 @@ const ADMIN_TABS = [
   { id: "staff", label: "Staff", icon: UserPlus },
 ];
 
-const ADMIN_PLACEHOLDERS = {
-  staff: "Invite technicians by email and manage active / suspended / read-only access.",
-};
-
-function LabAdminWorkspace({ queue, lab, clinicsById, cases }) {
+function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId }) {
   const [tab, setTab] = useState("queue");
-  const active = ADMIN_TABS.find((t) => t.id === tab) ?? ADMIN_TABS[0];
   return (
     <div>
       <nav className="mb-5 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
@@ -632,7 +615,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases }) {
       ) : tab === "prices" ? (
         <PriceListsManager lab={lab} clinicsById={clinicsById} />
       ) : (
-        <ComingSoonCard icon={active.icon} title={`${active.label} — coming soon`} blurb={ADMIN_PLACEHOLDERS[tab]} />
+        <StaffPanel lab={lab} meId={meId} />
       )}
     </div>
   );
@@ -801,7 +784,9 @@ export default function DentalLabTracker({ auth }) {
   // Only labs that actually registered on the platform (a real lab account
   // owns the row) can be picked for new work or listed as partners —
   // dentists can no longer create placeholder lab rows themselves.
-  const registeredLabs = useMemo(() => labs.filter((l) => l.ownerId), [labs]);
+  // Suspended labs (deactivated tenants) drop out of dentist-facing pickers;
+  // labById still resolves their names on old cases.
+  const registeredLabs = useMemo(() => labs.filter((l) => l.ownerId && l.status !== "suspended"), [labs]);
 
   // Which case's lifecycle drawer is open.
   const [drawerCaseId, setDrawerCaseId] = useState(null);
@@ -1052,7 +1037,7 @@ export default function DentalLabTracker({ auth }) {
             />
           );
           return activeWorkspace === "admin" ? (
-            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} cases={labQueue} />
+            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} cases={labQueue} meId={profile.id} />
           ) : (
             labDashboard
           );

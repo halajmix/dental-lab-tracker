@@ -20,6 +20,7 @@ export const labFromRow = (r) => ({
   procedureTats: r.procedure_tats ?? {},
   ownerId: r.owner_id,
   createdByClinicId: r.created_by_clinic_id,
+  status: r.status ?? "active",
 });
 
 export const caseFromRow = (r) => ({
@@ -292,6 +293,46 @@ export async function repriceUnbilledCases() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Staff management (Phase 19) — invites + status, all lab_admin-      */
+/*  gated by RLS. "Removing" a person = suspending them; only unclaimed */
+/*  invites are ever hard-deleted (deleting a member's rows would       */
+/*  otherwise change what the RLS fallbacks grant).                     */
+/* ------------------------------------------------------------------ */
+
+export async function inviteLabMember(labId, email, roles) {
+  const rows = roles.map((role) => ({ lab_id: labId, email: email.trim(), role, status: "invited" }));
+  const { error } = await supabase.from("lab_members").insert(rows);
+  if (error) throw error;
+}
+
+export async function setMemberStatus(memberRowIds, status) {
+  const { error } = await supabase.from("lab_members").update({ status }).in("id", memberRowIds);
+  if (error) throw error;
+}
+
+export async function deleteInviteRows(memberRowIds) {
+  const { error } = await supabase.from("lab_members").delete().in("id", memberRowIds);
+  if (error) throw error;
+}
+
+// Onboarding: invites addressed to this login email (RLS exposes only
+// the caller's own-email invites).
+export async function fetchMyInvites(email) {
+  const { data, error } = await supabase
+    .from("lab_members")
+    .select("id, lab_id, role, email, labs(name)")
+    .is("user_id", null)
+    .ilike("email", (email || "").trim());
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function claimLabInvites(userId, inviteIds) {
+  const { error } = await supabase.from("lab_members").update({ user_id: userId }).in("id", inviteIds);
+  if (error) throw error;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Price schedules (Phase 17) — lab price lists + per-clinic rules.    */
 /*  All writes are lab_admin-gated by RLS; actual case pricing happens  */
 /*  in a DB trigger, never in the client.                               */
@@ -520,6 +561,24 @@ export async function adminDeleteCase(caseId) {
 
 export async function adminGetImpersonationToken(userId) {
   return callAdminAction("impersonate", { userId }); // { hashedToken, email }
+}
+
+export async function adminSetLabStatus(labId, status) {
+  await callAdminAction("set-lab-status", { labId, status });
+}
+
+export async function adminSetLabRoles(userId, labId, roles) {
+  await callAdminAction("set-lab-role", { userId, labId, roles });
+}
+
+// Cross-tenant price sheet inspection — plain RLS reads via is_admin().
+export async function adminFetchPriceSchedules() {
+  const { data, error } = await supabase
+    .from("price_schedules")
+    .select("*, price_schedule_items(*)")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data.map(priceScheduleFromRow);
 }
 
 /* ------------------------------------------------------------------ */

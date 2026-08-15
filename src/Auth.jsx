@@ -429,6 +429,7 @@ function DentistOnboarding({ userId, userEmail, onDone, onBack }) {
 function LabOnboarding({ userId, userEmail, onDone, onBack }) {
   const [checked, setChecked] = useState(false);
   const [claimable, setClaimable] = useState(null); // lab row found by email, unclaimed
+  const [invites, setInvites] = useState([]); // staff invites addressed to this email (Phase 19)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showNewForm, setShowNewForm] = useState(false);
@@ -442,15 +443,21 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from("labs")
-        .select("*")
-        .is("owner_id", null)
-        .ilike("email", (userEmail || "").trim())
-        .limit(1)
-        .maybeSingle();
+      const [{ data }, invitesRes] = await Promise.all([
+        supabase
+          .from("labs")
+          .select("*")
+          .is("owner_id", null)
+          .ilike("email", (userEmail || "").trim())
+          .limit(1)
+          .maybeSingle(),
+        // Staff invites: RLS only ever exposes rows addressed to the
+        // caller's own login email, so no filter beyond user_id is needed.
+        supabase.from("lab_members").select("id, lab_id, role, labs(name, contact)").is("user_id", null),
+      ]);
       if (!cancelled) {
         setClaimable(data ?? null);
+        setInvites(invitesRes.data ?? []);
         setChecked(true);
       }
     })();
@@ -458,6 +465,39 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
       cancelled = true;
     };
   }, [userEmail]);
+
+  // Join via staff invite: profile first (can_join_lab passes because the
+  // invite exists), then claim the invite rows (user_id only — the claim
+  // guard trigger forces status to active and pins role/lab).
+  const joinInvitedLab = async (labId) => {
+    setBusy(true);
+    setError("");
+    const ids = invites.filter((i) => i.lab_id === labId).map((i) => i.id);
+    const { error: profErr } = await supabase
+      .from("profiles")
+      .insert({ id: userId, role: "lab", name: displayName.trim() || "Lab Tech", lab_id: labId });
+    if (profErr) {
+      setBusy(false);
+      setError(profErr.message);
+      return;
+    }
+    const { data: claimed, error: claimErr } = await supabase
+      .from("lab_members")
+      .update({ user_id: userId })
+      .in("id", ids)
+      .select();
+    setBusy(false);
+    if (claimErr) {
+      setError(claimErr.message);
+      return;
+    }
+    if (!claimed?.length) {
+      // RLS no-op guard: never assume a 0-row update succeeded
+      setError("Could not claim the invite — ask your lab admin to re-invite you.");
+      return;
+    }
+    onDone();
+  };
 
   const claim = async () => {
     setBusy(true);
@@ -515,6 +555,21 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
     onDone();
   };
 
+  // One card per inviting lab (dual-role invites collapse into one card).
+  const inviteLabs = [];
+  for (const inv of invites) {
+    let g = inviteLabs.find((x) => x.labId === inv.lab_id);
+    if (!g) {
+      g = { labId: inv.lab_id, name: inv.labs?.name ?? "A dental lab", roles: [] };
+      inviteLabs.push(g);
+    }
+    if (!g.roles.includes(inv.role)) g.roles.push(inv.role);
+  }
+  const roleWords = (roles) =>
+    roles
+      .map((r) => (r === "lab_admin" ? "Lab Admin" : "Technician"))
+      .join(" + ");
+
   return (
     <Shell>
       <button onClick={onBack} className="mb-4 flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700">
@@ -531,7 +586,36 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
         </div>
       )}
 
-      {checked && claimable && !showNewForm && (
+      {checked && inviteLabs.length > 0 && !showNewForm && (
+        <div>
+          <p className="mb-4 text-xs text-slate-500">
+            You've been invited to join {inviteLabs.length === 1 ? "a lab team" : "lab teams"} — joining links your
+            account to their workspace.
+          </p>
+          <Field label="Your name">
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Ahmed Al-Balushi" />
+          </Field>
+          {inviteLabs.map((g) => (
+            <div key={g.labId} className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+              <p className="font-bold text-slate-800">{g.name}</p>
+              <p className="text-xs text-slate-500">Invited as: {roleWords(g.roles)}</p>
+              <button
+                onClick={() => joinInvitedLab(g.labId)}
+                disabled={busy}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                Join {g.name}
+              </button>
+            </div>
+          ))}
+          <button onClick={() => setShowNewForm(true)} className="mt-4 w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-700">
+            Not you? Register a separate lab instead
+          </button>
+        </div>
+      )}
+
+      {checked && claimable && inviteLabs.length === 0 && !showNewForm && (
         <div>
           <p className="mb-4 text-xs text-slate-500">
             A dental clinic already added a lab profile using your email — claim it to link your account instead of starting from scratch.
@@ -558,7 +642,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
         </div>
       )}
 
-      {checked && (!claimable || showNewForm) && (
+      {checked && ((!claimable && inviteLabs.length === 0) || showNewForm) && (
         <form onSubmit={createNew} className="space-y-4">
           {!claimable && <p className="mb-1 text-xs text-slate-500">No existing profile found for your email — let's register your lab.</p>}
           <Field label="Lab name *">
