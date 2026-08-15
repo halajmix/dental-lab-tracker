@@ -41,6 +41,9 @@ import {
   inviteLabMember,
   setMemberStatus,
   deleteInviteRows,
+  addMemberRole,
+  removeMemberRole,
+  removeLabMember,
 } from "./lib/data.js";
 
 /* ================================================================== */
@@ -1277,6 +1280,7 @@ export function StaffPanel({ lab, meId }) {
   const [busy, setBusy] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRoles, setInviteRoles] = useState({ lab_admin: false, lab_tech: true });
+  const [confirmRemove, setConfirmRemove] = useState(null); // userId pending removal confirm
 
   const load = () => {
     fetchLabRoster(lab.id)
@@ -1308,6 +1312,19 @@ export function StaffPanel({ lab, meId }) {
     mutate(() => inviteLabMember(lab.id, email, roles));
     setInviteEmail("");
     setInviteRoles({ lab_admin: false, lab_tech: true });
+  };
+
+  // Grant/revoke one role on an existing member. Revoking their last role is
+  // blocked — that's what Remove is for.
+  const toggleRole = (p, role) => {
+    const has = p.roles.includes(role);
+    if (has && p.roles.length === 1) {
+      setError("A member needs at least one role — use Remove to take them off the lab entirely.");
+      return;
+    }
+    mutate(() =>
+      has ? removeMemberRole(p.roleRows[role]) : addMemberRole(lab.id, p.userId, p.email, role, p.status)
+    );
   };
 
   const people = roster ?? [];
@@ -1407,18 +1424,47 @@ export function StaffPanel({ lab, meId }) {
                       <p className="truncate text-xs text-slate-400">{p.email || "—"}</p>
                     </td>
                     <td className="px-2 py-2.5">
-                      <span className="flex items-center gap-1">
-                        {p.roles.includes("lab_admin") && (
-                          <span className="flex items-center gap-0.5 rounded bg-violet-100 px-1 py-px text-[9px] font-bold uppercase text-violet-600">
+                      {isInvitePending || locked ? (
+                        <span className="flex items-center gap-1">
+                          {p.roles.includes("lab_admin") && (
+                            <span className="flex items-center gap-0.5 rounded bg-violet-100 px-1 py-px text-[9px] font-bold uppercase text-violet-600">
+                              <Shield size={9} /> Admin
+                            </span>
+                          )}
+                          {p.roles.includes("lab_tech") && (
+                            <span className="flex items-center gap-0.5 rounded bg-blue-100 px-1 py-px text-[9px] font-bold uppercase text-blue-600">
+                              <Wrench size={9} /> Tech
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <button
+                            onClick={() => toggleRole(p, "lab_admin")}
+                            disabled={busy}
+                            title={p.roles.includes("lab_admin") ? "Revoke Lab Admin" : "Grant Lab Admin"}
+                            className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase transition ${
+                              p.roles.includes("lab_admin")
+                                ? "bg-violet-100 text-violet-600 hover:bg-violet-200"
+                                : "bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500"
+                            }`}
+                          >
                             <Shield size={9} /> Admin
-                          </span>
-                        )}
-                        {p.roles.includes("lab_tech") && (
-                          <span className="flex items-center gap-0.5 rounded bg-blue-100 px-1 py-px text-[9px] font-bold uppercase text-blue-600">
+                          </button>
+                          <button
+                            onClick={() => toggleRole(p, "lab_tech")}
+                            disabled={busy}
+                            title={p.roles.includes("lab_tech") ? "Revoke Technician" : "Grant Technician"}
+                            className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase transition ${
+                              p.roles.includes("lab_tech")
+                                ? "bg-blue-100 text-blue-600 hover:bg-blue-200"
+                                : "bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500"
+                            }`}
+                          >
                             <Wrench size={9} /> Tech
-                          </span>
-                        )}
-                      </span>
+                          </button>
+                        </span>
+                      )}
                     </td>
                     <td className="px-2 py-2.5">
                       {isInvitePending ? (
@@ -1443,12 +1489,40 @@ export function StaffPanel({ lab, meId }) {
                       )}
                     </td>
                     <td className="px-2 py-2.5 text-right">
-                      {isInvitePending && (
+                      {isInvitePending ? (
                         <button
                           onClick={() => mutate(() => deleteInviteRows(p.memberRowIds))}
                           disabled={busy}
                           className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
                           title="Cancel invite"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : locked ? null : confirmRemove === p.userId ? (
+                        <span className="flex items-center justify-end gap-1 text-xs">
+                          <button
+                            onClick={() => {
+                              setConfirmRemove(null);
+                              mutate(() => removeLabMember(p.userId));
+                            }}
+                            disabled={busy}
+                            className="rounded-lg bg-rose-600 px-2 py-1.5 font-semibold text-white hover:bg-rose-700"
+                          >
+                            Remove
+                          </button>
+                          <button
+                            onClick={() => setConfirmRemove(null)}
+                            className="rounded-lg px-2 py-1.5 font-semibold text-slate-500 hover:bg-slate-50"
+                          >
+                            Keep
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmRemove(p.userId)}
+                          disabled={busy}
+                          className="rounded-lg p-1.5 text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
+                          title="Remove from lab"
                         >
                           <Trash2 size={14} />
                         </button>

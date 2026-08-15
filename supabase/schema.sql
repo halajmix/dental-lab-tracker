@@ -1356,3 +1356,78 @@ create policy "labs_update_owner_or_creator" on labs for update
     or (owner_id is null and id = my_lab_id())
     or (id = my_lab_id() and is_lab_admin())
   );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 21 — true member removal + emailed invitations                 */
+/*                                                                       */
+/*  remove_lab_member: an active lab_admin can fully remove a non-owner  */
+/*  member (not just suspend). Removal must clear the target's profile   */
+/*  row — which only their own RLS could touch — so it runs SECURITY     */
+/*  DEFINER with every ownership check inline. The removed login         */
+/*  survives; next sign-in lands on Onboarding like a fresh account.     */
+/*                                                                       */
+/*  Invite emails: an AFTER INSERT trigger on unclaimed lab_members      */
+/*  rows posts to the case-notify Edge Function (same pg_net + shared    */
+/*  secret machinery as the cases webhook); the function emails the      */
+/*  invitee a signup link that pre-fills their address.                  */
+/* --------------------------------------------------------------------- */
+
+create or replace function remove_lab_member(target_user uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  caller_lab uuid;
+begin
+  select lab_id into caller_lab from profiles where id = auth.uid();
+  if caller_lab is null or not is_lab_admin() then
+    raise exception 'only a lab admin can remove members';
+  end if;
+  if target_user = auth.uid() then
+    raise exception 'you cannot remove yourself';
+  end if;
+  if exists (select 1 from labs where id = caller_lab and owner_id = target_user) then
+    raise exception 'the lab owner cannot be removed';
+  end if;
+  if (select lab_id from profiles where id = target_user) is distinct from caller_lab then
+    raise exception 'user is not a member of your lab';
+  end if;
+
+  delete from lab_members where lab_id = caller_lab and user_id = target_user;
+  delete from profiles where id = target_user;
+end;
+$$;
+
+create or replace function notify_invite_webhook()
+returns trigger
+security definer
+set search_path = public, private
+as $$
+declare
+  secret text;
+begin
+  select value into secret from private.webhook_config where key = 'case_notify_secret';
+  perform net.http_post(
+    url := 'https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/case-notify',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-webhook-secret', coalesce(secret, '')
+    ),
+    body := jsonb_build_object(
+      'type', 'INSERT',
+      'table', 'lab_members',
+      'schema', 'public',
+      'record', to_jsonb(NEW)
+    )
+  );
+  return NEW;
+end;
+$$ language plpgsql;
+
+drop trigger if exists lab_members_notify_invite on lab_members;
+create trigger lab_members_notify_invite
+  after insert on lab_members
+  for each row
+  when (new.user_id is null)
+  execute function notify_invite_webhook();

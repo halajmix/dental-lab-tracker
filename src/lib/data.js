@@ -277,9 +277,11 @@ export async function fetchLabRoster(labId) {
       roles: [],
       status: m.status,
       memberRowIds: [],
+      roleRows: {}, // role -> row id, for per-role grant/revoke
     };
     if (!entry.roles.includes(m.role)) entry.roles.push(m.role);
     entry.memberRowIds.push(m.id);
+    entry.roleRows[m.role] = m.id;
     // Any suspended row means the person is locked out — mirror RLS.
     if (m.status === "suspended") entry.status = "suspended";
     byPerson.set(key, entry);
@@ -332,6 +334,27 @@ export async function fetchMyInvites(email) {
 
 export async function claimLabInvites(userId, inviteIds) {
   const { error } = await supabase.from("lab_members").update({ user_id: userId }).in("id", inviteIds);
+  if (error) throw error;
+}
+
+// Grant one extra role to an existing member (dual-role them).
+export async function addMemberRole(labId, userId, email, role, status = "active") {
+  const { error } = await supabase
+    .from("lab_members")
+    .insert({ lab_id: labId, user_id: userId, email, role, status });
+  if (error) throw error;
+}
+
+// Revoke a single role row (the caller keeps the person's other role).
+export async function removeMemberRole(rowId) {
+  const { error } = await supabase.from("lab_members").delete().eq("id", rowId);
+  if (error) throw error;
+}
+
+// Fully remove a member from the lab (server-side function: clears their
+// membership AND profile so their next sign-in starts at Onboarding).
+export async function removeLabMember(userId) {
+  const { error } = await supabase.rpc("remove_lab_member", { target_user: userId });
   if (error) throw error;
 }
 

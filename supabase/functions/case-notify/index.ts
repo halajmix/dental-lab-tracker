@@ -105,7 +105,12 @@ Deno.serve(async (req) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
-  let payload: { type?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> };
+  let payload: {
+    type?: string;
+    table?: string;
+    record?: Record<string, unknown>;
+    old_record?: Record<string, unknown>;
+  };
   try {
     payload = await req.json();
   } catch {
@@ -113,6 +118,7 @@ Deno.serve(async (req) => {
   }
 
   const { type, record, old_record } = payload;
+  const table = payload.table ?? "cases";
   if (!record) return json({ ok: true, skipped: "no record" });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -120,6 +126,60 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceKey);
 
   try {
+    // ---------------- staff invitations (lab_members INSERTs) ----------------
+    if (table === "lab_members") {
+      if (type !== "INSERT" || record.user_id || !record.email) {
+        return json({ ok: true, skipped: "not an unclaimed invite" });
+      }
+      // A dual-role invite inserts TWO rows (lab_admin + lab_tech) in one
+      // statement, firing this webhook twice. Only the lab_tech row sends
+      // the email; a lone lab_admin invite (no tech sibling) sends its own.
+      if (record.role === "lab_admin") {
+        const { data: sibling } = await admin
+          .from("lab_members")
+          .select("id")
+          .eq("lab_id", record.lab_id)
+          .is("user_id", null)
+          .eq("role", "lab_tech")
+          .ilike("email", String(record.email))
+          .maybeSingle();
+        if (sibling) return json({ ok: true, skipped: "dual-role invite — tech row emails" });
+      }
+
+      const [{ data: lab }, { data: roleRows }] = await Promise.all([
+        admin.from("labs").select("name").eq("id", record.lab_id).maybeSingle(),
+        admin
+          .from("lab_members")
+          .select("role")
+          .eq("lab_id", record.lab_id)
+          .is("user_id", null)
+          .ilike("email", String(record.email)),
+      ]);
+      const labName = lab?.name ?? "a dental lab";
+      const roles =
+        (roleRows ?? [])
+          .map((r) => (r.role === "lab_admin" ? "Lab Admin" : "Technician"))
+          .join(" + ") || "Technician";
+      const link = `${APP_URL}/?invite_email=${encodeURIComponent(String(record.email))}`;
+
+      const emailed = await sendEmail(
+        String(record.email),
+        `You're invited to join ${labName} on Dr-Crown`,
+        emailShell(
+          `Join ${labName} on Dr-Crown`,
+          `<p style="color:#475569">You've been invited to join <b>${labName}</b> as <b>${roles}</b>.</p>
+           <p style="color:#475569">Create your account with <b>this email address</b> and choose a password —
+           the invitation is linked to it, so after confirming your email you'll be offered to join
+           ${labName} automatically.</p>
+           <p style="margin:16px 0">
+             <a href="${link}" style="background:#2563eb;color:#ffffff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Create your account</a>
+           </p>`,
+        ),
+      );
+      return json({ ok: true, emailed });
+    }
+
+    // ---------------- case notifications (cases table) ----------------
     if (type === "INSERT") {
       // A new case was sent to a lab — email the lab.
       if (!record.lab_id) return json({ ok: true, skipped: "no lab assigned" });

@@ -12,6 +12,18 @@ const inputCls =
 // and "/" in dev (see vite.config.js), so this always lands on a real page.
 const authRedirectUrl = () => window.location.origin + import.meta.env.BASE_URL;
 
+// Staff-invitation deep link (Phase 21): the invite email links to
+// /?invite_email=<address>, which opens signup with the address pre-filled —
+// the invitation is matched by email at onboarding, so signing up with the
+// exact invited address is what makes the "Join {lab}" card appear.
+const inviteEmailParam = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get("invite_email")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+})();
+
 function Field({ label, children }) {
   return (
     <label className="block">
@@ -248,7 +260,7 @@ function ResetPasswordScreen({ onDone }) {
 }
 
 function SignupScreen({ onSwitch }) {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(inviteEmailParam);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -307,6 +319,12 @@ function SignupScreen({ onSwitch }) {
     <Shell>
       <h2 className="mb-1 text-lg font-bold text-slate-800">Create an account</h2>
       <p className="mb-5 text-xs text-slate-500">You'll choose Dentist or Lab next.</p>
+      {inviteEmailParam && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
+          <b>You've been invited to join a lab.</b> Sign up with this exact email address and choose a
+          password — your invitation is linked to it.
+        </div>
+      )}
       <ErrorBanner message={error} />
       <form onSubmit={submit} className="space-y-4">
         <Field label="Email">
@@ -341,7 +359,8 @@ function SignupScreen({ onSwitch }) {
 }
 
 function AuthScreen() {
-  const [mode, setMode] = useState("login"); // "login" | "signup" | "forgot"
+  // An invitation link drops the visitor straight onto signup.
+  const [mode, setMode] = useState(inviteEmailParam ? "signup" : "login"); // "login" | "signup" | "forgot"
   if (mode === "signup") return <SignupScreen onSwitch={() => setMode("login")} />;
   if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
   return <LoginScreen onSwitch={() => setMode("signup")} onForgot={() => setMode("forgot")} />;
