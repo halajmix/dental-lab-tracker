@@ -919,3 +919,229 @@ create policy "labs_update_owner_or_creator" on labs for update
     or created_by_clinic_id = my_clinic_id()
     or (id = my_lab_id() and is_lab_admin())
   );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 17 — price schedules + automatic case pricing                  */
+/*                                                                       */
+/*  A lab keeps one or more price lists (one flagged default) of         */
+/*  per-restoration-category prices, optionally mapped per clinic with   */
+/*  a discount ("VIP rate"). A BEFORE trigger prices each case from      */
+/*  those tables server-side — the client never computes or submits      */
+/*  money. The trigger FAILS OPEN: any error, missing schedule, or       */
+/*  unknown category leaves the fee columns untouched and never blocks   */
+/*  a case write (there are live users; billing must not gate clinical   */
+/*  workflow). Fee columns on already-issued/paid cases are frozen.      */
+/* --------------------------------------------------------------------- */
+
+create table if not exists price_schedules (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid not null references labs(id) on delete cascade,
+  name text not null,
+  is_default boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-- at most one default list per lab
+create unique index if not exists price_schedules_default_key
+  on price_schedules (lab_id) where is_default;
+create index if not exists price_schedules_lab_idx on price_schedules (lab_id);
+
+create table if not exists price_schedule_items (
+  id uuid primary key default gen_random_uuid(),
+  schedule_id uuid not null references price_schedules(id) on delete cascade,
+  category text not null,          -- Rx form category name (CATEGORY_NAMES)
+  code text not null default '',   -- lab's internal billing code
+  base_price numeric not null check (base_price >= 0),
+  unique (schedule_id, category)
+);
+
+create table if not exists clinic_price_rules (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid not null references labs(id) on delete cascade,
+  clinic_id uuid not null references clinics(id) on delete cascade,
+  price_schedule_id uuid references price_schedules(id) on delete set null,
+  discount_pct numeric not null default 0 check (discount_pct between -100 and 100),
+  unique (lab_id, clinic_id)
+);
+
+alter table price_schedules enable row level security;
+alter table price_schedule_items enable row level security;
+alter table clinic_price_rules enable row level security;
+
+-- Lab members read their lab's pricing; only active lab_admins write it;
+-- platform admin gets read-only inspection. Clinics never see lab price
+-- lists — they only ever see the priced totals on their own cases.
+drop policy if exists "price_schedules_select" on price_schedules;
+create policy "price_schedules_select" on price_schedules for select
+  using (lab_id = my_lab_id() or is_admin());
+
+drop policy if exists "price_schedules_insert_admin" on price_schedules;
+create policy "price_schedules_insert_admin" on price_schedules for insert
+  with check (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "price_schedules_update_admin" on price_schedules;
+create policy "price_schedules_update_admin" on price_schedules for update
+  using (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "price_schedules_delete_admin" on price_schedules;
+create policy "price_schedules_delete_admin" on price_schedules for delete
+  using (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "price_items_select" on price_schedule_items;
+create policy "price_items_select" on price_schedule_items for select
+  using (exists (
+    select 1 from price_schedules s
+    where s.id = price_schedule_items.schedule_id
+      and (s.lab_id = my_lab_id() or is_admin())
+  ));
+
+drop policy if exists "price_items_insert_admin" on price_schedule_items;
+create policy "price_items_insert_admin" on price_schedule_items for insert
+  with check (exists (
+    select 1 from price_schedules s
+    where s.id = price_schedule_items.schedule_id
+      and s.lab_id = my_lab_id() and is_lab_admin()
+  ));
+
+drop policy if exists "price_items_update_admin" on price_schedule_items;
+create policy "price_items_update_admin" on price_schedule_items for update
+  using (exists (
+    select 1 from price_schedules s
+    where s.id = price_schedule_items.schedule_id
+      and s.lab_id = my_lab_id() and is_lab_admin()
+  ));
+
+drop policy if exists "price_items_delete_admin" on price_schedule_items;
+create policy "price_items_delete_admin" on price_schedule_items for delete
+  using (exists (
+    select 1 from price_schedules s
+    where s.id = price_schedule_items.schedule_id
+      and s.lab_id = my_lab_id() and is_lab_admin()
+  ));
+
+drop policy if exists "clinic_price_rules_select" on clinic_price_rules;
+create policy "clinic_price_rules_select" on clinic_price_rules for select
+  using (lab_id = my_lab_id() or is_admin());
+
+drop policy if exists "clinic_price_rules_insert_admin" on clinic_price_rules;
+create policy "clinic_price_rules_insert_admin" on clinic_price_rules for insert
+  with check (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "clinic_price_rules_update_admin" on clinic_price_rules;
+create policy "clinic_price_rules_update_admin" on clinic_price_rules for update
+  using (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "clinic_price_rules_delete_admin" on clinic_price_rules;
+create policy "clinic_price_rules_delete_admin" on clinic_price_rules for delete
+  using (lab_id = my_lab_id() and is_lab_admin());
+
+-- Billing/assignment columns are lab-side only. A clinic writer trying to
+-- change them (only possible via a hand-crafted API call — the app never
+-- sends them) gets the old values silently restored. Fires before the
+-- pricing trigger ("g" < "p" in trigger name order), so legitimate
+-- repricing still lands afterwards.
+create or replace function guard_lab_financial_columns()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) is distinct from 'service_role'
+     and (new.lab_id is null or new.lab_id is distinct from my_lab_id()) then
+    new.assigned_tech_id := old.assigned_tech_id;
+    new.invoice_status := old.invoice_status;
+    new.base_fee := old.base_fee;
+    new.adjustments := old.adjustments;
+    new.total_price := old.total_price;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists cases_guard_financials on cases;
+create trigger cases_guard_financials
+  before update on cases
+  for each row execute function guard_lab_financial_columns();
+
+-- The pricing engine. SECURITY DEFINER: it runs during a dentist's case
+-- insert, and the dentist's own RLS can't read the lab's price tables.
+create or replace function price_case()
+returns trigger
+security definer
+set search_path = public
+as $$
+declare
+  sched uuid;
+  disc numeric := 0;
+  base numeric := 0;
+  priced boolean := false;
+  r record;
+  p numeric;
+  adj jsonb := '[]'::jsonb;
+  credit numeric := 0;
+begin
+  -- issued/paid invoices are frozen; new lab-less cases can't be priced
+  if tg_op = 'UPDATE' and old.invoice_status in ('issued', 'paid') then
+    return new;
+  end if;
+  if new.lab_id is null then
+    return new;
+  end if;
+
+  -- clinic-specific schedule/discount, else the lab's default list
+  select cpr.price_schedule_id, coalesce(cpr.discount_pct, 0)
+    into sched, disc
+    from clinic_price_rules cpr
+   where cpr.lab_id = new.lab_id and cpr.clinic_id = new.clinic_id;
+  if sched is null then
+    select ps.id into sched from price_schedules ps
+     where ps.lab_id = new.lab_id and ps.is_default
+     limit 1;
+  end if;
+  if sched is null then
+    return new;  -- lab has no price list yet: leave fee columns alone
+  end if;
+
+  -- itemize: multi-restoration cart, or the flat legacy/appliance shape
+  for r in
+    select x->>'category' as category,
+           greatest(coalesce(jsonb_array_length(x->'teeth'), 0), 1) as units
+      from jsonb_array_elements(
+             coalesce(new.prescription->'restorations',
+                      jsonb_build_array(new.prescription))) as x
+  loop
+    select psi.base_price into p
+      from price_schedule_items psi
+     where psi.schedule_id = sched and psi.category = r.category;
+    if p is not null then
+      base := base + p * r.units;
+      priced := true;
+    end if;
+  end loop;
+
+  if not priced then
+    return new;  -- nothing matched the list: don't write misleading zeros
+  end if;
+
+  if disc <> 0 then
+    adj := adj || jsonb_build_array(jsonb_build_object(
+      'label', 'Clinic rate ' || (case when disc > 0 then '−' else '+' end) || abs(disc)::text || '%',
+      'amount', round(-(base * disc / 100.0), 3)));
+  end if;
+  if new.remake is not null and coalesce((new.remake->>'cost')::numeric, 0) > 0 then
+    credit := (new.remake->>'cost')::numeric;
+    adj := adj || jsonb_build_array(jsonb_build_object('label', 'Remake credit', 'amount', -credit));
+  end if;
+
+  new.base_fee := round(base, 3);
+  new.adjustments := adj;
+  new.total_price := greatest(0, round(base - (base * disc / 100.0) - credit, 3));
+  return new;
+exception when others then
+  -- pricing must NEVER block a clinical case write
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists cases_price on cases;
+create trigger cases_price
+  before insert or update of prescription, remake, lab_id on cases
+  for each row execute function price_case();

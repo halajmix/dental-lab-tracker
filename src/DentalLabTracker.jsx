@@ -54,6 +54,7 @@ import {
   isUrgent,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics } from "./Analytics.jsx";
+import { PriceListsManager } from "./LabAdmin.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import ContactLabModal from "./ContactLab.jsx";
@@ -603,11 +604,10 @@ const ADMIN_TABS = [
 const ADMIN_PLACEHOLDERS = {
   overview: "Revenue, outstanding balances, AOV, remake rate and intake-vs-completed charts arrive with the pricing engine.",
   technicians: "Live technician workload, output and remake tracking, plus batch case re-assignment.",
-  prices: "Master price list and per-clinic tier rates that drive automatic case invoicing.",
   staff: "Invite technicians by email and manage active / suspended / read-only access.",
 };
 
-function LabAdminWorkspace({ queue }) {
+function LabAdminWorkspace({ queue, lab, clinicsById }) {
   const [tab, setTab] = useState("queue");
   const active = ADMIN_TABS.find((t) => t.id === tab) ?? ADMIN_TABS[0];
   return (
@@ -627,6 +627,8 @@ function LabAdminWorkspace({ queue }) {
       </nav>
       {tab === "queue" ? (
         queue
+      ) : tab === "prices" ? (
+        <PriceListsManager lab={lab} clinicsById={clinicsById} />
       ) : (
         <ComingSoonCard icon={active.icon} title={`${active.label} — coming soon`} blurb={ADMIN_PLACEHOLDERS[tab]} />
       )}
@@ -1047,7 +1049,11 @@ export default function DentalLabTracker({ auth }) {
               onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
             />
           );
-          return activeWorkspace === "admin" ? <LabAdminWorkspace queue={labDashboard} /> : labDashboard;
+          return activeWorkspace === "admin" ? (
+            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} />
+          ) : (
+            labDashboard
+          );
         })()}
       </main>
 

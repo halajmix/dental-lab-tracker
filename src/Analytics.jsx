@@ -7,7 +7,8 @@ import { QualityBreakdown } from "./Remake.jsx";
 /*  Pricing + derived-date helpers                                     */
 /* ================================================================== */
 
-const BASE_PRICE = {
+// Legacy fallback prices, also used to seed a lab's first real price list.
+export const BASE_PRICE = {
   "Crown - tooth": 420,
   "Crown - implant": 950,
   "Bridge - tooth (conventional)": 420,
@@ -29,12 +30,23 @@ const BASE_PRICE = {
 // `_labs` kept for signature stability with callers — pricing no longer
 // varies per lab since the express surcharge was removed.
 export function caseFee(c, _labs = []) {
+  // Cases priced by the Phase 17 DB trigger carry authoritative totals —
+  // prefer those over the legacy hardcoded estimate.
+  if (c.totalPrice != null) {
+    const adjSum = (c.adjustments ?? []).reduce((s, a) => s + (Number(a.amount) || 0), 0);
+    return {
+      base: Number(c.baseFee ?? c.totalPrice),
+      credit: Math.max(0, -adjSum),
+      total: Number(c.totalPrice),
+      priced: true,
+    };
+  }
   const restorations = c.prescription?.restorations;
   const base = restorations?.length
     ? restorations.reduce((sum, r) => sum + (BASE_PRICE[r.category] ?? 400) * (r.teeth?.length || 1), 0)
     : (BASE_PRICE[c.prescription?.category] ?? 400) * (c.prescription?.teeth?.length || 1);
   const credit = c.remake?.cost ? Number(c.remake.cost) : 0;
-  return { base, credit, total: Math.max(0, base - credit) };
+  return { base, credit, total: Math.max(0, base - credit), priced: false };
 }
 
 export const caseCost = (c, labs) => caseFee(c, labs).total;

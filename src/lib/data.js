@@ -245,6 +245,148 @@ export async function fetchMyLabMemberships(userId, labId) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Price schedules (Phase 17) — lab price lists + per-clinic rules.    */
+/*  All writes are lab_admin-gated by RLS; actual case pricing happens  */
+/*  in a DB trigger, never in the client.                               */
+/* ------------------------------------------------------------------ */
+
+const priceItemFromRow = (r) => ({
+  id: r.id,
+  scheduleId: r.schedule_id,
+  category: r.category,
+  code: r.code ?? "",
+  basePrice: Number(r.base_price),
+});
+
+const priceScheduleFromRow = (r) => ({
+  id: r.id,
+  labId: r.lab_id,
+  name: r.name,
+  isDefault: r.is_default,
+  items: (r.price_schedule_items ?? [])
+    .map(priceItemFromRow)
+    .sort((a, b) => a.category.localeCompare(b.category)),
+});
+
+const clinicRuleFromRow = (r) => ({
+  id: r.id,
+  labId: r.lab_id,
+  clinicId: r.clinic_id,
+  priceScheduleId: r.price_schedule_id,
+  discountPct: Number(r.discount_pct ?? 0),
+});
+
+export async function fetchPriceSchedules(labId) {
+  const { data, error } = await supabase
+    .from("price_schedules")
+    .select("*, price_schedule_items(*)")
+    .eq("lab_id", labId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data.map(priceScheduleFromRow);
+}
+
+export async function createPriceSchedule(labId, name, { isDefault = false, items = [] } = {}) {
+  const { data: sched, error } = await supabase
+    .from("price_schedules")
+    .insert({ lab_id: labId, name, is_default: isDefault })
+    .select()
+    .single();
+  if (error) throw error;
+  if (items.length) {
+    const { error: itemsError } = await supabase.from("price_schedule_items").insert(
+      items.map((it) => ({
+        schedule_id: sched.id,
+        category: it.category,
+        code: it.code ?? "",
+        base_price: it.basePrice,
+      }))
+    );
+    if (itemsError) throw itemsError;
+  }
+  return sched.id;
+}
+
+export async function addPriceItem(scheduleId, { category, code = "", basePrice }) {
+  const { data, error } = await supabase
+    .from("price_schedule_items")
+    .insert({ schedule_id: scheduleId, category, code, base_price: basePrice })
+    .select()
+    .single();
+  if (error) throw error;
+  return priceItemFromRow(data);
+}
+
+export async function updatePriceItem(id, { code, basePrice }) {
+  const patch = {};
+  if (code !== undefined) patch.code = code;
+  if (basePrice !== undefined) patch.base_price = basePrice;
+  const { error } = await supabase.from("price_schedule_items").update(patch).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deletePriceItem(id) {
+  const { error } = await supabase.from("price_schedule_items").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Clear-then-set: a partial unique index allows only one default per lab.
+export async function setDefaultSchedule(labId, scheduleId) {
+  const { error: clearError } = await supabase
+    .from("price_schedules")
+    .update({ is_default: false })
+    .eq("lab_id", labId)
+    .eq("is_default", true);
+  if (clearError) throw clearError;
+  const { error } = await supabase
+    .from("price_schedules")
+    .update({ is_default: true })
+    .eq("id", scheduleId);
+  if (error) throw error;
+}
+
+export async function deletePriceSchedule(id) {
+  const { error } = await supabase.from("price_schedules").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchClinicPriceRules(labId) {
+  const { data, error } = await supabase
+    .from("clinic_price_rules")
+    .select("*")
+    .eq("lab_id", labId);
+  if (error) throw error;
+  return data.map(clinicRuleFromRow);
+}
+
+export async function upsertClinicPriceRule(labId, clinicId, { priceScheduleId = null, discountPct = 0 }) {
+  const { data, error } = await supabase
+    .from("clinic_price_rules")
+    .upsert(
+      {
+        lab_id: labId,
+        clinic_id: clinicId,
+        price_schedule_id: priceScheduleId,
+        discount_pct: discountPct,
+      },
+      { onConflict: "lab_id,clinic_id" }
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return clinicRuleFromRow(data);
+}
+
+export async function deleteClinicPriceRule(labId, clinicId) {
+  const { error } = await supabase
+    .from("clinic_price_rules")
+    .delete()
+    .eq("lab_id", labId)
+    .eq("clinic_id", clinicId);
+  if (error) throw error;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Profile self-service (name / phone / avatar — never email, that's   */
 /*  the auth.users login identity, not a profile field)                 */
 /* ------------------------------------------------------------------ */
