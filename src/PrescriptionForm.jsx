@@ -24,6 +24,7 @@ import {
   RotateCcw,
   Pencil,
   Layers3,
+  Truck,
 } from "lucide-react";
 import { uploadCasePhoto } from "./lib/data.js";
 
@@ -880,6 +881,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
 
   const [labId, setLabId] = useState("");
   const [deliveryTime, setDeliveryTime] = useState(DELIVERY_TIMES[0]);
+  const [pickupRequested, setPickupRequested] = useState(false); // ask the lab to collect the case from the clinic
 
   // Implant-only specs (blank so the dentist has to choose deliberately).
   const [implantSystem, setImplantSystem] = useState("");
@@ -1222,7 +1224,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
     setCaseMode("restorations"); setRestorations([]); setDraftOpen(false); setDraftTouched(false); setDraft(emptyDraft());
-    setLabId(""); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]);
+    setLabId(""); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]); setPickupRequested(false);
     setImplantSystem(""); setAbutmentType(""); setAbutmentColor("");
     setScans([]);
     photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
@@ -1247,6 +1249,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
         ...photos.filter((f) => f.url).map((f) => ({ name: f.name, size: f.size, kind: "photo", url: f.url })),
       ],
       notes: notes.trim(),
+      pickupRequested,
     };
     // Cart-mode cases carry a `restorations` array and omit the legacy flat
     // fields entirely; appliance-mode cases keep the exact original shape
@@ -1780,6 +1783,28 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
+              </Field>
+              <Field label="Lab Pick-up">
+                <button
+                  type="button"
+                  onClick={() => setPickupRequested((v) => !v)}
+                  aria-pressed={pickupRequested}
+                  className={`flex min-h-[42px] w-full items-center gap-2 rounded-lg border px-3 text-left text-base font-medium transition sm:text-sm ${
+                    pickupRequested
+                      ? "border-blue-400 bg-blue-50 text-blue-700 ring-2 ring-blue-100"
+                      : "border-slate-300 bg-white text-slate-500 hover:border-slate-400"
+                  }`}
+                >
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
+                      pickupRequested ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white"
+                    }`}
+                  >
+                    {pickupRequested && <Check size={11} />}
+                  </span>
+                  <Truck size={15} className="shrink-0" />
+                  Request a lab pick-up
+                </button>
               </Field>
             </div>
 

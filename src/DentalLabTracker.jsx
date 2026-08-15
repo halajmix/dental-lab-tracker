@@ -35,6 +35,7 @@ import {
   Image as ImageIcon,
   History as HistoryIcon,
   ScanLine,
+  Truck,
   Shield,
   Wrench,
   LayoutDashboard,
@@ -386,6 +387,11 @@ function CaseRxDetails({ c }) {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-2">
+      {p.pickupRequested && (
+        <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 ring-1 ring-inset ring-blue-100">
+          <Truck size={13} /> Lab pick-up requested — collect this case from the clinic
+        </div>
+      )}
       {hasCart ? (
         <div className="space-y-2.5 py-1.5">
           {restorations.map((r, i) => (
@@ -1876,8 +1882,13 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
               </span>
             </>
           )}
+          {c.prescription.pickupRequested && (
+            <span className="ml-auto flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">
+              <Truck size={11} /> Pick-up
+            </span>
+          )}
           {c.prescription.files?.some((f) => f.kind === "photo" && f.url) && (
-            <span className="ml-auto flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-700">
+            <span className={`flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-700 ${c.prescription.pickupRequested ? "" : "ml-auto"}`}>
               <ImageIcon size={11} /> {c.prescription.files.filter((f) => f.kind === "photo" && f.url).length}
             </span>
           )}
