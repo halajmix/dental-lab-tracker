@@ -188,7 +188,7 @@ export function AnalyticsDashboard({ cases, labs }) {
               <div>
                 <div className="mb-1.5 flex items-center justify-between">
                   <span className="text-sm font-semibold text-slate-800">{l.name}</span>
-                  <span className="text-[11px] text-slate-400">{l.volume} cases · ${l.spend.toLocaleString()}</span>
+                  <span className="text-[11px] text-slate-400">{l.volume} cases · {l.spend.toLocaleString()} OMR</span>
                 </div>
                 {/* promised bar */}
                 <div className="mb-1 flex items-center gap-2">

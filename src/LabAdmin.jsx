@@ -1201,7 +1201,7 @@ export function TechniciansPanel({ lab, cases }) {
                 <th className="px-2 py-2.5 text-right">Units today</th>
                 <th className="px-2 py-2.5 text-right">Month</th>
                 <th className="px-2 py-2.5 text-right">Year</th>
-                <th className="px-2 py-2.5 text-right">Value (month)</th>
+                <th className="px-2 py-2.5 text-right">Value (OMR/mo)</th>
                 <th className="px-2 py-2.5 text-right">Remake %</th>
               </tr>
             </thead>
