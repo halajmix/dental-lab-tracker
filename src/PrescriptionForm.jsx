@@ -25,8 +25,13 @@ import {
   Pencil,
   Layers3,
   Truck,
+  MapPin,
+  Search,
+  Phone,
 } from "lucide-react";
 import { uploadCasePhoto } from "./lib/data.js";
+import { OMAN_GOVERNORATES } from "./lib/omanRegions.jsx";
+import { waLink } from "./lib/whatsapp.js";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -654,6 +659,168 @@ function Field({ label, children, hint, required }) {
  * collapsed and shows a live summary, so the dentist can see the whole order
  * at a glance without expanding everything.
  */
+/* ------------------------------------------------------------------ */
+/*  Lab picker — replaces the blind name-only dropdown. One card per    */
+/*  registered lab with region, turnaround and contact actions; labs    */
+/*  in the sending clinic's governorate sort first under "Near you".    */
+/* ------------------------------------------------------------------ */
+
+const labRegionLine = (l) =>
+  l.governorate ? `${l.governorate}${l.wilayat ? ` · ${l.wilayat}` : ""}` : "Location not set";
+
+function LabPickerCard({ lab, selected, onPick }) {
+  const phoneDigits = (lab.contact || "").replace(/\D/g, "");
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onPick(lab.id)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onPick(lab.id)}
+      className={`cursor-pointer rounded-xl border p-3 transition ${
+        selected ? "border-blue-400 bg-blue-50/60 ring-2 ring-blue-100" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-slate-800">{lab.name}</p>
+          <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-500">
+            <MapPin size={11} className="shrink-0 text-slate-400" /> {labRegionLine(lab)}
+          </p>
+        </div>
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+          <Clock size={11} /> {lab.tat}d turnaround
+        </span>
+      </div>
+      {phoneDigits && (
+        <div className="mt-2 flex items-center gap-2">
+          <a
+            href={`tel:${phoneDigits}`}
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            <Phone size={12} /> Call
+          </a>
+          <a
+            href={waLink(phoneDigits, `Hello ${lab.name}, I'm contacting you via Dr-Crown.`)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+          >
+            <MessageCircle size={12} /> WhatsApp
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [gov, setGov] = useState("");
+
+  const selected = labs.find((l) => l.id === value) ?? null;
+
+  const q = query.trim().toLowerCase();
+  const filtered = labs.filter(
+    (l) => (!q || l.name.toLowerCase().includes(q)) && (!gov || l.governorate === gov)
+  );
+  const near = clinicGov ? filtered.filter((l) => l.governorate && l.governorate === clinicGov) : [];
+  const rest = filtered.filter((l) => !near.includes(l));
+
+  const pick = (id) => {
+    onChange(id);
+    setOpen(false);
+    setQuery("");
+    setGov("");
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={`${inputCls} flex items-center justify-between gap-2 text-left ${invalid ? "border-rose-400 ring-rose-100" : ""}`}
+      >
+        {selected ? (
+          <span className="min-w-0 truncate">
+            <span className="font-medium text-slate-800">{selected.name}</span>
+            <span className="text-slate-400"> · {labRegionLine(selected)}</span>
+          </span>
+        ) : (
+          <span className="truncate text-slate-400">Choose a lab…</span>
+        )}
+        <ChevronDown size={16} className="shrink-0 text-slate-400" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
+            <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-md sm:rounded-2xl">
+              <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+                <Building2 size={16} className="text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-800">Choose a lab</h3>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-[1.4fr_1fr]">
+                <div className="relative min-w-0">
+                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search labs…"
+                    className={`${inputCls} pl-8`}
+                  />
+                </div>
+                <select value={gov} onChange={(e) => setGov(e.target.value)} className={`${inputCls} min-w-0`}>
+                  <option value="">All regions</option>
+                  {OMAN_GOVERNORATES.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
+                {near.length > 0 && (
+                  <>
+                    <p className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-emerald-600">
+                      <MapPin size={11} /> Near you — {clinicGov}
+                    </p>
+                    {near.map((l) => (
+                      <LabPickerCard key={l.id} lab={l} selected={l.id === value} onPick={pick} />
+                    ))}
+                  </>
+                )}
+                {rest.length > 0 && (
+                  <>
+                    {near.length > 0 && (
+                      <p className="pt-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Other labs</p>
+                    )}
+                    {rest.map((l) => (
+                      <LabPickerCard key={l.id} lab={l} selected={l.id === value} onPick={pick} />
+                    ))}
+                  </>
+                )}
+                {filtered.length === 0 && (
+                  <p className="py-10 text-center text-sm text-slate-400">No labs match — try clearing the search or region filter.</p>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
 function Step({ n, title, subtitle, summary, open, onToggle, complete, invalid, children }) {
   const ref = useRef(null);
   const wasOpen = useRef(open);
@@ -1386,12 +1553,13 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                 <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
               </Field>
               <Field label="Select Lab" required>
-                <select className={`${inputCls} ${err("labId") ? "border-rose-400 ring-rose-100" : ""}`} value={labId} onChange={(e) => setLabId(e.target.value)}>
-                  <option value="">Select lab…</option>
-                  {labs.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name}</option>
-                  ))}
-                </select>
+                <LabPicker
+                  labs={labs}
+                  value={labId}
+                  onChange={setLabId}
+                  clinicGov={clinics.find((c) => c.id === (selectedClinicId || defaultClinicId))?.governorate || ""}
+                  invalid={!!err("labId")}
+                />
               </Field>
             </div>
 
