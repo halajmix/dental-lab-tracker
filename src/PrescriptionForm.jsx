@@ -27,11 +27,8 @@ import {
   Truck,
   MapPin,
   Search,
-  Phone,
 } from "lucide-react";
 import { uploadCasePhoto } from "./lib/data.js";
-import { OMAN_GOVERNORATES } from "./lib/omanRegions.jsx";
-import { waLink } from "./lib/whatsapp.js";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -669,7 +666,6 @@ const labRegionLine = (l) =>
   l.governorate ? `${l.governorate}${l.wilayat ? ` · ${l.wilayat}` : ""}` : "Location not set";
 
 function LabPickerCard({ lab, selected, onPick }) {
-  const phoneDigits = (lab.contact || "").replace(/\D/g, "");
   return (
     <div
       role="button"
@@ -691,26 +687,6 @@ function LabPickerCard({ lab, selected, onPick }) {
           <Clock size={11} /> {lab.tat}d turnaround
         </span>
       </div>
-      {phoneDigits && (
-        <div className="mt-2 flex items-center gap-2">
-          <a
-            href={`tel:${phoneDigits}`}
-            onClick={(e) => e.stopPropagation()}
-            className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-          >
-            <Phone size={12} /> Call
-          </a>
-          <a
-            href={waLink(phoneDigits, `Hello ${lab.name}, I'm contacting you via Dr-Crown.`)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-          >
-            <MessageCircle size={12} /> WhatsApp
-          </a>
-        </div>
-      )}
     </div>
   );
 }
@@ -718,14 +694,11 @@ function LabPickerCard({ lab, selected, onPick }) {
 function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [gov, setGov] = useState("");
 
   const selected = labs.find((l) => l.id === value) ?? null;
 
   const q = query.trim().toLowerCase();
-  const filtered = labs.filter(
-    (l) => (!q || l.name.toLowerCase().includes(q)) && (!gov || l.governorate === gov)
-  );
+  const filtered = labs.filter((l) => !q || l.name.toLowerCase().includes(q));
   const near = clinicGov ? filtered.filter((l) => l.governorate && l.governorate === clinicGov) : [];
   const rest = filtered.filter((l) => !near.includes(l));
 
@@ -733,7 +706,6 @@ function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
     onChange(id);
     setOpen(false);
     setQuery("");
-    setGov("");
   };
 
   return (
@@ -770,7 +742,7 @@ function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-[1.4fr_1fr]">
+              <div className="border-b border-slate-100 px-4 py-3">
                 <div className="relative min-w-0">
                   <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
@@ -780,12 +752,6 @@ function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
                     className={`${inputCls} pl-8`}
                   />
                 </div>
-                <select value={gov} onChange={(e) => setGov(e.target.value)} className={`${inputCls} min-w-0`}>
-                  <option value="">All regions</option>
-                  {OMAN_GOVERNORATES.map((g) => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
-                </select>
               </div>
 
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
@@ -810,7 +776,7 @@ function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
                   </>
                 )}
                 {filtered.length === 0 && (
-                  <p className="py-10 text-center text-sm text-slate-400">No labs match — try clearing the search or region filter.</p>
+                  <p className="py-10 text-center text-sm text-slate-400">No labs match — try clearing the search.</p>
                 )}
               </div>
             </div>
