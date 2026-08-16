@@ -1280,9 +1280,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
     const arr = Array.from(fileList).map((f) => ({ name: f.name, size: f.size }));
     setter((prev) => [...prev, ...arr]);
   };
-  const addSampleScan = () =>
-    setScans((p) => [...p, { name: `IOS_scan_${p.length + 1}.stl`, size: 4_800_000 + p.length * 512_000 }]);
-
   // Clinical/shade photos are REAL uploads to Supabase Storage so the lab
   // sees the actual image, not just a filename. Each file gets a local
   // object-URL thumbnail immediately, then the entry is patched in place
@@ -1955,45 +1952,19 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               </Field>
             </div>
 
-            {/* TAT + schedule-check summary cards */}
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-                <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500"><Clock size={12} /> Estimated Turnaround</p>
-                <p className="mt-0.5 text-lg font-bold text-slate-800">
-                  {effTat} day{effTat !== 1 ? "s" : ""}
-                </p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-                <p className="flex items-center gap-1 text-[11px] font-medium text-slate-500"><Calendar size={12} /> Est. Ready Date</p>
-                <p className="mt-0.5 text-lg font-bold text-slate-800">{estReady ? iso(estReady) : "—"}</p>
-              </div>
-              <div className={`rounded-lg border px-3 py-2.5 ${insufficientTime ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
-                <p className={`flex items-center gap-1 text-[11px] font-medium ${insufficientTime ? "text-rose-600" : "text-emerald-600"}`}>
-                  {insufficientTime ? <AlertTriangle size={12} /> : <Check size={12} />} Schedule Check
-                </p>
-                <p className={`mt-0.5 text-xs font-semibold ${insufficientTime ? "text-rose-700" : "text-emerald-700"}`}>
-                  {!insertionDate ? "Set an insertion date" : insufficientTime ? "Insertion is before ready date" : "Fits before insertion"}
-                </p>
-              </div>
-            </div>
           </section>
 
           {/* Attachments & notes */}
           <section className="mt-6">
-            <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach STL scans (simulated) and clinical/shade photos — photos upload for real, the lab sees the actual image" />
+            <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach intraoral scans and clinical/shade photos for the lab" />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* STL scans */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Intraoral Scans (STL)</div>
-                <div className="flex flex-wrap gap-2">
-                  <label className="cursor-pointer rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">
-                    Choose .stl
-                    <input type="file" accept=".stl,.ply,.obj" multiple className="hidden" onChange={(e) => addFiles(e.target.files, setScans)} />
-                  </label>
-                  <button type="button" onClick={addSampleScan} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                    <Sparkles size={12} className="mr-1 inline" /> Attach sample scan
-                  </button>
-                </div>
+                <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
+                  <Plus size={13} /> Add STL scan file
+                  <input type="file" accept=".stl,.ply,.obj" multiple className="hidden" onChange={(e) => addFiles(e.target.files, setScans)} />
+                </label>
                 <ul className="mt-3 space-y-1.5">
                   {scans.length === 0 && <li className="text-[11px] text-slate-400">No scans attached.</li>}
                   {scans.map((f, i) => (
@@ -2014,8 +1985,8 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-700"><ImageIcon size={16} className="text-violet-600" /> Clinical / Shade Photos</div>
                   {photos.length > 0 && <span className="text-[11px] font-medium text-slate-400">{photos.length} photo{photos.length !== 1 ? "s" : ""}</span>}
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
-                  <ImageIcon size={13} /> Choose or take photos
+                <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
+                  <Plus size={13} /> Add photos
                   {/* No `capture` attribute — that forces mobile browsers straight
                       into the camera, skipping the "Camera or Photo Library"
                       chooser. Plain accept="image/*" gives the normal picker. */}
