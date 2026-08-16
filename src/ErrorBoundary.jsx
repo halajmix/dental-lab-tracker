@@ -1,6 +1,16 @@
 import React from "react";
 import { AlertTriangle, RotateCcw, RefreshCw } from "lucide-react";
 
+// A deploy replaces the hashed JS chunks; a page (or service worker cache)
+// from before the deploy then fails to import modules that no longer exist
+// under their old names. Safari words it "Importing a module script failed",
+// Chrome "Failed to fetch dynamically imported module". One reload fixes it
+// — so do that automatically, once (sessionStorage-guarded against loops;
+// main.jsx clears the guard after the app has been healthy for a while).
+const STALE_CHUNK_RE =
+  /Importing a module script failed|Failed to fetch dynamically imported module|error loading dynamically imported module|ChunkLoadError/i;
+export const STALE_CHUNK_RELOAD_KEY = "drcrown.stale-chunk-reload";
+
 /**
  * Catches render errors anywhere below it and shows a friendly fallback
  * instead of a blank white/black screen. Class component because only class
@@ -9,7 +19,7 @@ import { AlertTriangle, RotateCcw, RefreshCw } from "lucide-react";
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { error: null };
+    this.state = { error: null, recovering: false };
   }
 
   static getDerivedStateFromError(error) {
@@ -19,6 +29,23 @@ export default class ErrorBoundary extends React.Component {
   componentDidCatch(error, info) {
     // Surface for debugging; a real app would send this to a logging service.
     console.error("App crashed:", error, info?.componentStack);
+
+    // Stale-deploy self-heal: reload once instead of showing the crash card.
+    let alreadyTried = false;
+    try {
+      alreadyTried = !!sessionStorage.getItem(STALE_CHUNK_RELOAD_KEY);
+    } catch {
+      alreadyTried = true; // no sessionStorage -> don't risk a reload loop
+    }
+    if (STALE_CHUNK_RE.test(String(error?.message || error)) && !alreadyTried) {
+      try {
+        sessionStorage.setItem(STALE_CHUNK_RELOAD_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      this.setState({ recovering: true });
+      window.location.reload();
+    }
   }
 
   reload = () => window.location.reload();
@@ -36,6 +63,16 @@ export default class ErrorBoundary extends React.Component {
 
   render() {
     if (!this.state.error) return this.props.children;
+
+    if (this.state.recovering) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+          <p className="flex items-center gap-2 text-sm font-medium text-slate-500">
+            <RefreshCw size={16} className="animate-spin" /> Updating to the latest version…
+          </p>
+        </div>
+      );
+    }
 
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 text-slate-800">

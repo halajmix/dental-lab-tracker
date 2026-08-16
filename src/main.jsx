@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import DentalLabTracker from "./DentalLabTracker.jsx";
-import ErrorBoundary from "./ErrorBoundary.jsx";
+import ErrorBoundary, { STALE_CHUNK_RELOAD_KEY } from "./ErrorBoundary.jsx";
 import PWAInstallBanner from "./PWAInstallBanner.jsx";
 import ConnectionStatus from "./ConnectionStatus.jsx";
 import ImpersonationBanner from "./ImpersonationBanner.jsx";
@@ -9,8 +9,40 @@ import { AuthGate } from "./Auth.jsx";
 import "./index.css";
 
 // Role-gated and rarely used — keep it out of the initial bundle everyone
-// else (dentist/lab logins) pays for.
-const AdminDashboard = lazy(() => import("./AdminDashboard.jsx"));
+// else (dentist/lab logins) pays for. The .catch mirrors ErrorBoundary's
+// stale-deploy self-heal: if this chunk's old hashed name is gone after a
+// deploy, one reload fetches the fresh index.html that points at the new
+// one (guarded so a genuinely broken deploy can't reload-loop).
+const AdminDashboard = lazy(() =>
+  import("./AdminDashboard.jsx").catch((err) => {
+    let alreadyTried = false;
+    try {
+      alreadyTried = !!sessionStorage.getItem(STALE_CHUNK_RELOAD_KEY);
+    } catch {
+      alreadyTried = true;
+    }
+    if (!alreadyTried) {
+      try {
+        sessionStorage.setItem(STALE_CHUNK_RELOAD_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      window.location.reload();
+      return new Promise(() => {}); // page is reloading; never resolve
+    }
+    throw err;
+  })
+);
+
+// After the app has been healthy for a while, re-arm the one-shot reload
+// guard so the NEXT deploy can also self-heal.
+setTimeout(() => {
+  try {
+    sessionStorage.removeItem(STALE_CHUNK_RELOAD_KEY);
+  } catch {
+    /* ignore */
+  }
+}, 15000);
 
 // Nudge the service worker to check for a new deploy whenever the app comes
 // back to the foreground. iOS installed PWAs poll for SW updates very
