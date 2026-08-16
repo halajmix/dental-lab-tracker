@@ -679,8 +679,9 @@ function LabPickerCard({ lab, selected, onPick }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-bold text-slate-800">{lab.name}</p>
-          <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-500">
-            <MapPin size={11} className="shrink-0 text-slate-400" /> {labRegionLine(lab)}
+          <p className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-slate-500">
+            <MapPin size={11} className="shrink-0 text-slate-400" />
+            <span className="min-w-0 truncate">{labRegionLine(lab)}</span>
           </p>
         </div>
         <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
