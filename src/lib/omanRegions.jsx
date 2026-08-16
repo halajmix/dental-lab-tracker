@@ -25,13 +25,17 @@ export const OMAN_GOVERNORATES = Object.keys(OMAN_REGIONS);
  * `{ governorate, wilayat }`; `onChange` receives a partial patch — when
  * the governorate changes, the caller should clear wilayat itself (this
  * component doesn't assume how the parent stores state).
+ *
+ * `stacked` keeps all three fields in one column — the onboarding card is
+ * only max-w-md wide, where three side-by-side selects clip the longer
+ * governorate names.
  */
 import React from "react";
 
-export function OmanLocationFields({ value, onChange, inputCls, required }) {
+export function OmanLocationFields({ value, onChange, inputCls, required, stacked }) {
   const wilayats = OMAN_REGIONS[value.governorate] ?? [];
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className={`grid grid-cols-1 gap-3 ${stacked ? "" : "sm:grid-cols-3"}`}>
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-slate-600">Country</span>
         <input value="Oman" disabled readOnly className={`${inputCls} cursor-not-allowed text-slate-400`} />

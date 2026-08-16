@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Mail, Lock, LogIn, UserPlus, Stethoscope, Building2, Loader2, ArrowLeft, CheckCircle2, KeyRound } from "lucide-react";
 import { supabase } from "./lib/supabaseClient.js";
 import { useAuth } from "./lib/useAuth.js";
+import { OmanLocationFields } from "./lib/omanRegions.jsx";
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
@@ -375,6 +376,7 @@ function DentistOnboarding({ userId, userEmail, onDone, onBack }) {
   const [dentistName, setDentistName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState(userEmail || "");
+  const [location, setLocation] = useState({ governorate: "", wilayat: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -390,6 +392,8 @@ function DentistOnboarding({ userId, userEmail, onDone, onBack }) {
         dentist: dentistName.trim(),
         contact: `00968${phone}`,
         email: email.trim(),
+        governorate: location.governorate,
+        wilayat: location.wilayat,
       })
       .select()
       .single();
@@ -432,6 +436,16 @@ function DentistOnboarding({ userId, userEmail, onDone, onBack }) {
         <Field label="E-mail *">
           <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="care@clinic.com" />
         </Field>
+        {/* Location drives the Rx form's "Near you" lab grouping, which keys
+            off the sending clinic's governorate — asking here keeps it from
+            silently never appearing. */}
+        <OmanLocationFields
+          required
+          stacked
+          value={location}
+          onChange={(patch) => setLocation((l) => ({ ...l, ...patch }))}
+          inputCls={inputCls}
+        />
         <button
           type="submit"
           disabled={busy}
@@ -458,6 +472,7 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState(userEmail || "");
   const [displayName, setDisplayName] = useState("");
+  const [location, setLocation] = useState({ governorate: "", wilayat: "" });
 
   useEffect(() => {
     let cancelled = false;
@@ -518,7 +533,16 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
     onDone();
   };
 
+  // The claimable row was created by a clinic before labs self-registered,
+  // so it almost never carries a location. Ask for one on the way in.
+  const claimNeedsLocation = !claimable?.governorate;
+
   const claim = async () => {
+    if (claimNeedsLocation && (!location.governorate || !location.wilayat)) {
+      // This button isn't a form submit, so `required` never fires here.
+      setError("Pick your governorate and wilayat so clinics can find you.");
+      return;
+    }
     setBusy(true);
     setError("");
     // Profile FIRST: the labs update policy passes via "id = my_lab_id()",
@@ -532,7 +556,12 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
       setError(profErr.message);
       return;
     }
-    const { error: labErr } = await supabase.from("labs").update({ owner_id: userId }).eq("id", claimable.id);
+    const labPatch = { owner_id: userId };
+    if (claimNeedsLocation) {
+      labPatch.governorate = location.governorate;
+      labPatch.wilayat = location.wilayat;
+    }
+    const { error: labErr } = await supabase.from("labs").update(labPatch).eq("id", claimable.id);
     setBusy(false);
     if (labErr) {
       setError(labErr.message);
@@ -555,6 +584,8 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
         contact: `00968${phone}`,
         email: email.trim(),
         tat: 5,
+        governorate: location.governorate,
+        wilayat: location.wilayat,
       })
       .select()
       .single();
@@ -647,6 +678,17 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
           <Field label="Technician name">
             <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="e.g. Ahmed Al-Balushi" />
           </Field>
+          {claimNeedsLocation && (
+            <div className="mt-4">
+              <OmanLocationFields
+                required
+                stacked
+                value={location}
+                onChange={(patch) => setLocation((l) => ({ ...l, ...patch }))}
+                inputCls={inputCls}
+              />
+            </div>
+          )}
           <button
             onClick={claim}
             disabled={busy}
@@ -676,6 +718,15 @@ function LabOnboarding({ userId, userEmail, onDone, onBack }) {
           <Field label="E-mail *">
             <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
           </Field>
+          {/* Without this the lab lands in the Rx form's lab picker reading
+              "Location not set" and never joins a "Near you" group. */}
+          <OmanLocationFields
+            required
+            stacked
+            value={location}
+            onChange={(patch) => setLocation((l) => ({ ...l, ...patch }))}
+            inputCls={inputCls}
+          />
           <button
             type="submit"
             disabled={busy}
