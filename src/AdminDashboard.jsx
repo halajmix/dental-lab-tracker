@@ -790,7 +790,6 @@ function PriceSheets({ labById }) {
               <thead className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
                 <tr>
                   <th className="py-1.5 pr-3">Restoration</th>
-                  <th className="py-1.5 pr-3">Code</th>
                   <th className="py-1.5 text-right">Price (OMR)</th>
                 </tr>
               </thead>
@@ -798,7 +797,6 @@ function PriceSheets({ labById }) {
                 {s.items.map((it) => (
                   <tr key={it.id}>
                     <td className="py-1.5 pr-3 text-slate-700">{it.category}</td>
-                    <td className="py-1.5 pr-3 text-slate-400">{it.code || "—"}</td>
                     <td className="py-1.5 text-right tabular-nums text-slate-700">{it.basePrice}</td>
                   </tr>
                 ))}
