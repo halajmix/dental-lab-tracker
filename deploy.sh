@@ -5,6 +5,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 REPO_URL="https://github.com/halajmix/dental-lab-tracker.git"
 
+echo "▸ Checking for undefined JSX components…"
+node scripts/check-jsx-undef.mjs
+
 echo "▸ Building production bundle…"
 NODE_ENV=production npm run build
 

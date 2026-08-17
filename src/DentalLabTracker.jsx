@@ -5,6 +5,7 @@ import {
   Stethoscope,
   Pencil,
   MapPin,
+  CheckCircle2,
   X,
   Search,
   ClipboardCheck,
