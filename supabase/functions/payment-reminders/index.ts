@@ -104,6 +104,52 @@ Deno.serve(async (req) => {
 
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
+  let task = "";
+  try {
+    task = (await req.json())?.task ?? "";
+  } catch {
+    /* no body — default task */
+  }
+
+  // ---------------- hourly client-error digest ----------------
+  // Routed through this function because pg_net -> api.resend.com times
+  // out from the database's network, while pg_net -> this function and
+  // Deno -> Resend are both proven paths (case-notify uses them daily).
+  if (task === "error-digest") {
+    const { data: errors, error } = await admin
+      .from("client_errors")
+      .select("id, at, message, url")
+      .eq("alerted", false)
+      .order("id", { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    if (!errors?.length) return json({ ok: true, errors: 0 });
+
+    const esc = (s: unknown) => String(s ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const items = errors
+      .slice(0, 5)
+      .map(
+        (e) => `<li style="margin-bottom:8px"><b>${esc(e.message).slice(0, 200)}</b><br>
+          <span style="color:#64748b;font-size:12px">${new Date(e.at).toUTCString()} — ${esc(e.url).slice(0, 120)}</span></li>`,
+      )
+      .join("");
+
+    const emailed = await sendEmail(
+      "alajmix@gmail.com",
+      undefined,
+      `Dr-Crown: ${errors.length} client error${errors.length === 1 ? "" : "s"} in the last hour`,
+      `<div style="font-family:system-ui,sans-serif;max-width:560px">
+        <h2 style="margin:0 0 10px">${errors.length} new client error${errors.length === 1 ? "" : "s"}</h2>
+        <ul style="padding-left:18px">${items}</ul>
+        <p style="color:#64748b;font-size:12px">Newest 5 shown. Full details (stack traces, user ids) are in the client_errors table.</p>
+      </div>`,
+    );
+    if (emailed) {
+      await admin.from("client_errors").update({ alerted: true }).in("id", errors.map((e) => e.id));
+    }
+    return json({ ok: true, errors: errors.length, emailed });
+  }
+
   try {
     const { data: unpaid, error } = await admin
       .from("cases")

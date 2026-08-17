@@ -1530,7 +1530,9 @@ begin
       'Content-Type', 'application/json',
       'x-webhook-secret', coalesce(secret, '')
     ),
-    body := jsonb_build_object('source', 'pg_cron')
+    body := jsonb_build_object('source', 'pg_cron'),
+    -- Give the function time to email every clinic before pg_net hangs up.
+    timeout_milliseconds := 30000
   );
 end;
 $$ language plpgsql;
@@ -1568,6 +1570,11 @@ create table if not exists client_errors (
   ua text,
   user_id uuid default auth.uid()
 );
+
+-- Digest state lives on the rows themselves (alerted flips true once
+-- emailed) because the sender is an Edge Function that can't reach the
+-- private schema through PostgREST.
+alter table client_errors add column if not exists alerted boolean not null default false;
 
 alter table client_errors enable row level security;
 
@@ -1612,60 +1619,27 @@ security definer
 set search_path = public, private
 as $$
 declare
-  resend_key text;
-  last_id bigint;
-  new_count int;
-  max_id bigint;
-  digest text;
+  secret text;
 begin
-  select value into resend_key from private.webhook_config where key = 'resend_api_key';
-  -- Real Resend keys always start "re_" — checking the shape instead of
-  -- comparing against the placeholder literal survives a find-and-replace-
-  -- all of the placeholder (which once poisoned this very check).
-  if resend_key is null or resend_key not like 're\_%' then
-    return; -- not configured yet; errors still accumulate in the table
+  -- Direct pg_net -> api.resend.com hangs from the DB network (timed out
+  -- live on 2026-08-17), so the digest goes through the payment-reminders
+  -- Edge Function instead: pg_net reaches the project's own functions
+  -- reliably, and Deno -> Resend is the same proven path case-notify uses.
+  -- The function reads client_errors where alerted = false and flips the
+  -- flag after emailing, so no state lives here.
+  if not exists (select 1 from client_errors where alerted = false) then
+    return;
   end if;
-
-  select coalesce(nullif(value, '')::bigint, 0) into last_id
-    from private.webhook_config where key = 'error_alert_last_id';
-  if last_id is null then last_id := 0; end if;
-
-  select count(*), max(id) into new_count, max_id from client_errors where id > last_id;
-  if new_count = 0 then return; end if;
-
-  select string_agg(
-    '<li style="margin-bottom:8px"><b>' ||
-    replace(replace(left(message, 200), '<', '&lt;'), '>', '&gt;') ||
-    '</b><br><span style="color:#64748b;font-size:12px">' ||
-    to_char(at, 'DD Mon HH24:MI UTC') || ' — ' ||
-    replace(replace(coalesce(left(url, 120), ''), '<', '&lt;'), '>', '&gt;') ||
-    '</span></li>', '')
-  into digest
-  from (select * from client_errors where id > last_id order by id desc limit 5) recent;
-
+  select value into secret from private.webhook_config where key = 'case_notify_secret';
   perform net.http_post(
-    url := 'https://api.resend.com/emails',
+    url := 'https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/payment-reminders',
     headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || resend_key,
-      'Content-Type', 'application/json'
+      'Content-Type', 'application/json',
+      'x-webhook-secret', coalesce(secret, '')
     ),
-    body := jsonb_build_object(
-      'from', 'Dr-Crown <noreply@dr-crown.com>',
-      'to', jsonb_build_array('alajmix@gmail.com'),
-      'subject', 'Dr-Crown: ' || new_count || ' client error' || case when new_count = 1 then '' else 's' end || ' in the last hour',
-      'html', '<div style="font-family:system-ui,sans-serif;max-width:560px">' ||
-              '<h2 style="margin:0 0 10px">' || new_count || ' new client error' || case when new_count = 1 then '' else 's' end || '</h2>' ||
-              '<ul style="padding-left:18px">' || coalesce(digest, '') || '</ul>' ||
-              '<p style="color:#64748b;font-size:12px">Newest 5 shown. Full details (stack traces, user ids) are in the client_errors table.</p></div>'
-    ),
-    -- pg_net's default 5s timeout killed the very first live send (timed_out
-    -- in net._http_response); give the TLS handshake + Resend room to answer.
+    body := jsonb_build_object('task', 'error-digest'),
     timeout_milliseconds := 15000
   );
-
-  insert into private.webhook_config (key, value)
-    values ('error_alert_last_id', max_id::text)
-    on conflict (key) do update set value = excluded.value;
 end;
 $$ language plpgsql;
 
