@@ -1541,3 +1541,128 @@ select cron.schedule(
   '0 6 25 * *',
   $$select private.run_payment_reminders()$$
 );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 24 — client error reporting + hourly admin alert emails        */
+/*                                                                       */
+/*  The app inserts crashes into client_errors (anyone may insert, only  */
+/*  the super admin may read; a trigger caps volume so a broken client   */
+/*  or an abuser can't flood the table). Every hour pg_cron checks for   */
+/*  new rows and emails a digest to the admin — via the Resend API       */
+/*  called directly from Postgres (pg_net), no Edge Function involved.   */
+/*                                                                       */
+/*  Manual step: store your Resend API key (resend.com → API Keys) —    */
+/*  replace PASTE-RESEND-KEY-HERE below before running, or run the       */
+/*  insert separately. Without it, errors are still recorded and         */
+/*  visible via SQL; only the emails are skipped.                        */
+/* --------------------------------------------------------------------- */
+
+create table if not exists client_errors (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  message text not null,
+  stack text,
+  url text,
+  ua text,
+  user_id uuid default auth.uid()
+);
+
+alter table client_errors enable row level security;
+
+drop policy if exists "client_errors_insert" on client_errors;
+create policy "client_errors_insert" on client_errors for insert with check (true);
+
+drop policy if exists "client_errors_select" on client_errors;
+create policy "client_errors_select" on client_errors for select using (is_admin());
+
+-- Flood guard: at most 300 reports per hour platform-wide; oversized
+-- fields are clipped server-side even if a client bypasses the app.
+create or replace function guard_client_errors()
+returns trigger as $$
+begin
+  if (select count(*) from client_errors where at > now() - interval '1 hour') >= 300 then
+    return null; -- silently drop, never error a reporting client
+  end if;
+  new.message := left(coalesce(new.message, ''), 500);
+  new.stack := left(coalesce(new.stack, ''), 4000);
+  new.url := left(coalesce(new.url, ''), 300);
+  new.ua := left(coalesce(new.ua, ''), 300);
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists client_errors_guard on client_errors;
+create trigger client_errors_guard
+  before insert on client_errors
+  for each row execute function guard_client_errors();
+
+-- Resend key for direct-from-Postgres alert emails (write-only storage,
+-- same non-exposed private table as the webhook secret).
+-- do nothing on conflict: a full-file re-run with the placeholder must
+-- never clobber a real key that's already stored.
+insert into private.webhook_config (key, value)
+  values ('resend_api_key', 'PASTE-RESEND-KEY-HERE')
+  on conflict (key) do nothing;
+
+create or replace function private.send_error_alert()
+returns void
+security definer
+set search_path = public, private
+as $$
+declare
+  resend_key text;
+  last_id bigint;
+  new_count int;
+  max_id bigint;
+  digest text;
+begin
+  select value into resend_key from private.webhook_config where key = 'resend_api_key';
+  if resend_key is null or resend_key = '' or resend_key = 'PASTE-RESEND-KEY-HERE' then
+    return; -- not configured yet; errors still accumulate in the table
+  end if;
+
+  select coalesce(nullif(value, '')::bigint, 0) into last_id
+    from private.webhook_config where key = 'error_alert_last_id';
+  if last_id is null then last_id := 0; end if;
+
+  select count(*), max(id) into new_count, max_id from client_errors where id > last_id;
+  if new_count = 0 then return; end if;
+
+  select string_agg(
+    '<li style="margin-bottom:8px"><b>' ||
+    replace(replace(left(message, 200), '<', '&lt;'), '>', '&gt;') ||
+    '</b><br><span style="color:#64748b;font-size:12px">' ||
+    to_char(at, 'DD Mon HH24:MI UTC') || ' — ' ||
+    replace(replace(coalesce(left(url, 120), ''), '<', '&lt;'), '>', '&gt;') ||
+    '</span></li>', '')
+  into digest
+  from (select * from client_errors where id > last_id order by id desc limit 5) recent;
+
+  perform net.http_post(
+    url := 'https://api.resend.com/emails',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || resend_key,
+      'Content-Type', 'application/json'
+    ),
+    body := jsonb_build_object(
+      'from', 'Dr-Crown <noreply@dr-crown.com>',
+      'to', jsonb_build_array('alajmix@gmail.com'),
+      'subject', 'Dr-Crown: ' || new_count || ' client error' || case when new_count = 1 then '' else 's' end || ' in the last hour',
+      'html', '<div style="font-family:system-ui,sans-serif;max-width:560px">' ||
+              '<h2 style="margin:0 0 10px">' || new_count || ' new client error' || case when new_count = 1 then '' else 's' end || '</h2>' ||
+              '<ul style="padding-left:18px">' || coalesce(digest, '') || '</ul>' ||
+              '<p style="color:#64748b;font-size:12px">Newest 5 shown. Full details (stack traces, user ids) are in the client_errors table.</p></div>'
+    )
+  );
+
+  insert into private.webhook_config (key, value)
+    values ('error_alert_last_id', max_id::text)
+    on conflict (key) do update set value = excluded.value;
+end;
+$$ language plpgsql;
+
+select cron.schedule(
+  'error-alerts-hourly',
+  '5 * * * *',
+  $$select private.send_error_alert()$$
+);

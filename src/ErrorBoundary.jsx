@@ -1,5 +1,6 @@
 import React from "react";
 import { AlertTriangle, RotateCcw, RefreshCw } from "lucide-react";
+import { reportError } from "./lib/errorReport.js";
 
 // A deploy replaces the hashed JS chunks; a page (or service worker cache)
 // from before the deploy then fails to import modules that no longer exist
@@ -27,8 +28,11 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    // Surface for debugging; a real app would send this to a logging service.
     console.error("App crashed:", error, info?.componentStack);
+    // Render crashes are the highest-signal errors — report includes the
+    // component stack so the broken component is identifiable from the
+    // digest email alone. (reportError skips stale-chunk errors itself.)
+    reportError(error?.message || error, `${error?.stack ?? ""}\n--- component stack ---${info?.componentStack ?? ""}`);
 
     // Stale-deploy self-heal: reload once instead of showing the crash card.
     let alreadyTried = false;

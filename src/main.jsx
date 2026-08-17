@@ -6,7 +6,12 @@ import PWAInstallBanner from "./PWAInstallBanner.jsx";
 import ConnectionStatus from "./ConnectionStatus.jsx";
 import ImpersonationBanner from "./ImpersonationBanner.jsx";
 import { AuthGate } from "./Auth.jsx";
+import { installGlobalErrorReporting } from "./lib/errorReport.js";
 import "./index.css";
+
+// Uncaught errors and unhandled rejections anywhere in the app get logged
+// to the client_errors table; an hourly job emails the admin a digest.
+installGlobalErrorReporting();
 
 // Role-gated and rarely used — keep it out of the initial bundle everyone
 // else (dentist/lab logins) pays for. The .catch mirrors ErrorBoundary's
@@ -81,6 +86,10 @@ function SiteFooter() {
         paradiseharbours.com
       </a>
       , a purely Omani Company.
+      <span className="mx-1.5">·</span>
+      <a href="/privacy.html" className="text-slate-400 underline hover:text-slate-600">Privacy</a>
+      <span className="mx-1.5">·</span>
+      <a href="/terms.html" className="text-slate-400 underline hover:text-slate-600">Terms</a>
     </footer>
   );
 }
