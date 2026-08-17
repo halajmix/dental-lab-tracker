@@ -1657,7 +1657,10 @@ begin
               '<h2 style="margin:0 0 10px">' || new_count || ' new client error' || case when new_count = 1 then '' else 's' end || '</h2>' ||
               '<ul style="padding-left:18px">' || coalesce(digest, '') || '</ul>' ||
               '<p style="color:#64748b;font-size:12px">Newest 5 shown. Full details (stack traces, user ids) are in the client_errors table.</p></div>'
-    )
+    ),
+    -- pg_net's default 5s timeout killed the very first live send (timed_out
+    -- in net._http_response); give the TLS handshake + Resend room to answer.
+    timeout_milliseconds := 15000
   );
 
   insert into private.webhook_config (key, value)
