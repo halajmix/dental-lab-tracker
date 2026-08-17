@@ -1552,9 +1552,11 @@ select cron.schedule(
 /*  called directly from Postgres (pg_net), no Edge Function involved.   */
 /*                                                                       */
 /*  Manual step: store your Resend API key (resend.com → API Keys) —    */
-/*  replace PASTE-RESEND-KEY-HERE below before running, or run the       */
-/*  insert separately. Without it, errors are still recorded and         */
-/*  visible via SQL; only the emails are skipped.                        */
+/*  swap in your key over the placeholder in the INSERT below before     */
+/*  running (the placeholder string deliberately appears nowhere else    */
+/*  in this file: a find-and-replace-all once poisoned the function's    */
+/*  is-configured check, silently disabling alert emails). Without a     */
+/*  key, errors are still recorded; only the emails are skipped.         */
 /* --------------------------------------------------------------------- */
 
 create table if not exists client_errors (
@@ -1617,7 +1619,10 @@ declare
   digest text;
 begin
   select value into resend_key from private.webhook_config where key = 'resend_api_key';
-  if resend_key is null or resend_key = '' or resend_key = 'PASTE-RESEND-KEY-HERE' then
+  -- Real Resend keys always start "re_" — checking the shape instead of
+  -- comparing against the placeholder literal survives a find-and-replace-
+  -- all of the placeholder (which once poisoned this very check).
+  if resend_key is null or resend_key not like 're\_%' then
     return; -- not configured yet; errors still accumulate in the table
   end if;
 
