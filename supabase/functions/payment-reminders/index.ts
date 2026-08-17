@@ -1,19 +1,19 @@
 /**
  * Monthly payment reminders: fired by a pg_cron job (schema.sql Phase 23)
- * on the 25th of each month — NOT called from the browser and NOT a row
+ * on the 25th of each month &mdash; NOT called from the browser and NOT a row
  * webhook. For every (lab, clinic) pair with ISSUED-but-unpaid invoices,
  * emails the clinic one summary of what it owes that lab. Cases whose
- * invoice_status is still "draft" are deliberately never mentioned — you
+ * invoice_status is still "draft" are deliberately never mentioned &mdash; you
  * can't dun someone for an invoice that was never issued.
  *
  * Deploy:
  *   Supabase Dashboard → Edge Functions → New function → name it exactly
- *   "payment-reminders" (type the name yourself — don't accept an
+ *   "payment-reminders" (type the name yourself &mdash; don't accept an
  *   auto-generated slug) → paste this file → in the function's Settings
  *   turn "Verify JWT with legacy secret" OFF (same as case-notify; the
  *   pg_net caller can't mint a platform JWT on this project's signing keys).
  *
- * Secrets: reuses RESEND_API_KEY, OTP_FROM_EMAIL and CASE_NOTIFY_SECRET —
+ * Secrets: reuses RESEND_API_KEY, OTP_FROM_EMAIL and CASE_NOTIFY_SECRET &mdash;
  * nothing new to set.
  */
 
@@ -30,7 +30,7 @@ const fmtOMR = (n: number) =>
 async function sendEmail(to: string, replyTo: string | undefined, subject: string, html: string): Promise<boolean> {
   const key = Deno.env.get("RESEND_API_KEY");
   if (!key) {
-    console.warn("RESEND_API_KEY not set — payment reminder not emailed");
+    console.warn("RESEND_API_KEY not set &mdash; payment reminder not emailed");
     return false;
   }
   try {
@@ -71,7 +71,7 @@ function invoiceTable(rows: CaseRow[]): { html: string; total: number } {
       return `<tr>
         <td style="padding:4px 12px 4px 0;color:#1e293b;font-weight:600">${c.invoice_number || c.id}</td>
         <td style="padding:4px 12px 4px 0;color:#475569">${c.patient_name ?? ""}</td>
-        <td style="padding:4px 0;color:#1e293b;text-align:right">${amount !== null ? fmtOMR(amount) : "—"}</td>
+        <td style="padding:4px 0;color:#1e293b;text-align:right">${amount !== null ? fmtOMR(amount) : "&mdash;"}</td>
       </tr>`;
     })
     .join("");
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
   try {
     task = (await req.json())?.task ?? "";
   } catch {
-    /* no body — default task */
+    /* no body &mdash; default task */
   }
 
   // ---------------- hourly client-error digest ----------------
@@ -130,7 +130,7 @@ Deno.serve(async (req) => {
       .slice(0, 5)
       .map(
         (e) => `<li style="margin-bottom:8px"><b>${esc(e.message).slice(0, 200)}</b><br>
-          <span style="color:#64748b;font-size:12px">${new Date(e.at).toUTCString()} — ${esc(e.url).slice(0, 120)}</span></li>`,
+          <span style="color:#64748b;font-size:12px">${new Date(e.at).toUTCString()} &mdash; ${esc(e.url).slice(0, 120)}</span></li>`,
       )
       .join("");
 
@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
     if (error) throw error;
     if (!unpaid?.length) return json({ ok: true, groups: 0, emailed: 0 });
 
-    // Group by lab+clinic pair — a clinic owing two labs gets two emails,
+    // Group by lab+clinic pair &mdash; a clinic owing two labs gets two emails,
     // each from the right lab's perspective.
     const groups = new Map<string, CaseRow[]>();
     for (const c of unpaid as CaseRow[]) {
@@ -180,17 +180,17 @@ Deno.serve(async (req) => {
       const [labId, clinicId] = key.split(":");
       const lab = labById.get(labId);
       const clinic = clinicById.get(clinicId);
-      if (!clinic?.email) continue; // surfaced in the lab's dashboard as "no email — can't be reminded"
+      if (!clinic?.email) continue; // surfaced in the lab's dashboard as "no email &mdash; can't be reminded"
 
       const { html, total } = invoiceTable(rows);
       const ok = await sendEmail(
         clinic.email,
         lab?.email || undefined,
-        `Payment reminder — ${rows.length} outstanding invoice${rows.length === 1 ? "" : "s"} with ${lab?.name ?? "your lab"} (${fmtOMR(total)})`,
+        `Payment reminder &mdash; ${rows.length} outstanding invoice${rows.length === 1 ? "" : "s"} with ${lab?.name ?? "your lab"} (${fmtOMR(total)})`,
         `<div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px">
           <h2 style="margin:0 0 12px">Outstanding invoices with ${lab?.name ?? "your dental lab"}</h2>
           <p style="color:#475569">Dear ${clinic.name ?? "clinic"}, the following invoices are still unpaid.
-          If you've already settled them, please ask ${lab?.name ?? "the lab"} to mark them paid — replying
+          If you've already settled them, please ask ${lab?.name ?? "the lab"} to mark them paid &mdash; replying
           to this email reaches them directly.</p>
           ${html}
           <p style="margin:20px 0 0">
