@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   Building2,
   Stethoscope,
+  Pencil,
   X,
   Search,
   ClipboardCheck,
@@ -489,7 +490,7 @@ function CaseRxPhotos({ files }) {
  * corners rely on `overflow-hidden`, which would otherwise clip a dropdown
  * anchored to a row near the bottom edge.
  */
-function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvance }) {
+function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvance, onEditRx }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
@@ -551,6 +552,10 @@ function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvanc
             {c.stageIndex === STAGE_INDEX.WORK_COMPLETE &&
               item(() => onAdvance(c.id), <ClipboardCheck size={14} className="text-emerald-600" />, "Mark Received", "text-emerald-700")}
             {item(() => onOpenCase(c.id), <Eye size={14} />, "View / Manage")}
+            {/* Only offered inside the 30-minute post-submission window
+                (parent passes null past it — the DB trigger enforces it
+                regardless). */}
+            {onEditRx && item(() => onEditRx(c.id), <Pencil size={14} className="text-blue-600" />, "Edit Rx", "text-blue-700")}
             {item(() => onContactLab(c.id), <Phone size={14} />, `Contact ${lab?.name ?? "Lab"}`)}
             {item(() => onShareRx(c.id), <MessageCircle size={14} />, "Share Rx PDF")}
           </div>,
@@ -773,6 +778,16 @@ export default function DentalLabTracker({ auth }) {
   // Modals
   const [clinicModal, setClinicModal] = useState(null); // { editing: clinicObj | null } | null
   const [showCaseModal, setShowCaseModal] = useState(false);
+  // Case being edited in the Rx form (30-minute window), null = new case.
+  const [editingCase, setEditingCase] = useState(null);
+  // Green confirmation after submitting/editing an Rx — the modal just
+  // closes otherwise, with nothing telling the dentist it actually saved.
+  const [rxToast, setRxToast] = useState(null);
+  useEffect(() => {
+    if (!rxToast) return;
+    const t = setTimeout(() => setRxToast(null), 4500);
+    return () => clearTimeout(t);
+  }, [rxToast]);
   // Admin actions (lab directory, SLA analytics) live off the main dashboard.
   const [showSettings, setShowSettings] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -900,6 +915,7 @@ export default function DentalLabTracker({ auth }) {
     try {
       const saved = await insertCase(clinicId || clinic.id, newCaseData);
       setCases((p) => [saved, ...p]);
+      setRxToast("Prescription submitted — you can edit it for the next 30 minutes.");
       // "Submit & Share" → jump straight into the share flow for the new case.
       if (opts.share) {
         setAutoShare(true);
@@ -908,6 +924,34 @@ export default function DentalLabTracker({ auth }) {
     } catch (err) {
       console.error(err);
       alert("Couldn't save the case — " + err.message);
+    }
+  };
+
+  // 30-minute Rx edit window (mirrors the cases_guard_prescription trigger,
+  // which is the real enforcement — this just decides whether to show the
+  // menu item). Legacy rows without created_at simply aren't editable.
+  const RX_EDIT_WINDOW_MS = 30 * 60 * 1000;
+  const canEditRx = (c) => !!c.createdAt && Date.now() - new Date(c.createdAt).getTime() < RX_EDIT_WINDOW_MS;
+
+  const editCase = async (caseId, data) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    // labId/clinicId deliberately omitted: the case stays with its lab.
+    const { labId: _lab, clinicId: _clinic, ...rxFields } = data;
+    const patch = {
+      ...rxFields,
+      history: [...(c.history ?? []), logEntry("rx-edited", c.stageIndex, currentUser, "dentist", "Prescription edited")],
+    };
+    // No optimistic write (unlike persist): the DB trigger rejects edits
+    // past the window, and showing changes that didn't save would be worse
+    // than a beat of latency.
+    try {
+      const saved = await updateCase(caseId, patch);
+      setCases((prev) => prev.map((x) => (x.id === caseId ? saved : x)));
+      setRxToast("Prescription updated — the lab sees the new version.");
+    } catch (err) {
+      console.error(err);
+      alert("Couldn't update the prescription — " + err.message);
     }
   };
 
@@ -1023,6 +1067,13 @@ export default function DentalLabTracker({ auth }) {
             setQuery={setQuery}
             onAdvance={(id) => advanceStage(id, currentUser, "dentist")}
             onOpenCase={setDrawerCaseId}
+            canEditRx={canEditRx}
+            onEditRx={(id) => {
+              const c = cases.find((x) => x.id === id);
+              if (!c) return;
+              setEditingCase(c);
+              setShowCaseModal(true);
+            }}
             onShareRx={(id) => { setAutoShare(true); setPrintCaseId(id); }}
             onContactLab={setContactCaseId}
             onExportCsv={() => exportCasesCSV(filteredDentistCases, labs, clinic?.dentist, "dentatrack-clinic-cases.csv")}
@@ -1053,6 +1104,15 @@ export default function DentalLabTracker({ auth }) {
 
       {/* ------------------------- Modals ------------------------- */}
       <ProfileSettingsModal open={showProfileSettings} onClose={() => setShowProfileSettings(false)} auth={auth} />
+      {/* Green confirmation after an Rx submit/edit — z-above the modals so
+          it's visible the instant the form closes. */}
+      {rxToast && (
+        <div className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4">
+          <div className="flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg">
+            <CheckCircle2 size={16} /> {rxToast}
+          </div>
+        </div>
+      )}
       {isDentist && (
         <AddClinicModal
           open={!!clinicModal}
@@ -1064,8 +1124,10 @@ export default function DentalLabTracker({ auth }) {
       {isDentist && (
         <PrescriptionForm
           open={showCaseModal}
-          onClose={() => setShowCaseModal(false)}
+          onClose={() => { setShowCaseModal(false); setEditingCase(null); }}
           onSave={addCase}
+          onSaveEdit={editCase}
+          editing={editingCase}
           labs={registeredLabs}
           userId={auth.session?.user?.id}
           clinics={myClinics}
@@ -1271,6 +1333,8 @@ function DentistDashboard({
   setQuery,
   onAdvance,
   onOpenCase,
+  canEditRx,
+  onEditRx,
   onShareRx,
   onContactLab,
   onExportCsv,
@@ -1430,6 +1494,7 @@ function DentistDashboard({
                       onContactLab={onContactLab}
                       onShareRx={onShareRx}
                       onAdvance={onAdvance}
+                      onEditRx={canEditRx(c) ? onEditRx : null}
                     />
                   </td>
                 </tr>

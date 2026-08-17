@@ -983,7 +983,7 @@ const emptyDraft = () => ({
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, labs, onSave, userId, clinics = [], defaultClinicId = null }) {
+export default function PrescriptionForm({ open, onClose, labs, onSave, onSaveEdit, editing = null, userId, clinics = [], defaultClinicId = null }) {
   const [notation, setNotation] = useState("FDI");
   const [mode, setMode] = useState("unit");
   const [selection, setSelection] = useState({}); // { universal: 'unit'|'pontic' }
@@ -1063,6 +1063,70 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
   }, [justAddedId]);
 
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
+
+  // Edit mode: rehydrate every field from the case being edited. Keyed on the
+  // `open` transition ONLY (the settings-forms lesson — object identities
+  // change on every auth event, so `editing` must not be in the deps).
+  const isEditing = !!editing;
+  // Closing without submitting deliberately keeps a NEW-case draft around,
+  // but a cancelled EDIT must not leak that case's data into the next "New
+  // Prescription" — remember whether the last open was an edit.
+  const wasEditingRef = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    if (!editing) {
+      if (wasEditingRef.current) {
+        wasEditingRef.current = false;
+        reset();
+      }
+      return;
+    }
+    wasEditingRef.current = true;
+    const p = editing.prescription ?? {};
+    setNotation(p.notation ?? "FDI");
+    setPatientName(editing.patientName ?? "");
+    const pid = editing.patientId === "PT-NEW" ? "" : editing.patientId ?? "";
+    const phone = (editing.patientPhone ?? "").replace(/^\+968/, "");
+    setPatientId(pid);
+    setPatientPhone(phone);
+    setShowPatientExtras(!!(pid || phone));
+    setSelectedClinicId(editing.clinicId ?? defaultClinicId);
+    setIncluded(p.included ?? []);
+    setIncludedOther(p.includedOther ?? "");
+    if (p.restorations?.length) {
+      setCaseMode("restorations");
+      setRestorations(p.restorations);
+    } else {
+      setCaseMode("appliance");
+      setRestorations([]);
+      setSelection(Object.fromEntries((p.teeth ?? []).map((t) => [t.universal, t.role])));
+      setCategory(p.category ?? "Crown - tooth");
+      setMaterial(p.material ?? "");
+      setShadeGuide(p.shadeGuide ?? "Vita Classical");
+      setVitaShade(p.vitaShade ?? "A2");
+      setStumpShade(p.stumpShade ?? "N/A");
+      setImplantSystem(p.implantSystem ?? "");
+      setAbutmentType(p.abutmentType ?? "");
+      setAbutmentColor(p.abutmentColor ?? "");
+    }
+    setDraftOpen(false);
+    setDraftTouched(false);
+    setDraft(emptyDraft());
+    setLabId(editing.labId ?? "");
+    setInsertionDate(editing.appointmentDate && editing.appointmentDate !== "—" ? editing.appointmentDate : "");
+    setDeliveryTime(editing.deliveryTime ?? DELIVERY_TIMES[0]);
+    setPickupRequested(p.pickupRequested ?? false);
+    setNotes(p.notes ?? "");
+    // Already-uploaded files come back as plain {name, size, url} entries —
+    // no uploading/error flags, so the thumbnails render them as done.
+    const files = p.files ?? [];
+    setScans(files.filter((f) => f.kind === "scan").map((f) => ({ name: f.name, size: f.size })));
+    setPhotos(files.filter((f) => f.kind === "photo" && f.url).map((f, i) => ({ id: `existing-${i}`, name: f.name, size: f.size, url: f.url })));
+    setPhotoGroupId(crypto.randomUUID());
+    setTouched(false);
+    setStep(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 
@@ -1415,19 +1479,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
             abutmentType: isImplant ? abutmentType : null,
             abutmentColor: isImplant ? abutmentColor.trim() : null,
           };
-    onSave(
-      {
-        patientName: patientName.trim(),
-        patientId: patientId.trim() || "PT-NEW",
-        patientPhone: patientPhone ? `+968${patientPhone}` : "",
-        appointmentDate: insertionDate || "—",
-        deliveryTime,
-        labId,
-        clinicId: selectedClinicId || defaultClinicId,
-        prescription,
-      },
-      opts
-    );
+    const payload = {
+      patientName: patientName.trim(),
+      patientId: patientId.trim() || "PT-NEW",
+      patientPhone: patientPhone ? `+968${patientPhone}` : "",
+      appointmentDate: insertionDate || "—",
+      deliveryTime,
+      labId,
+      clinicId: selectedClinicId || defaultClinicId,
+      prescription,
+    };
+    if (isEditing) onSaveEdit(editing.id, payload);
+    else onSave(payload, opts);
     reset();
     onClose();
   };
@@ -1478,7 +1541,9 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               <FileText size={18} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-800">Digital Laboratory Prescription</h3>
+              <h3 className="text-base font-bold text-slate-800">
+                {isEditing ? `Edit Prescription · ${editing.id}` : "Digital Laboratory Prescription"}
+              </h3>
               <p className="text-[11px] text-slate-500">Phase 2 · Rx work order</p>
             </div>
           </div>
@@ -1504,7 +1569,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               {/* Multi-clinic: only shown once a dentist actually owns more
                   than one clinic — no clutter for the common single-clinic
                   case, where it just silently uses their default clinic. */}
-              {clinics.length > 1 && (
+              {clinics.length > 1 && !isEditing && (
                 <Field label="Sending Clinic" required>
                   <select className={inputCls} value={selectedClinicId ?? ""} onChange={(e) => setSelectedClinicId(e.target.value)}>
                     {clinics.map((c) => (
@@ -1516,15 +1581,26 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
               <Field label="Patient Name" required>
                 <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
               </Field>
-              <Field label="Select Lab" required>
-                <LabPicker
-                  labs={labs}
-                  value={labId}
-                  onChange={setLabId}
-                  clinicGov={clinics.find((c) => c.id === (selectedClinicId || defaultClinicId))?.governorate || ""}
-                  invalid={!!err("labId")}
-                />
-              </Field>
+              {/* The lab is locked while editing: the case is already in that
+                  lab's queue and they were emailed on submission — re-routing
+                  a live case is a delete-and-resend, not an edit. */}
+              {isEditing ? (
+                <Field label="Lab">
+                  <div className={`${inputCls} cursor-not-allowed bg-slate-50 text-slate-500`}>
+                    {labById[labId]?.name ?? "Original lab (locked)"}
+                  </div>
+                </Field>
+              ) : (
+                <Field label="Select Lab" required>
+                  <LabPicker
+                    labs={labs}
+                    value={labId}
+                    onChange={setLabId}
+                    clinicGov={clinics.find((c) => c.id === (selectedClinicId || defaultClinicId))?.governorate || ""}
+                    invalid={!!err("labId")}
+                  />
+                </Field>
+              )}
             </div>
 
             {/* Patient ID / WhatsApp are optional and tucked away by default so
@@ -2091,7 +2167,11 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
             ) : (
               <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                 <Info size={13} />
-                {isValid ? "Ready to submit to lab queue." : "Complete required fields (*) to submit."}
+                {isEditing
+                  ? "Changes go straight to the lab's live case."
+                  : isValid
+                    ? "Ready to submit to lab queue."
+                    : "Complete required fields (*) to submit."}
               </div>
             )}
             {/* Stacked full-width on phones (three inline buttons overflow a
@@ -2102,16 +2182,18 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, userId, 
                 onClick={() => submit()}
                 className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:py-2 ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
               >
-                <Check size={15} /> Submit Prescription
+                <Check size={15} /> {isEditing ? "Save Changes" : "Submit Prescription"}
               </button>
-              <button
-                type="button"
-                onClick={() => submit({ share: true })}
-                title="Save the case and immediately share the Rx PDF with the patient"
-                className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-3 sm:py-2 ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
-              >
-                <MessageCircle size={15} /> Submit &amp; Share
-              </button>
+              {!isEditing && (
+                <button
+                  type="button"
+                  onClick={() => submit({ share: true })}
+                  title="Save the case and immediately share the Rx PDF with the patient"
+                  className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-3 sm:py-2 ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
+                >
+                  <MessageCircle size={15} /> Submit &amp; Share
+                </button>
+              )}
               <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
                 Cancel
               </button>

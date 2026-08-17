@@ -1431,3 +1431,69 @@ create trigger lab_members_notify_invite
   for each row
   when (new.user_id is null)
   execute function notify_invite_webhook();
+
+/* --------------------------------------------------------------------- */
+/*  Phase 22 — 30-minute prescription edit window                        */
+/*                                                                       */
+/*  Dentists may correct a just-submitted Rx (wrong shade, missed tooth) */
+/*  for 30 minutes after submission. Enforced here, not just in the UI:  */
+/*  the cases_update RLS policy lets a clinic update its cases forever   */
+/*  (stage moves, handover, remakes need that), so without this trigger  */
+/*  any client could rewrite a prescription the lab is already working   */
+/*  from. Labs never edit Rx content — their writes to these columns     */
+/*  are reverted, same pattern as guard_lab_financial_columns. The       */
+/*  reprice path's "set prescription = prescription" no-op is not a      */
+/*  distinct change, so it passes untouched.                             */
+/* --------------------------------------------------------------------- */
+
+create or replace function guard_prescription_edits()
+returns trigger
+as $$
+declare
+  rx_changed boolean;
+  is_clinic_writer boolean;
+begin
+  if current_setting('role', true) = 'service_role' then
+    return new;
+  end if;
+
+  rx_changed :=
+    new.prescription is distinct from old.prescription
+    or new.patient_name is distinct from old.patient_name
+    or new.patient_id is distinct from old.patient_id
+    or new.patient_phone is distinct from old.patient_phone
+    or new.appointment_date is distinct from old.appointment_date
+    or new.delivery_time is distinct from old.delivery_time;
+  if not rx_changed then
+    return new;
+  end if;
+
+  is_clinic_writer :=
+    old.clinic_id = my_clinic_id()
+    or old.clinic_id in (select my_owned_clinic_ids());
+
+  if not is_clinic_writer then
+    -- Lab-side write: keep the rest of the patch, drop the Rx changes.
+    new.prescription := old.prescription;
+    new.patient_name := old.patient_name;
+    new.patient_id := old.patient_id;
+    new.patient_phone := old.patient_phone;
+    new.appointment_date := old.appointment_date;
+    new.delivery_time := old.delivery_time;
+    return new;
+  end if;
+
+  -- Raise instead of silently reverting (the RLS-0-row lesson): the edit
+  -- flow sends ONLY Rx fields, and the dentist needs to know it failed.
+  if old.created_at < now() - interval '30 minutes' then
+    raise exception 'This prescription can no longer be edited — changes are only allowed within 30 minutes of submission.';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists cases_guard_prescription on cases;
+create trigger cases_guard_prescription
+  before update on cases
+  for each row execute function guard_prescription_edits();

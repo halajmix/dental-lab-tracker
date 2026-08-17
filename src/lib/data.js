@@ -213,6 +213,14 @@ export async function insertCase(clinicId, data) {
 // Patch keys are the same camelCase names as the app object; only the ones
 // present get translated and sent, so callers can send partial updates.
 const PATCH_KEY_MAP = {
+  // Rx-edit fields (30-minute window, enforced by the cases_guard_prescription
+  // trigger — a too-late edit raises, surfaced to the caller as a thrown error).
+  prescription: "prescription",
+  patientName: "patient_name",
+  patientId: "patient_id",
+  patientPhone: "patient_phone",
+  appointmentDate: "appointment_date",
+  deliveryTime: "delivery_time",
   stageIndex: "stage_index",
   handover: "handover",
   remake: "remake",
