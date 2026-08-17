@@ -4,6 +4,7 @@ import {
   Building2,
   Stethoscope,
   Pencil,
+  MapPin,
   X,
   Search,
   ClipboardCheck,
@@ -1049,6 +1050,44 @@ export default function DentalLabTracker({ auth }) {
         {loadError && (
           <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
             Couldn't load your data: {loadError}
+          </div>
+        )}
+        {/* Location nudge: orgs registered before onboarding asked for a
+            governorate can't join the Rx form's "Near you" lab grouping.
+            One button opens the right editor directly. Lab side gates on
+            hasAdminRole (techs can't open Lab Settings to fix it). */}
+        {!loadingData && isDentist && myClinics.some((c) => !c.governorate) && (
+          <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="flex items-start gap-2 text-sm font-medium text-amber-800">
+              <MapPin size={16} className="mt-0.5 shrink-0" />
+              <span>
+                {myClinics.length > 1 ? "A clinic of yours has" : "Your clinic has"} no location set —
+                add your governorate so nearby labs are grouped for you when sending a case.
+              </span>
+            </p>
+            <button
+              onClick={() => setClinicModal({ editing: myClinics.find((c) => !c.governorate) })}
+              className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-700"
+            >
+              Set location
+            </button>
+          </div>
+        )}
+        {!loadingData && !isDentist && lab && hasAdminRole && !isSuspended && !lab.governorate && (
+          <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="flex items-start gap-2 text-sm font-medium text-amber-800">
+              <MapPin size={16} className="mt-0.5 shrink-0" />
+              <span>
+                Your lab has no location set — clinics browsing for a lab see "Location not set"
+                on your card. Add your governorate in Lab Settings.
+              </span>
+            </p>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-700"
+            >
+              Set location
+            </button>
           </div>
         )}
         {loadingData ? (
