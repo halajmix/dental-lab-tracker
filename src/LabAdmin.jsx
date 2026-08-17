@@ -9,7 +9,7 @@ import {
   Star,
   AlertTriangle,
   Building2,
-  DollarSign,
+  Banknote,
   Wallet,
   TrendingUp,
   CheckCheck,
@@ -902,7 +902,7 @@ function revenueByCategory(cases) {
   return map;
 }
 
-export function OverviewDashboard({ cases }) {
+export function OverviewDashboard({ cases, clinicsById = {} }) {
   const [preset, setPreset] = useState("month");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const { from, to } = rangeBounds(preset, custom);
@@ -950,6 +950,26 @@ export function OverviewDashboard({ cases }) {
   const aov = stats.completed.length ? stats.revenue / stats.completed.length : 0;
   const remakeRate = stats.completed.length ? (stats.remakes / stats.completed.length) * 100 : 0;
 
+  // Uncollected money grouped by owing clinic — same all-time definition as
+  // the Uncollected card (completed but not marked paid), split into
+  // "invoiced" (issued, covered by the monthly reminder email) vs cases the
+  // lab hasn't issued an invoice for yet (reminders never mention those).
+  const unpaidByClinic = useMemo(() => {
+    const groups = new Map();
+    for (const c of cases) {
+      if (!completedAt(c) || c.invoiceStatus === "paid") continue;
+      const g = groups.get(c.clinicId) ?? { clinicId: c.clinicId, total: 0, issued: 0, notInvoiced: 0 };
+      g.total += caseFee(c).total;
+      if (c.invoiceStatus === "issued") g.issued += 1;
+      else g.notInvoiced += 1;
+      groups.set(c.clinicId, g);
+    }
+    return [...groups.values()]
+      .map((g) => ({ ...g, clinic: clinicsById[g.clinicId] }))
+      .sort((a, b) => b.total - a.total);
+  }, [cases, clinicsById]);
+  const unpaidMax = unpaidByClinic[0]?.total || 1;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -984,7 +1004,7 @@ export function OverviewDashboard({ cases }) {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard icon={DollarSign} label="Gross revenue" value={fmtOMR(stats.revenue)} sub="completed in period" />
+        <StatCard icon={Banknote} label="Gross revenue" value={fmtOMR(stats.revenue)} sub="completed in period" />
         <StatCard icon={Wallet} label="Uncollected" value={fmtOMR(stats.outstanding)} sub="all time, not yet paid" />
         <StatCard icon={TrendingUp} label="Avg order value" value={fmtOMR(aov)} />
         <StatCard icon={CheckCheck} label="Cases completed" value={stats.completed.length} />
@@ -1007,6 +1027,44 @@ export function OverviewDashboard({ cases }) {
           <DonutChart slices={stats.donut} centerLabel="Total OMR" />
         </div>
       </div>
+
+      {unpaidByClinic.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-bold text-slate-800">Unpaid work by clinic</h3>
+            <span className="text-xs font-semibold text-slate-500">{fmtOMR(stats.outstanding)} outstanding</span>
+          </div>
+          <p className="mb-3 text-[11px] text-slate-400">
+            Completed cases not yet marked paid. Clinics with <b>issued</b> invoices get an automatic email
+            reminder on the 25th of each month — cases you haven't invoiced are never emailed.
+          </p>
+          <div className="space-y-3">
+            {unpaidByClinic.map((g) => (
+              <div key={g.clinicId ?? "unknown"}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <p className="min-w-0 truncate text-sm font-semibold text-slate-700">
+                    {g.clinic?.name ?? "Unknown clinic"}
+                    {g.clinic && !g.clinic.email && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                        no email — can't be reminded
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-sm font-bold text-slate-800">{fmtOMR(g.total)}</p>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.max(3, (g.total / unpaidMax) * 100)}%` }} />
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  {g.issued > 0 && `${g.issued} invoiced unpaid`}
+                  {g.issued > 0 && g.notInvoiced > 0 && " · "}
+                  {g.notInvoiced > 0 && `${g.notInvoiced} not yet invoiced`}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {stats.hasEstimates && (
         <p className="text-[11px] text-slate-400">

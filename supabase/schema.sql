@@ -1497,3 +1497,47 @@ drop trigger if exists cases_guard_prescription on cases;
 create trigger cases_guard_prescription
   before update on cases
   for each row execute function guard_prescription_edits();
+
+/* --------------------------------------------------------------------- */
+/*  Phase 23 — automatic monthly payment reminders                       */
+/*                                                                       */
+/*  On the 25th of every month at 06:00 UTC (10:00 in Oman), a pg_cron   */
+/*  job posts to the payment-reminders Edge Function, which emails each  */
+/*  clinic a summary of its ISSUED-but-unpaid invoices per lab (draft    */
+/*  cases are never mentioned — no invoice, no reminder). Same shared-   */
+/*  secret gate as case-notify, read from private.webhook_config.        */
+/*                                                                       */
+/*  Manual steps that pair with this block:                              */
+/*    1. deploy supabase/functions/payment-reminders/index.ts as a new   */
+/*       Edge Function named exactly "payment-reminders", Verify JWT OFF */
+/*    2. (nothing else — it reuses the existing secrets)                 */
+/* --------------------------------------------------------------------- */
+
+create extension if not exists pg_cron;
+
+create or replace function private.run_payment_reminders()
+returns void
+security definer
+set search_path = public, private
+as $$
+declare
+  secret text;
+begin
+  select value into secret from private.webhook_config where key = 'case_notify_secret';
+  perform net.http_post(
+    url := 'https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/payment-reminders',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-webhook-secret', coalesce(secret, '')
+    ),
+    body := jsonb_build_object('source', 'pg_cron')
+  );
+end;
+$$ language plpgsql;
+
+-- cron.schedule by name is an upsert in pg_cron — safe to re-run.
+select cron.schedule(
+  'payment-reminders-monthly',
+  '0 6 25 * *',
+  $$select private.run_payment_reminders()$$
+);

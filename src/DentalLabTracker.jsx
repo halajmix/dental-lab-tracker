@@ -623,7 +623,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId }) {
       {tab === "queue" ? (
         queue
       ) : tab === "overview" ? (
-        <OverviewDashboard cases={cases} />
+        <OverviewDashboard cases={cases} clinicsById={clinicsById} />
       ) : tab === "technicians" ? (
         <TechniciansPanel lab={lab} cases={cases} />
       ) : tab === "prices" ? (
