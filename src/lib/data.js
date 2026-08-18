@@ -683,6 +683,7 @@ const statementFromRow = (r) => ({
   id: r.id,
   labId: r.lab_id,
   clinicId: r.clinic_id,
+  clinicName: r.clinic_name ?? "",
   month: r.month, // "YYYY-MM-01"
   total: Number(r.total) || 0,
   status: r.status,
@@ -693,6 +694,7 @@ const paymentFromRow = (r) => ({
   id: r.id,
   labId: r.lab_id,
   clinicId: r.clinic_id,
+  clinicName: r.clinic_name ?? "",
   statementId: r.statement_id ?? null,
   cancelStatus: r.cancel_status ?? "none",
   cancellationFee: r.cancellation_fee != null ? Number(r.cancellation_fee) : null,
@@ -759,7 +761,7 @@ export async function insertPayment(labId, { clinicId, statementId, amount, meth
     .from("lab_payments")
     .insert({
       lab_id: labId,
-      clinic_id: clinicId,
+      clinic_id: clinicId ?? null,
       statement_id: statementId || null,
       amount,
       method,
@@ -820,4 +822,73 @@ export async function saveCommissionRates(labId, userId, rates) {
     .from("tech_commission_rates")
     .upsert({ lab_id: labId, user_id: userId, rates }, { onConflict: "lab_id,user_id" });
   if (error) throw error;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Historical finance import (Phase 28) — bulk inserts for rows        */
+/*  mapped by src/lib/financeImport.js. Imported bills/payments carry   */
+/*  a free-text clinic_name (their clinics usually aren't registered).  */
+/* ------------------------------------------------------------------ */
+
+const chunked = async (rows, insertChunk) => {
+  for (let i = 0; i < rows.length; i += 200) {
+    await insertChunk(rows.slice(i, i + 200));
+  }
+};
+
+export async function importFinanceRows(labId, { statements = [], payments = [], expenses = [] }) {
+  // Statements first: each may carry an already-paid amount that becomes an
+  // allocated payment row, so status/recompute land correctly via trigger.
+  for (const st of statements) {
+    const { data, error } = await supabase
+      .from("clinic_statements")
+      .insert({ lab_id: labId, clinic_id: null, clinic_name: st.clinicName, month: st.month, total: st.total })
+      .select()
+      .single();
+    if (error) throw error;
+    if (st.paid > 0) {
+      const { error: payErr } = await supabase.from("lab_payments").insert({
+        lab_id: labId,
+        clinic_id: null,
+        clinic_name: st.clinicName,
+        statement_id: data.id,
+        amount: st.paid,
+        method: "cash",
+        reference: "Imported — paid amount from bill sheet",
+        received_date: st.month,
+        cleared: true,
+        cleared_date: st.month,
+      });
+      if (payErr) throw payErr;
+    }
+  }
+  await chunked(payments, async (batch) => {
+    const { error } = await supabase.from("lab_payments").insert(
+      batch.map((p) => ({
+        lab_id: labId,
+        clinic_id: null,
+        clinic_name: p.clinicName ?? "",
+        amount: p.amount,
+        method: p.method,
+        reference: p.reference ?? "",
+        received_date: p.receivedDate,
+        cleared: p.cleared !== false,
+        cleared_date: p.cleared !== false ? p.receivedDate : null,
+      })),
+    );
+    if (error) throw error;
+  });
+  await chunked(expenses, async (batch) => {
+    const { error } = await supabase.from("lab_expenses").insert(
+      batch.map((e) => ({
+        lab_id: labId,
+        category: e.category,
+        amount: e.amount,
+        method: e.method,
+        description: e.description ?? "",
+        expense_date: e.expenseDate,
+      })),
+    );
+    if (error) throw error;
+  });
 }

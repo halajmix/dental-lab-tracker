@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  Upload,
   FileText,
   Banknote,
   Wallet,
@@ -24,8 +25,10 @@ import {
   markChequeCleared,
   insertExpense,
   deleteExpense,
+  importFinanceRows,
 } from "./lib/data.js";
 import { downloadStatementPdf } from "./lib/statementPdf.js";
+import { IMPORT_CATEGORIES, readWorkbookRows, mapImportRows } from "./lib/financeImport.js";
 
 /* ================================================================== */
 /*  Shared helpers (mirrors LabAdmin's money + completion helpers)     */
@@ -164,13 +167,15 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
     }
   };
 
+  const clinicLabel = (s) => clinicsById[s.clinicId]?.name ?? s.clinicName ?? "Unknown clinic";
+
   const downloadPdf = async (s) => {
     const included = cases
       .filter((c) => c.statementId === s.id)
       .map((c) => ({ ...c, completedAtLabel: completedAt(c)?.toLocaleDateString("en-GB") ?? "" }));
     await downloadStatementPdf({
       lab,
-      clinic: clinicsById[s.clinicId],
+      clinic: clinicsById[s.clinicId] ?? { name: s.clinicName || "Clinic" },
       statement: s,
       cases: included,
       paidSoFar: paidByStatement[s.id] ?? 0,
@@ -260,7 +265,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
                     <tr key={s.id} className="border-t border-slate-100">
                       <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">{monthLabel(s.month)}</td>
                       <td className="max-w-[180px] truncate py-2.5 pr-3 font-semibold text-slate-700">
-                        {clinicsById[s.clinicId]?.name ?? "Unknown clinic"}
+                        {clinicLabel(s)}
                       </td>
                       <td className="py-2.5 pr-3 text-right font-semibold text-slate-800 whitespace-nowrap">{fmtOMR(s.total)}</td>
                       <td className="py-2.5 pr-3 text-right text-slate-600 whitespace-nowrap">{fmtOMR(paid)}</td>
@@ -286,10 +291,12 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
         )}
       </div>
 
+      <ImportHistoryCard lab={lab} onImported={load} />
+
       <RecordPaymentModal
         open={!!payFor}
         statement={payFor}
-        clinic={payFor ? clinicsById[payFor.clinicId] : null}
+        clinic={payFor ? clinicsById[payFor.clinicId] ?? { name: payFor.clinicName || "Clinic" } : null}
         remaining={payFor ? Math.max(0, payFor.total - (paidByStatement[payFor.id] ?? 0)) : 0}
         labId={lab.id}
         onClose={() => setPayFor(null)}
@@ -627,6 +634,124 @@ function TreasuryCard({ icon: Icon, label, value, sub }) {
       </div>
       <p className="mt-1.5 text-xl font-bold text-slate-800">{value}</p>
       {sub && <p className="mt-0.5 text-[11px] text-slate-400">{sub}</p>}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Historical import — upload the old Excel workbook, sheet by sheet,  */
+/*  so a lab joining the platform starts with its finance history.      */
+/* ================================================================== */
+
+function ImportHistoryCard({ lab, onImported }) {
+  const [category, setCategory] = useState(IMPORT_CATEGORIES[0].id);
+  const [fileName, setFileName] = useState("");
+  const [mapped, setMapped] = useState(null); // result of mapImportRows
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState("");
+  const [error, setError] = useState("");
+
+  const cat = IMPORT_CATEGORIES.find((c) => c.id === category);
+
+  const pickFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // same file can be re-picked after changing category
+    if (!file) return;
+    setError("");
+    setDone("");
+    setBusy(true);
+    try {
+      const rows = await readWorkbookRows(file);
+      setFileName(file.name);
+      setMapped(mapImportRows(category, rows));
+    } catch (err) {
+      setMapped(null);
+      setError("Couldn't read that file — " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runImport = async () => {
+    if (!mapped) return;
+    setBusy(true);
+    setError("");
+    try {
+      await importFinanceRows(lab.id, mapped);
+      setDone(`Imported: ${mapped.summary}`);
+      setMapped(null);
+      setFileName("");
+      await onImported();
+    } catch (err) {
+      setError("Import failed — " + err.message + " (nothing after the failing row was written; fix the sheet and re-import the remainder)");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const hasRows = mapped && (mapped.statements.length || mapped.payments.length || mapped.expenses.length);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="mb-1 flex items-center gap-2">
+        <Upload size={15} className="text-blue-600" />
+        <h3 className="text-sm font-bold text-slate-800">Import finance history from Excel</h3>
+      </div>
+      <p className="mb-3 text-[11px] text-slate-400">
+        Bring your old bookkeeping onto the platform — upload one sheet at a time (.xlsx or .csv, first
+        worksheet is read). Imported bills and payments keep the clinic's name as text; they don't need the
+        clinic to be registered.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600">Sheet type</span>
+          <select
+            value={category}
+            onChange={(e) => { setCategory(e.target.value); setMapped(null); setFileName(""); setDone(""); }}
+            className={inputCls}
+          >
+            {IMPORT_CATEGORIES.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+        <div className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-600">Excel file</span>
+          <label className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-slate-500 transition hover:border-blue-300 hover:text-blue-700">
+            <Upload size={14} /> {fileName || "Choose file…"}
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={pickFile} className="hidden" />
+          </label>
+        </div>
+      </div>
+      <p className="mt-1.5 text-[11px] text-slate-400">{cat.hint}</p>
+
+      {error && <p className="mt-2 text-xs font-semibold text-rose-600">{error}</p>}
+      {done && <p className="mt-2 text-xs font-semibold text-emerald-600">{done}</p>}
+
+      {mapped && (
+        <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+          <p className="text-xs font-semibold text-slate-700">{mapped.summary}</p>
+          {hasRows ? (
+            <>
+              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                {[...mapped.statements.slice(0, 4).map((x) => `Statement · ${x.clinicName} · ${monthLabel(x.month)} · ${fmtOMR(x.total)}${x.paid ? ` (paid ${fmtOMR(x.paid)})` : ""}`),
+                  ...mapped.payments.slice(0, 4).map((x) => `Payment · ${x.clinicName || "—"} · ${x.receivedDate} · ${fmtOMR(x.amount)} · ${METHOD_LABEL[x.method]}${x.cleared === false ? " (pending)" : ""}`),
+                  ...mapped.expenses.slice(0, 4).map((x) => `Expense · ${x.category} · ${x.expenseDate} · ${fmtOMR(x.amount)}`),
+                ].map((line, i) => (
+                  <p key={i} className="truncate text-[11px] text-slate-500">{line}</p>
+                ))}
+              </div>
+              <button
+                onClick={runImport}
+                disabled={busy}
+                className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+              >
+                {busy ? "Importing…" : "Import these rows"}
+              </button>
+            </>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

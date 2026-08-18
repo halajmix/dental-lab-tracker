@@ -2038,3 +2038,18 @@ begin
   return n;
 end;
 $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 28 — historical finance import                                  */
+/*                                                                        */
+/*  New labs arrive with years of Excel bookkeeping. Imported bills and   */
+/*  payments reference clinics that are usually NOT registered on the     */
+/*  platform, so both financial tables learn a free-text clinic_name      */
+/*  and their clinic_id becomes optional. Everything else (status,        */
+/*  aging, treasury, recompute trigger) already works on these rows.      */
+/* --------------------------------------------------------------------- */
+
+alter table clinic_statements alter column clinic_id drop not null;
+alter table clinic_statements add column if not exists clinic_name text not null default '';
+alter table lab_payments alter column clinic_id drop not null;
+alter table lab_payments add column if not exists clinic_name text not null default '';
