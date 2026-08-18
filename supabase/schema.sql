@@ -1904,3 +1904,137 @@ begin
   return new;
 end;
 $$ language plpgsql;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 27 — case cancellation workflow                                 */
+/*                                                                        */
+/*  Dentists REQUEST cancellation; the lab approves (setting a            */
+/*  cancellation fee for work already done — never more than the case     */
+/*  price) or declines. Approved cancellations bill the fee instead of    */
+/*  the full price in monthly statements.                                 */
+/* --------------------------------------------------------------------- */
+
+alter table cases add column if not exists cancel_status text not null default 'none'
+  check (cancel_status in ('none','requested','cancelled','declined'));
+alter table cases add column if not exists cancellation_fee numeric;
+
+-- Transition rules, enforced regardless of which client writes:
+--   clinic side: none -> requested (only before Work Complete), and
+--                requested -> none (withdraw). Anything else reverts.
+--                The fee is lab-only and always reverts for clinic writers.
+--   lab side:    requested -> cancelled|declined; fee only meaningful on
+--                cancelled and capped at the case price (raises loudly —
+--                the lab UI surfaces the message).
+create or replace function guard_case_cancellation()
+returns trigger
+as $$
+declare
+  is_lab_writer boolean;
+begin
+  if current_setting('role', true) = 'service_role' then
+    return new;
+  end if;
+  is_lab_writer := new.lab_id is not null and new.lab_id = my_lab_id();
+
+  if not is_lab_writer then
+    new.cancellation_fee := old.cancellation_fee;
+    if new.cancel_status is distinct from old.cancel_status then
+      if old.cancel_status = 'none' and new.cancel_status = 'requested'
+         and old.stage_index < 3 then
+        null; -- allowed: dentist requests before the work is complete
+      elsif old.cancel_status = 'requested' and new.cancel_status = 'none' then
+        null; -- allowed: dentist withdraws the request
+      else
+        new.cancel_status := old.cancel_status;
+      end if;
+    end if;
+  else
+    if new.cancel_status is distinct from old.cancel_status
+       and not (old.cancel_status = 'requested' and new.cancel_status in ('cancelled','declined'))
+       and not (old.cancel_status = 'declined' and new.cancel_status = 'none') then
+      new.cancel_status := old.cancel_status;
+    end if;
+    if new.cancellation_fee is not null then
+      if new.cancellation_fee < 0 then
+        raise exception 'Cancellation fee cannot be negative';
+      end if;
+      if new.total_price is not null and new.cancellation_fee > new.total_price then
+        raise exception 'Cancellation fee (%.3f OMR) cannot exceed the case price (%.3f OMR)',
+          new.cancellation_fee, new.total_price;
+      end if;
+    end if;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists cases_guard_cancellation on cases;
+create trigger cases_guard_cancellation
+  before update on cases
+  for each row execute function guard_case_cancellation();
+
+-- Statements now also bill approved cancellations at their fee: a
+-- cancelled case with a fee is real money owed for work already done,
+-- even though the case never reached Work Complete.
+create or replace function generate_clinic_statements(p_month date)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_lab uuid;
+  v_cutoff timestamptz;
+  v_month date;
+  r record;
+  v_sid uuid;
+  v_sum numeric;
+  n integer := 0;
+begin
+  v_lab := my_lab_id();
+  if v_lab is null or not is_lab_admin() then
+    raise exception 'Only an active lab admin can generate statements';
+  end if;
+  v_month := date_trunc('month', p_month)::date;
+  v_cutoff := (v_month + interval '1 month');
+
+  for r in
+    select clinic_id
+      from cases
+     where lab_id = v_lab
+       and invoice_status = 'draft'
+       and statement_id is null
+       and (
+         (cancel_status = 'cancelled' and coalesce(cancellation_fee, 0) > 0)
+         or (cancel_status <> 'cancelled' and stage_index >= 3 and coalesce(total_price, 0) > 0)
+       )
+       and case_completed_at(history, created_at) < v_cutoff
+     group by clinic_id
+  loop
+    insert into clinic_statements (lab_id, clinic_id, month)
+    values (v_lab, r.clinic_id, v_month)
+    on conflict (lab_id, clinic_id, month) do update set month = excluded.month
+    returning id into v_sid;
+
+    update cases
+       set invoice_status = 'issued', statement_id = v_sid
+     where lab_id = v_lab
+       and clinic_id = r.clinic_id
+       and invoice_status = 'draft'
+       and statement_id is null
+       and (
+         (cancel_status = 'cancelled' and coalesce(cancellation_fee, 0) > 0)
+         or (cancel_status <> 'cancelled' and stage_index >= 3 and coalesce(total_price, 0) > 0)
+       )
+       and case_completed_at(history, created_at) < v_cutoff;
+
+    select coalesce(sum(case when cancel_status = 'cancelled' then coalesce(cancellation_fee, 0) else total_price end), 0)
+      into v_sum
+      from cases where statement_id = v_sid;
+    update clinic_statements set total = v_sum where id = v_sid;
+    perform statement_recompute(v_sid);
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;

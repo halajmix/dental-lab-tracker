@@ -75,9 +75,11 @@ export async function downloadStatementPdf({ lab, clinic, statement, cases, paid
       doc.setFontSize(8.5);
     }
     const rest = c.prescription?.restorations;
-    const label = rest?.length
+    const cancelled = c.cancelStatus === "cancelled";
+    let label = rest?.length
       ? rest.map((r) => r.category).join(", ")
       : c.prescription?.category ?? "—";
+    if (cancelled) label = `Cancellation fee — ${label}`;
     const units = rest?.length
       ? rest.reduce((n, r) => n + (r.teeth?.length || 1), 0)
       : c.prescription?.teeth?.length || 1;
@@ -86,7 +88,7 @@ export async function downloadStatementPdf({ lab, clinic, statement, cases, paid
     doc.text(doc.splitTextToSize(c.patientName ?? "", 56)[0] ?? "", cols.patient, y);
     doc.text(doc.splitTextToSize(label, 62)[0] ?? "", cols.type, y);
     doc.text(String(units), cols.units, y, { align: "right" });
-    doc.text(fmt(c.totalPrice ?? 0), cols.amount, y, { align: "right" });
+    doc.text(fmt(cancelled ? c.cancellationFee ?? 0 : c.totalPrice ?? 0), cols.amount, y, { align: "right" });
     y += 5.5;
   }
 

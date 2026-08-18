@@ -943,8 +943,10 @@ export function OverviewDashboard({ cases, clinicsById = {}, lab }) {
     const inRange = (d) => d && d >= from && d <= to;
     const completed = cases.filter((c) => inRange(completedAt(c)));
     const revenue = completed.reduce((s, c) => s + caseFee(c).total, 0);
+    const owed = (c) =>
+      c.cancelStatus === "cancelled" ? (c.cancellationFee ?? 0) > 0 : !!completedAt(c);
     const outstanding = cases
-      .filter((c) => completedAt(c) && c.invoiceStatus !== "paid")
+      .filter((c) => owed(c) && c.invoiceStatus !== "paid")
       .reduce((s, c) => s + caseFee(c).total, 0);
     const remakes = completed.filter((c) => c.remake).length;
     const hasEstimates = completed.some((c) => !caseFee(c).priced);
@@ -989,7 +991,8 @@ export function OverviewDashboard({ cases, clinicsById = {}, lab }) {
   const unpaidByClinic = useMemo(() => {
     const groups = new Map();
     for (const c of cases) {
-      if (!completedAt(c) || c.invoiceStatus === "paid") continue;
+      const owed = c.cancelStatus === "cancelled" ? (c.cancellationFee ?? 0) > 0 : !!completedAt(c);
+      if (!owed || c.invoiceStatus === "paid") continue;
       const g = groups.get(c.clinicId) ?? { clinicId: c.clinicId, total: 0, issued: 0, notInvoiced: 0 };
       g.total += caseFee(c).total;
       if (c.invoiceStatus === "issued") g.issued += 1;

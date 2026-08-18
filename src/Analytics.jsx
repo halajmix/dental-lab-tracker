@@ -30,6 +30,12 @@ export const BASE_PRICE = {
 // `_labs` kept for signature stability with callers — pricing no longer
 // varies per lab since the express surcharge was removed.
 export function caseFee(c, _labs = []) {
+  // An approved cancellation is worth its cancellation fee (work done up
+  // to that point), never the full case price — keeps every revenue and
+  // outstanding figure coherent without special-casing each dashboard.
+  if (c.cancelStatus === "cancelled") {
+    return { base: Number(c.cancellationFee ?? 0), credit: 0, total: Number(c.cancellationFee ?? 0), priced: true };
+  }
   // Cases priced by the Phase 17 DB trigger carry authoritative totals —
   // prefer those over the legacy hardcoded estimate.
   if (c.totalPrice != null) {

@@ -13,6 +13,7 @@ import {
   FlaskConical,
   FileText,
   Wallet,
+  Ban,
   AlertTriangle,
   CheckCheck,
   BarChart3,
@@ -58,7 +59,7 @@ import {
   CaseDrawer,
   isUrgent,
 } from "./LifecycleEngine.jsx";
-import { AnalyticsDashboard, computeAnalytics } from "./Analytics.jsx";
+import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
 import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel } from "./LabAdmin.jsx";
 import { BillingPanel, ExpensesPanel } from "./LabFinance.jsx";
 import { RemakeModal } from "./Remake.jsx";
@@ -494,7 +495,7 @@ function CaseRxPhotos({ files }) {
  * corners rely on `overflow-hidden`, which would otherwise clip a dropdown
  * anchored to a row near the bottom edge.
  */
-function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvance, onEditRx }) {
+function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvance, onEditRx, onRequestCancel, onWithdrawCancel }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
@@ -562,6 +563,12 @@ function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvanc
             {onEditRx && item(() => onEditRx(c.id), <Pencil size={14} className="text-blue-600" />, "Edit Rx", "text-blue-700")}
             {item(() => onContactLab(c.id), <Phone size={14} />, `Contact ${lab?.name ?? "Lab"}`)}
             {item(() => onShareRx(c.id), <MessageCircle size={14} />, "Share Rx PDF")}
+            {/* Cancellation: request before the lab completes the work; the
+                lab must approve and may charge a fee for work already done. */}
+            {onRequestCancel && c.cancelStatus === "none" && c.stageIndex < STAGE_INDEX.WORK_COMPLETE &&
+              item(() => onRequestCancel(c.id), <Ban size={14} className="text-rose-500" />, "Request cancellation", "text-rose-600")}
+            {onWithdrawCancel && c.cancelStatus === "requested" &&
+              item(() => onWithdrawCancel(c.id), <Ban size={14} />, "Withdraw cancellation")}
           </div>,
           document.body
         )}
@@ -875,6 +882,30 @@ export default function DentalLabTracker({ auth }) {
   // own accounting.
   const setInvoiceNumber = (caseId, invoiceNumber) => persist(caseId, { invoiceNumber });
 
+  /* ---------------- Cancellation workflow (Phase 27) ----------------
+     Dentist requests / withdraws; lab approves with a fee (work already
+     done, capped at the case price by the DB guard) or declines. */
+  const cancelEntry = (c, label) => [...(c.history ?? []), logEntry("cancellation", c.stageIndex, currentUser, currentRole, label)];
+  const requestCancellation = (caseId) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    persist(caseId, { cancelStatus: "requested", history: cancelEntry(c, "Cancellation requested") });
+  };
+  const withdrawCancellation = (caseId) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    persist(caseId, { cancelStatus: "none", history: cancelEntry(c, "Cancellation request withdrawn") });
+  };
+  const resolveCancellation = (caseId, approved, fee) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    persist(caseId, {
+      cancelStatus: approved ? "cancelled" : "declined",
+      ...(approved ? { cancellationFee: Number(fee) || 0 } : {}),
+      history: cancelEntry(c, approved ? `Cancellation approved — fee ${Number(fee) || 0} OMR` : "Cancellation declined"),
+    });
+  };
+
   const saveHandover = (caseId, data, by) => {
     const c = cases.find((x) => x.id === caseId);
     if (!c) return;
@@ -1116,6 +1147,8 @@ export default function DentalLabTracker({ auth }) {
             onAdvance={(id) => advanceStage(id, currentUser, "dentist")}
             onOpenCase={setDrawerCaseId}
             canEditRx={canEditRx}
+            onRequestCancel={requestCancellation}
+            onWithdrawCancel={withdrawCancellation}
             onEditRx={(id) => {
               const c = cases.find((x) => x.id === id);
               if (!c) return;
@@ -1139,6 +1172,7 @@ export default function DentalLabTracker({ auth }) {
               onOpenCase={setDrawerCaseId}
               onLogRemake={setRemakeCaseId}
               onSetInvoiceNumber={setInvoiceNumber}
+              onResolveCancellation={resolveCancellation}
               onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
             />
           );
@@ -1386,6 +1420,8 @@ function DentistDashboard({
   onShareRx,
   onContactLab,
   onExportCsv,
+  onRequestCancel,
+  onWithdrawCancel,
 }) {
   // Counts for the filter pills always reflect the searched-but-unfiltered set,
   // so switching pills never has to fight the currently active one.
@@ -1423,7 +1459,7 @@ function DentistDashboard({
           <FilterPill active={statusFilter === "received"} onClick={() => setStatusFilter("received")} label="Clinic Received" count={receivedCount} />
           <FilterPill active={statusFilter === "urgent"} onClick={() => setStatusFilter("urgent")} label="Appt. Alerts" count={urgentCases.length} tone="alert" />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -1454,13 +1490,14 @@ function DentistDashboard({
                 <th className="px-4 py-3 font-semibold">Clinic → Lab</th>
                 <th className="px-4 py-3 font-semibold">Appt Date</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold text-right">Cancellation fee</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {cases.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
                     No cases match the current filters.
                   </td>
                 </tr>
@@ -1526,12 +1563,35 @@ function DentistDashboard({
                         </span>
                       </div>
                     )}
+                    {c.cancelStatus === "requested" && (
+                      <div className="mt-1">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+                          <Ban size={11} /> Cancellation requested
+                        </span>
+                      </div>
+                    )}
+                    {c.cancelStatus === "declined" && (
+                      <div className="mt-1">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-inset ring-slate-200">
+                          <Ban size={11} /> Cancellation declined
+                        </span>
+                      </div>
+                    )}
                     {c.handover?.confirmed && (
                       <div className="mt-1">
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
                           <CheckCheck size={11} /> {c.handover.type === "Delivered to Clinic" ? "Delivered" : "Picked Up"}
                         </span>
                       </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 align-top text-right whitespace-nowrap">
+                    {c.cancelStatus === "cancelled" && c.cancellationFee != null ? (
+                      <span className="font-semibold text-rose-700">
+                        {Number(c.cancellationFee).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
                     )}
                   </td>
                   <td className="px-4 py-3.5 align-top">
@@ -1543,6 +1603,8 @@ function DentistDashboard({
                       onShareRx={onShareRx}
                       onAdvance={onAdvance}
                       onEditRx={canEditRx(c) ? onEditRx : null}
+                      onRequestCancel={onRequestCancel}
+                      onWithdrawCancel={onWithdrawCancel}
                     />
                   </td>
                 </tr>
@@ -1643,7 +1705,7 @@ const QUEUE_TAB_DEFS = [
   { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
 ];
 
-function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onExportCsv }) {
+function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onResolveCancellation, onExportCsv }) {
   const [queueTab, setQueueTab] = useState("incoming");
   // Brief confirmation after a stage change moves a case out of the tab
   // you're looking at — without this, advancing the only case in "Incoming"
@@ -1658,9 +1720,12 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
 
   if (!lab) return null;
 
-  const inIncoming = (c) => c.stageIndex === STAGE_INDEX.STILL_AT_CLINIC;
-  const inProduction = (c) => c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex < STAGE_INDEX.WORK_COMPLETE;
-  const inCompleted = (c) => c.stageIndex >= STAGE_INDEX.WORK_COMPLETE;
+  // Approved cancellations drop out of the working queue — the work has
+  // stopped; billing still sees them via the admin tabs.
+  const live = (c) => c.cancelStatus !== "cancelled";
+  const inIncoming = (c) => live(c) && c.stageIndex === STAGE_INDEX.STILL_AT_CLINIC;
+  const inProduction = (c) => live(c) && c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex < STAGE_INDEX.WORK_COMPLETE;
+  const inCompleted = (c) => live(c) && c.stageIndex >= STAGE_INDEX.WORK_COMPLETE;
   const BUCKET = { incoming: inIncoming, in_production: inProduction, completed: inCompleted };
   const bucketOf = (stageIndex) =>
     Object.entries(BUCKET).find(([, test]) => test({ stageIndex }))?.[0] ?? "incoming";
@@ -1745,6 +1810,7 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
         <div className="space-y-2.5">
           {visibleQueue.map((c) => (
             <LabCaseCard
+              onResolveCancellation={onResolveCancellation}
               key={c.id}
               c={c}
               onAdvance={handleAdvance}
@@ -1928,7 +1994,77 @@ function InvoiceNumberField({ value, onSave }) {
   );
 }
 
-function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber }) {
+/* ------------------------------------------------------------------ */
+/*  Cancellation request banner (lab card) — the dentist asked to       */
+/*  cancel; the lab approves with a fee for work already done (the DB   */
+/*  guard caps it at the case price) or declines and keeps working.     */
+/* ------------------------------------------------------------------ */
+
+function CancellationRequestBanner({ c, onResolve }) {
+  const [fee, setFee] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const price = caseFee(c).total;
+
+  return (
+    <div className="mb-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+      <p className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
+        <Ban size={13} /> Dentist requested cancellation
+      </p>
+      <p className="mt-0.5 text-[11px] text-amber-700">
+        Approve with a fee for the work already done (case price {price.toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR), or decline to keep the case in production.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1.5">
+          <span className="text-[11px] font-semibold text-amber-800">Fee</span>
+          <input
+            type="number"
+            min="0"
+            step="0.001"
+            value={fee}
+            onChange={(e) => setFee(e.target.value)}
+            placeholder="0"
+            className="w-24 rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-amber-400"
+          />
+          <span className="text-[11px] text-amber-700">OMR</span>
+        </label>
+        {confirming ? (
+          <>
+            <button
+              onClick={() => onResolve(c.id, true, fee)}
+              className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+            >
+              Confirm cancel{Number(fee) > 0 ? ` — ${Number(fee).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR` : " — no fee"}
+            </button>
+            <button onClick={() => setConfirming(false)} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-white/60">
+              Back
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setConfirming(true)}
+              disabled={Number(fee) > price}
+              className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+            >
+              Approve cancellation
+            </button>
+            <button
+              onClick={() => onResolve(c.id, false)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Decline
+            </button>
+          </>
+        )}
+        {Number(fee) > price && (
+          <p className="w-full text-[11px] font-semibold text-rose-600">Fee can't exceed the case price.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onResolveCancellation }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -1953,6 +2089,11 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
               <RefreshCcw size={11} /> Remake
             </span>
           )}
+          {c.cancelStatus === "cancelled" && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">
+              <Ban size={11} /> Cancelled
+            </span>
+          )}
           <CaseCardOptionsMenu
             c={c}
             canRevert={canRevert}
@@ -1963,6 +2104,10 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
           />
         </div>
       </div>
+
+      {c.cancelStatus === "requested" && onResolveCancellation && (
+        <CancellationRequestBanner c={c} onResolve={onResolveCancellation} />
+      )}
 
       {/* Critical info — Material / Teeth / Shade in one subtly shaded row, not a wall of text */}
       {c.prescription && (

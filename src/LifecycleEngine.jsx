@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
+  Ban,
   ClipboardList,
   Truck,
   PackageCheck,
@@ -94,6 +95,15 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 /* ================================================================== */
 
 export function StatusPill({ caseObj }) {
+  // Approved cancellations override the lifecycle stage everywhere the
+  // pill appears — the case is terminal regardless of where it stopped.
+  if (caseObj.cancelStatus === "cancelled") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-200">
+        <Ban size={12} className="shrink-0" /> Cancelled
+      </span>
+    );
+  }
   const idx = caseObj.stageIndex;
   const s = STAGES[idx];
   // Work Complete and Clinic Received both read as "done" milestones —

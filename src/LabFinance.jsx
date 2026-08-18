@@ -122,10 +122,16 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
   // Completed, priced work not yet on any statement — what the next
   // "Generate" run would pick up.
   const unbilled = useMemo(() => {
+    // Mirrors the RPC's eligibility: completed work at full price, or an
+    // approved cancellation billed at its fee.
+    const value = (c) => (c.cancelStatus === "cancelled" ? c.cancellationFee ?? 0 : c.totalPrice ?? 0);
     const rows = cases.filter(
-      (c) => c.invoiceStatus === "draft" && !c.statementId && completedAt(c) && (c.totalPrice ?? 0) > 0,
+      (c) =>
+        c.invoiceStatus === "draft" &&
+        !c.statementId &&
+        (c.cancelStatus === "cancelled" ? (c.cancellationFee ?? 0) > 0 : completedAt(c) && (c.totalPrice ?? 0) > 0),
     );
-    return { count: rows.length, total: rows.reduce((s, c) => s + (c.totalPrice ?? 0), 0) };
+    return { count: rows.length, total: rows.reduce((s, c) => s + value(c), 0) };
   }, [cases]);
 
   // Receivables aging: remaining balance of open statements bucketed by

@@ -56,6 +56,8 @@ export const caseFromRow = (r) => ({
   totalPrice: r.total_price ?? null,
   invoiceStatus: r.invoice_status ?? "draft",
   statementId: r.statement_id ?? null,
+  cancelStatus: r.cancel_status ?? "none",
+  cancellationFee: r.cancellation_fee != null ? Number(r.cancellation_fee) : null,
 });
 
 export const clinicFromRow = (r) => ({
@@ -232,6 +234,8 @@ const PATCH_KEY_MAP = {
   invoiceNumber: "invoice_number",
   assignedTechId: "assigned_tech_id",
   invoiceStatus: "invoice_status",
+  cancelStatus: "cancel_status",
+  cancellationFee: "cancellation_fee",
 };
 
 export async function updateCase(id, patch) {
@@ -690,6 +694,8 @@ const paymentFromRow = (r) => ({
   labId: r.lab_id,
   clinicId: r.clinic_id,
   statementId: r.statement_id ?? null,
+  cancelStatus: r.cancel_status ?? "none",
+  cancellationFee: r.cancellation_fee != null ? Number(r.cancellation_fee) : null,
   amount: Number(r.amount) || 0,
   method: r.method,
   reference: r.reference ?? "",
