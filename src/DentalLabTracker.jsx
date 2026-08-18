@@ -33,7 +33,6 @@ import {
   Eye,
   Undo2,
   Receipt,
-  Lock,
   Check,
   UserCog,
   Camera,
@@ -1974,17 +1973,18 @@ function InvoiceNumberField({ value, onSave }) {
     );
   }
 
-  // Once set, an invoice number is pushed to the clinic and LOCKED — no
-  // editing (also enforced by a DB trigger, so this isn't just cosmetic).
+  // Always editable by the lab (Phase 29 dropped the once-set lock —
+  // typos and renumbering are normal); dentists still can't write it.
   return value ? (
-    <div
-      className="flex items-center gap-1.5"
-      title="Invoice number is locked once pushed to the clinic"
+    <button
+      onClick={() => { setDraft(value); setEditing(true); }}
+      className="group flex items-center gap-1.5"
+      title="Tap to edit the invoice number"
     >
       <Receipt size={15} className="shrink-0 text-slate-400" />
       <span className="font-mono text-lg font-black leading-tight tracking-wide text-slate-800">{value}</span>
-      <Lock size={12} className="text-slate-300" />
-    </div>
+      <Pencil size={12} className="text-slate-300 group-hover:text-blue-500" />
+    </button>
   ) : (
     <button
       onClick={() => setEditing(true)}

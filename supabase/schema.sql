@@ -2107,3 +2107,32 @@ begin
   return new;
 end;
 $$ language plpgsql;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 29 — invoice number always editable by the lab                 */
+/*                                                                       */
+/*  The Phase 7 once-set lock frustrated real use (typos, renumbering).  */
+/*  Labs can now edit it freely; it joins the lab-only column guard so   */
+/*  clinic writers still can't touch it.                                 */
+/* --------------------------------------------------------------------- */
+
+drop trigger if exists cases_lock_invoice_number on cases;
+drop function if exists lock_invoice_number();
+
+create or replace function guard_lab_financial_columns()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) is distinct from 'service_role'
+     and (new.lab_id is null or new.lab_id is distinct from my_lab_id()) then
+    new.assigned_tech_id := old.assigned_tech_id;
+    new.invoice_status := old.invoice_status;
+    new.base_fee := old.base_fee;
+    new.adjustments := old.adjustments;
+    new.total_price := old.total_price;
+    new.statement_id := old.statement_id;
+    new.invoice_number := old.invoice_number;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
