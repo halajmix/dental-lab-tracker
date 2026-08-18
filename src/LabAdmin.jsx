@@ -811,7 +811,7 @@ function DonutChart({ slices, centerLabel }) {
         </text>
       </svg>
       {/* value-labeled legend doubles as the table view */}
-      <div className="min-w-0 flex-1 space-y-1">
+      <div className="min-w-[13rem] flex-1 space-y-1">
         {segments.map((s, i) => (
           <div
             key={s.label}
