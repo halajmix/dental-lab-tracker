@@ -169,7 +169,7 @@ Deno.serve(async (req) => {
     const labIds = [...new Set(unpaid.map((c) => c.lab_id))];
     const clinicIds = [...new Set(unpaid.map((c) => c.clinic_id))];
     const [{ data: labs }, { data: clinics }] = await Promise.all([
-      admin.from("labs").select("id, name, email").in("id", labIds),
+      admin.from("labs").select("id, name, email, payment_reminders_enabled").in("id", labIds),
       admin.from("clinics").select("id, name, email").in("id", clinicIds),
     ]);
     const labById = new Map((labs ?? []).map((l) => [l.id, l]));
@@ -180,6 +180,9 @@ Deno.serve(async (req) => {
       const [labId, clinicId] = key.split(":");
       const lab = labById.get(labId);
       const clinic = clinicById.get(clinicId);
+      // Lab turned reminders off in Lab Settings. Missing column (Phase 25
+      // SQL not yet run) is undefined, which keeps the old always-on behavior.
+      if (lab?.payment_reminders_enabled === false) continue;
       if (!clinic?.email) continue; // surfaced in the lab's dashboard as "no email &mdash; can't be reminded"
 
       const { html, total } = invoiceTable(rows);

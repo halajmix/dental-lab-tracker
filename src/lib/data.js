@@ -23,6 +23,8 @@ export const labFromRow = (r) => ({
   status: r.status ?? "active",
   // Who receives new-case emails; "" = the lab's general contact email.
   notifyEmail: r.notify_email ?? "",
+  // Monthly unpaid-invoice reminder emails to clinics (Lab Settings toggle).
+  paymentRemindersEnabled: r.payment_reminders_enabled ?? true,
 });
 
 export const caseFromRow = (r) => ({
@@ -154,7 +156,7 @@ export async function fetchLabs() {
 
 // Lab self-service settings (phone, standard TAT, per-procedure TATs).
 // RLS: only the owning lab account (or creating clinic) can update.
-export async function updateLab(labId, { contact, tat, procedureTats, governorate, wilayat, notifyEmail }) {
+export async function updateLab(labId, { contact, tat, procedureTats, governorate, wilayat, notifyEmail, paymentRemindersEnabled }) {
   const patch = {};
   if (contact !== undefined) patch.contact = contact;
   if (tat !== undefined) patch.tat = tat;
@@ -162,6 +164,7 @@ export async function updateLab(labId, { contact, tat, procedureTats, governorat
   if (governorate !== undefined) patch.governorate = governorate;
   if (wilayat !== undefined) patch.wilayat = wilayat;
   if (notifyEmail !== undefined) patch.notify_email = notifyEmail;
+  if (paymentRemindersEnabled !== undefined) patch.payment_reminders_enabled = paymentRemindersEnabled;
   const { data, error } = await supabase.from("labs").update(patch).eq("id", labId).select().single();
   if (error) throw error;
   return labFromRow(data);

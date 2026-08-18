@@ -1648,3 +1648,19 @@ select cron.schedule(
   '5 * * * *',
   $$select private.send_error_alert()$$
 );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 25 — per-lab payment-reminder on/off toggle                    */
+/*                                                                       */
+/*  Lab Settings gains a "Payment reminders" switch. Off = the monthly   */
+/*  payment-reminders Edge Function skips every clinic of that lab.      */
+/*  Default true preserves the existing always-on behavior; the column   */
+/*  is written through the normal labs_update RLS path (lab admins).     */
+/*                                                                       */
+/*  Manual step that pairs with this block: re-paste                     */
+/*  supabase/functions/payment-reminders/index.ts (it now reads the      */
+/*  column and skips opted-out labs).                                    */
+/* --------------------------------------------------------------------- */
+
+alter table public.labs
+  add column if not exists payment_reminders_enabled boolean not null default true;

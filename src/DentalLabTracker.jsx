@@ -623,7 +623,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId }) {
       {tab === "queue" ? (
         queue
       ) : tab === "overview" ? (
-        <OverviewDashboard cases={cases} clinicsById={clinicsById} />
+        <OverviewDashboard cases={cases} clinicsById={clinicsById} lab={lab} />
       ) : tab === "technicians" ? (
         <TechniciansPanel lab={lab} cases={cases} />
       ) : tab === "prices" ? (
@@ -2144,6 +2144,7 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
   const [procTats, setProcTats] = useState({});
   const [location, setLocation] = useState({ governorate: "", wilayat: "" });
   const [notifyEmail, setNotifyEmail] = useState("");
+  const [payReminders, setPayReminders] = useState(true);
   const [roster, setRoster] = useState([]); // for the notification-recipient picker
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -2159,6 +2160,7 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
     setProcTats(lab.procedureTats ?? {});
     setLocation({ governorate: lab.governorate ?? "", wilayat: lab.wilayat ?? "" });
     setNotifyEmail(lab.notifyEmail ?? "");
+    setPayReminders(lab.paymentRemindersEnabled ?? true);
     setError("");
     fetchLabRoster(lab.id)
       .then((r) => setRoster(r.filter((p) => p.userId && p.email && p.status !== "suspended")))
@@ -2187,6 +2189,9 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
         governorate: location.governorate,
         wilayat: location.wilayat,
         notifyEmail,
+        // Only send when actually flipped, so saving other settings still
+        // works if the Phase 25 column doesn't exist yet (deploy-order safety).
+        ...(payReminders !== (lab.paymentRemindersEnabled ?? true) ? { paymentRemindersEnabled: payReminders } : {}),
       });
       await onSaved();
       onClose();
@@ -2233,6 +2238,32 @@ function LabSettingsDrawer({ open, onClose, lab, onSaved }) {
               <option value={notifyEmail}>{notifyEmail} — no longer on the roster</option>
             )}
           </select>
+        </div>
+
+        <div className="border-t border-slate-100 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment reminders</h4>
+              <p className="mt-1 text-[11px] text-slate-400">
+                On the 25th of each month, clinics with issued unpaid invoices get an automatic email
+                reminder from your lab. Turn off to stop these emails.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={payReminders}
+              onClick={() => setPayReminders((v) => !v)}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition ${payReminders ? "bg-blue-600" : "bg-slate-200"}`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${payReminders ? "left-[22px]" : "left-0.5"}`}
+              />
+            </button>
+          </div>
+          <p className={`mt-1.5 text-[11px] font-semibold ${payReminders ? "text-emerald-600" : "text-amber-600"}`}>
+            {payReminders ? "Active — monthly reminders are sent" : "Off — clinics will not be reminded"}
+          </p>
         </div>
 
         <div className="border-t border-slate-100 pt-4">

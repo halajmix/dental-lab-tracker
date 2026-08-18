@@ -895,7 +895,7 @@ function revenueByCategory(cases) {
   return map;
 }
 
-export function OverviewDashboard({ cases, clinicsById = {} }) {
+export function OverviewDashboard({ cases, clinicsById = {}, lab }) {
   const [preset, setPreset] = useState("month");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const { from, to } = rangeBounds(preset, custom);
@@ -1027,10 +1027,17 @@ export function OverviewDashboard({ cases, clinicsById = {} }) {
             <h3 className="text-sm font-bold text-slate-800">Unpaid work by clinic</h3>
             <span className="text-xs font-semibold text-slate-500">{fmtOMR(stats.outstanding)} outstanding</span>
           </div>
-          <p className="mb-3 text-[11px] text-slate-400">
-            Completed cases not yet marked paid. Clinics with <b>issued</b> invoices get an automatic email
-            reminder on the 25th of each month — cases you haven't invoiced are never emailed.
-          </p>
+          {lab?.paymentRemindersEnabled === false ? (
+            <p className="mb-3 text-[11px] font-semibold text-amber-600">
+              Automatic monthly reminders are turned off — clinics are not being emailed. Turn them back on
+              in Lab Settings.
+            </p>
+          ) : (
+            <p className="mb-3 text-[11px] text-slate-400">
+              Completed cases not yet marked paid. Clinics with <b>issued</b> invoices get an automatic email
+              reminder on the 25th of each month — cases you haven't invoiced are never emailed.
+            </p>
+          )}
           <div className="space-y-3">
             {unpaidByClinic.map((g) => (
               <div key={g.clinicId ?? "unknown"}>
