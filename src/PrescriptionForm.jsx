@@ -1096,7 +1096,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setIncludedOther(p.includedOther ?? "");
     if (p.restorations?.length) {
       setCaseMode("restorations");
-      setRestorations(p.restorations);
+      setRestorations(p.restorations.map((r, i) => (r.id ? r : { ...r, id: `rehydrated-${i}` })));
     } else {
       setCaseMode("appliance");
       setRestorations([]);
