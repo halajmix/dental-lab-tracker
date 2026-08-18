@@ -38,7 +38,9 @@ async function sendEmail(to: string, replyTo: string | undefined, subject: strin
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: Deno.env.get("OTP_FROM_EMAIL") ?? "Dr-Crown <noreply@dr-crown.com>",
+        // OTP_FROM_EMAIL's display name is "Dr-Crown Security" (old OTP flow) —
+        // wrong voice for billing emails.
+        from: "Dr-Crown <noreply@dr-crown.com>",
         to: [to],
         ...(replyTo ? { reply_to: replyTo } : {}),
         subject,
