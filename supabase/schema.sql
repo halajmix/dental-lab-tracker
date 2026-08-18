@@ -1664,3 +1664,243 @@ select cron.schedule(
 
 alter table public.labs
   add column if not exists payment_reminders_enabled boolean not null default true;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 26 — lab financial engine: monthly statements, payments,       */
+/*  expenses, technician commission rates                                */
+/*                                                                       */
+/*  Replaces the lab's Excel accounting workbook. All four tables are    */
+/*  per-lab (multi-tenant) and admin-only via RLS. Statements aggregate  */
+/*  unbilled completed cases per clinic per month; recording payments    */
+/*  against a statement auto-advances its status, and a fully settled   */
+/*  statement marks every included case invoice_status='paid'.          */
+/*                                                                       */
+/*  Manual steps that pair with this block: none (client deploy only).  */
+/* --------------------------------------------------------------------- */
+
+create table if not exists clinic_statements (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid not null references labs(id) on delete cascade,
+  clinic_id uuid not null references clinics(id) on delete cascade,
+  month date not null,                       -- first day of the billed month
+  total numeric not null default 0,
+  status text not null default 'unpaid' check (status in ('unpaid','partial','paid')),
+  created_at timestamptz not null default now(),
+  unique (lab_id, clinic_id, month)
+);
+
+alter table cases add column if not exists statement_id uuid references clinic_statements(id) on delete set null;
+
+create table if not exists lab_payments (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid not null references labs(id) on delete cascade,
+  clinic_id uuid not null references clinics(id) on delete cascade,
+  statement_id uuid references clinic_statements(id) on delete set null,
+  amount numeric not null check (amount > 0),
+  method text not null check (method in ('cash','cheque','bank')),
+  reference text not null default '',
+  received_date date not null default current_date,
+  -- Cheques start uncleared and only count toward cash-on-hand once
+  -- cleared; cash/bank payments clear immediately (client sets this).
+  cleared boolean not null default true,
+  cleared_date date,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists lab_expenses (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid not null references labs(id) on delete cascade,
+  category text not null check (category in ('Materials','Salaries','Rent','Utilities','Maintenance','Other')),
+  amount numeric not null check (amount > 0),
+  method text not null check (method in ('cash','cheque','bank')),
+  description text not null default '',
+  expense_date date not null default current_date,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists tech_commission_rates (
+  lab_id uuid not null references labs(id) on delete cascade,
+  user_id uuid not null,
+  rates jsonb not null default '{}'::jsonb,  -- { "<Rx category name>": OMR per unit }
+  primary key (lab_id, user_id)
+);
+
+-- Financial data is lab-admin-only (techs never see clinic money);
+-- the super admin dashboard gets read access for support.
+alter table clinic_statements enable row level security;
+alter table lab_payments enable row level security;
+alter table lab_expenses enable row level security;
+alter table tech_commission_rates enable row level security;
+
+drop policy if exists "statements_all" on clinic_statements;
+create policy "statements_all" on clinic_statements for all
+  using ((lab_id = my_lab_id() and is_lab_admin()) or is_admin())
+  with check (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "payments_all" on lab_payments;
+create policy "payments_all" on lab_payments for all
+  using ((lab_id = my_lab_id() and is_lab_admin()) or is_admin())
+  with check (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "expenses_all" on lab_expenses;
+create policy "expenses_all" on lab_expenses for all
+  using ((lab_id = my_lab_id() and is_lab_admin()) or is_admin())
+  with check (lab_id = my_lab_id() and is_lab_admin());
+
+drop policy if exists "commission_rates_all" on tech_commission_rates;
+create policy "commission_rates_all" on tech_commission_rates for all
+  using ((lab_id = my_lab_id() and is_lab_admin()) or is_admin())
+  with check (lab_id = my_lab_id() and is_lab_admin());
+
+-- When a case first reached WORK_COMPLETE (stage 3+), from its history
+-- audit trail; falls back to created_at for rows with sparse history.
+create or replace function case_completed_at(h jsonb, fallback timestamptz)
+returns timestamptz
+language sql
+immutable
+as $$
+  select coalesce(
+    (select min((e->>'at')::timestamptz)
+       from jsonb_array_elements(coalesce(h, '[]'::jsonb)) e
+      where (e->>'toStage')::int >= 3
+        and e->>'action' in ('advance','created')),
+    fallback
+  );
+$$;
+
+-- "Generate monthly statements" button. Sweeps every completed, still-
+-- draft, un-statemented case finished on or before the end of p_month
+-- into one statement per clinic, marks those cases issued, and returns
+-- how many statements were touched. Re-running is safe: an existing
+-- statement for that month absorbs newly eligible cases and its status
+-- is recomputed against payments already recorded.
+create or replace function generate_clinic_statements(p_month date)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_lab uuid;
+  v_cutoff timestamptz;
+  v_month date;
+  r record;
+  v_sid uuid;
+  v_sum numeric;
+  n integer := 0;
+begin
+  v_lab := my_lab_id();
+  if v_lab is null or not is_lab_admin() then
+    raise exception 'Only an active lab admin can generate statements';
+  end if;
+  v_month := date_trunc('month', p_month)::date;
+  v_cutoff := (v_month + interval '1 month');
+
+  for r in
+    select clinic_id
+      from cases
+     where lab_id = v_lab
+       and invoice_status = 'draft'
+       and statement_id is null
+       and stage_index >= 3
+       and coalesce(total_price, 0) > 0
+       and case_completed_at(history, created_at) < v_cutoff
+     group by clinic_id
+  loop
+    insert into clinic_statements (lab_id, clinic_id, month)
+    values (v_lab, r.clinic_id, v_month)
+    on conflict (lab_id, clinic_id, month) do update set month = excluded.month
+    returning id into v_sid;
+
+    update cases
+       set invoice_status = 'issued', statement_id = v_sid
+     where lab_id = v_lab
+       and clinic_id = r.clinic_id
+       and invoice_status = 'draft'
+       and statement_id is null
+       and stage_index >= 3
+       and coalesce(total_price, 0) > 0
+       and case_completed_at(history, created_at) < v_cutoff;
+
+    select coalesce(sum(total_price), 0) into v_sum
+      from cases where statement_id = v_sid;
+    update clinic_statements set total = v_sum where id = v_sid;
+    perform statement_recompute(v_sid);
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+
+-- Recompute a statement's status from its recorded payments. Fully
+-- settled -> every included case flips to invoice_status='paid'
+-- (one-directional: removing a payment later downgrades the statement
+-- but never un-pays cases; that stays a manual correction).
+create or replace function statement_recompute(p_sid uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_total numeric;
+  v_paid numeric;
+  v_status text;
+begin
+  select total into v_total from clinic_statements where id = p_sid;
+  if v_total is null then return; end if;
+  select coalesce(sum(amount), 0) into v_paid from lab_payments where statement_id = p_sid;
+  v_status := case
+    when v_paid <= 0 then 'unpaid'
+    when v_paid >= v_total and v_total > 0 then 'paid'
+    else 'partial'
+  end;
+  update clinic_statements set status = v_status where id = p_sid and status is distinct from v_status;
+  if v_status = 'paid' then
+    update cases set invoice_status = 'paid'
+     where statement_id = p_sid and invoice_status = 'issued';
+  end if;
+end;
+$$;
+
+create or replace function lab_payments_after_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op in ('INSERT', 'UPDATE') and new.statement_id is not null then
+    perform statement_recompute(new.statement_id);
+  end if;
+  if tg_op in ('UPDATE', 'DELETE') and old.statement_id is not null
+     and (tg_op = 'DELETE' or old.statement_id is distinct from new.statement_id) then
+    perform statement_recompute(old.statement_id);
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists lab_payments_recompute on lab_payments;
+create trigger lab_payments_recompute
+  after insert or update or delete on lab_payments
+  for each row execute function lab_payments_after_change();
+
+-- statement_id joins the lab-only case columns: without this, a clinic
+-- writer updating its own case would silently null the statement link.
+create or replace function guard_lab_financial_columns()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) is distinct from 'service_role'
+     and (new.lab_id is null or new.lab_id is distinct from my_lab_id()) then
+    new.assigned_tech_id := old.assigned_tech_id;
+    new.invoice_status := old.invoice_status;
+    new.base_fee := old.base_fee;
+    new.adjustments := old.adjustments;
+    new.total_price := old.total_price;
+    new.statement_id := old.statement_id;
+  end if;
+  return new;
+end;
+$$ language plpgsql;

@@ -12,6 +12,7 @@ import {
   Clock,
   FlaskConical,
   FileText,
+  Wallet,
   AlertTriangle,
   CheckCheck,
   BarChart3,
@@ -59,6 +60,7 @@ import {
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics } from "./Analytics.jsx";
 import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel } from "./LabAdmin.jsx";
+import { BillingPanel, ExpensesPanel } from "./LabFinance.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import ContactLabModal from "./ContactLab.jsx";
@@ -599,6 +601,8 @@ const ADMIN_TABS = [
   { id: "queue", label: "Case Queue", icon: ClipboardCheck },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "technicians", label: "Technicians", icon: Users },
+  { id: "billing", label: "Billing", icon: FileText },
+  { id: "expenses", label: "Expenses", icon: Wallet },
   { id: "prices", label: "Price Lists", icon: Tags },
   { id: "staff", label: "Staff", icon: UserPlus },
 ];
@@ -626,6 +630,10 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId }) {
         <OverviewDashboard cases={cases} clinicsById={clinicsById} lab={lab} />
       ) : tab === "technicians" ? (
         <TechniciansPanel lab={lab} cases={cases} />
+      ) : tab === "billing" ? (
+        <BillingPanel lab={lab} clinicsById={clinicsById} cases={cases} />
+      ) : tab === "expenses" ? (
+        <ExpensesPanel lab={lab} />
       ) : tab === "prices" ? (
         <PriceListsManager lab={lab} clinicsById={clinicsById} />
       ) : (

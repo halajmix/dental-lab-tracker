@@ -55,6 +55,7 @@ export const caseFromRow = (r) => ({
   adjustments: r.adjustments ?? [],
   totalPrice: r.total_price ?? null,
   invoiceStatus: r.invoice_status ?? "draft",
+  statementId: r.statement_id ?? null,
 });
 
 export const clinicFromRow = (r) => ({
@@ -667,4 +668,150 @@ export function subscribeCases({ clinicId, labId }, onChange) {
     .on("postgres_changes", { event: "*", schema: "public", table: "cases", filter }, onChange)
     .subscribe();
   return () => supabase.removeChannel(channel);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Financial engine (Phase 26) — statements, payments, expenses,      */
+/*  technician commission rates. Lab-admin only; RLS enforces it.      */
+/* ------------------------------------------------------------------ */
+
+const statementFromRow = (r) => ({
+  id: r.id,
+  labId: r.lab_id,
+  clinicId: r.clinic_id,
+  month: r.month, // "YYYY-MM-01"
+  total: Number(r.total) || 0,
+  status: r.status,
+  createdAt: r.created_at,
+});
+
+const paymentFromRow = (r) => ({
+  id: r.id,
+  labId: r.lab_id,
+  clinicId: r.clinic_id,
+  statementId: r.statement_id ?? null,
+  amount: Number(r.amount) || 0,
+  method: r.method,
+  reference: r.reference ?? "",
+  receivedDate: r.received_date,
+  cleared: !!r.cleared,
+  clearedDate: r.cleared_date ?? null,
+  createdAt: r.created_at,
+});
+
+const expenseFromRow = (r) => ({
+  id: r.id,
+  labId: r.lab_id,
+  category: r.category,
+  amount: Number(r.amount) || 0,
+  method: r.method,
+  description: r.description ?? "",
+  expenseDate: r.expense_date,
+  createdAt: r.created_at,
+});
+
+export async function fetchStatements(labId) {
+  const { data, error } = await supabase
+    .from("clinic_statements")
+    .select("*")
+    .eq("lab_id", labId)
+    .order("month", { ascending: false });
+  if (error) throw error;
+  return data.map(statementFromRow);
+}
+
+export async function fetchPayments(labId) {
+  const { data, error } = await supabase
+    .from("lab_payments")
+    .select("*")
+    .eq("lab_id", labId)
+    .order("received_date", { ascending: false });
+  if (error) throw error;
+  return data.map(paymentFromRow);
+}
+
+export async function fetchExpenses(labId) {
+  const { data, error } = await supabase
+    .from("lab_expenses")
+    .select("*")
+    .eq("lab_id", labId)
+    .order("expense_date", { ascending: false });
+  if (error) throw error;
+  return data.map(expenseFromRow);
+}
+
+// Sweeps unbilled completed cases into one statement per clinic for the
+// given month; returns how many statements were created or updated.
+export async function generateStatements(monthDate) {
+  const { data, error } = await supabase.rpc("generate_clinic_statements", { p_month: monthDate });
+  if (error) throw error;
+  return data ?? 0;
+}
+
+export async function insertPayment(labId, { clinicId, statementId, amount, method, reference, receivedDate }) {
+  const { data, error } = await supabase
+    .from("lab_payments")
+    .insert({
+      lab_id: labId,
+      clinic_id: clinicId,
+      statement_id: statementId || null,
+      amount,
+      method,
+      reference: reference ?? "",
+      received_date: receivedDate,
+      // Cheques sit in the pending portfolio until explicitly cleared.
+      cleared: method !== "cheque",
+      cleared_date: method !== "cheque" ? receivedDate : null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return paymentFromRow(data);
+}
+
+export async function markChequeCleared(paymentId) {
+  const { data, error } = await supabase
+    .from("lab_payments")
+    .update({ cleared: true, cleared_date: new Date().toISOString().slice(0, 10) })
+    .eq("id", paymentId)
+    .select()
+    .single();
+  if (error) throw error;
+  return paymentFromRow(data);
+}
+
+export async function deletePayment(paymentId) {
+  const { error } = await supabase.from("lab_payments").delete().eq("id", paymentId);
+  if (error) throw error;
+}
+
+export async function insertExpense(labId, { category, amount, method, description, expenseDate }) {
+  const { data, error } = await supabase
+    .from("lab_expenses")
+    .insert({ lab_id: labId, category, amount, method, description: description ?? "", expense_date: expenseDate })
+    .select()
+    .single();
+  if (error) throw error;
+  return expenseFromRow(data);
+}
+
+export async function deleteExpense(expenseId) {
+  const { error } = await supabase.from("lab_expenses").delete().eq("id", expenseId);
+  if (error) throw error;
+}
+
+export async function fetchCommissionRates(labId) {
+  const { data, error } = await supabase
+    .from("tech_commission_rates")
+    .select("*")
+    .eq("lab_id", labId);
+  if (error) throw error;
+  return Object.fromEntries(data.map((r) => [r.user_id, r.rates ?? {}]));
+}
+
+export async function saveCommissionRates(labId, userId, rates) {
+  const { error } = await supabase
+    .from("tech_commission_rates")
+    .upsert({ lab_id: labId, user_id: userId, rates }, { onConflict: "lab_id,user_id" });
+  if (error) throw error;
 }

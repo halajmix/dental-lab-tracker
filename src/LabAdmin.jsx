@@ -36,6 +36,10 @@ import {
   upsertClinicPriceRule,
   deleteClinicPriceRule,
   fetchLabRoster,
+  fetchCommissionRates,
+  saveCommissionRates,
+  fetchPayments,
+  fetchExpenses,
   repriceUnbilledCases,
   updateCase,
   inviteLabMember,
@@ -59,6 +63,17 @@ const completedAt = (c) => reachedDate(c, STAGE_INDEX.WORK_COMPLETE);
 
 // Billable units on a case = teeth per restoration (min 1), matching the
 // pricing trigger's math.
+const caseUnitsByCategory = (c) => {
+  const out = {};
+  const rest = c.prescription?.restorations;
+  if (rest?.length) {
+    for (const r of rest) out[r.category] = (out[r.category] ?? 0) + (r.teeth?.length || 1);
+  } else if (c.prescription?.category) {
+    out[c.prescription.category] = c.prescription?.teeth?.length || 1;
+  }
+  return out;
+};
+
 const caseUnits = (c) => {
   const rest = c.prescription?.restorations;
   if (rest?.length) return rest.reduce((n, r) => n + (r.teeth?.length || 1), 0);
@@ -900,6 +915,30 @@ export function OverviewDashboard({ cases, clinicsById = {}, lab }) {
   const [custom, setCustom] = useState({ from: "", to: "" });
   const { from, to } = rangeBounds(preset, custom);
 
+  // Money in / money out for the KPI cards. Fail-soft: before the Phase 26
+  // SQL exists (or for non-admin fetch errors) the two cards just hide.
+  const [money, setMoney] = useState(null);
+  useEffect(() => {
+    if (!lab?.id) return;
+    let cancelled = false;
+    Promise.all([fetchPayments(lab.id), fetchExpenses(lab.id)])
+      .then(([payments, expenses]) => !cancelled && setMoney({ payments, expenses }))
+      .catch(() => !cancelled && setMoney(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [lab?.id]);
+  const cashflow = useMemo(() => {
+    if (!money) return null;
+    const inRange = (iso) => {
+      const d = iso ? new Date(iso + "T12:00:00") : null;
+      return d && d >= from && d <= to;
+    };
+    const collected = money.payments.filter((p) => inRange(p.receivedDate)).reduce((s, p) => s + p.amount, 0);
+    const spent = money.expenses.filter((e) => inRange(e.expenseDate)).reduce((s, e) => s + e.amount, 0);
+    return { collected, net: collected - spent };
+  }, [money, from.getTime(), to.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const stats = useMemo(() => {
     const inRange = (d) => d && d >= from && d <= to;
     const completed = cases.filter((c) => inRange(completedAt(c)));
@@ -996,12 +1035,21 @@ export function OverviewDashboard({ cases, clinicsById = {}, lab }) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <StatCard icon={Banknote} label="Gross revenue" value={fmtOMR(stats.revenue)} sub="completed in period" />
         <StatCard icon={Wallet} label="Uncollected" value={fmtOMR(stats.outstanding)} sub="all time, not yet paid" />
         <StatCard icon={TrendingUp} label="Avg order value" value={fmtOMR(aov)} />
         <StatCard icon={CheckCheck} label="Cases completed" value={stats.completed.length} />
         <StatCard icon={RefreshCcw} label="Remake rate" value={`${remakeRate.toFixed(1)}%`} />
+        {cashflow && <StatCard icon={Banknote} label="Collections" value={fmtOMR(cashflow.collected)} sub="payments received in period" />}
+        {cashflow && (
+          <StatCard
+            icon={TrendingUp}
+            label="Net cash flow"
+            value={`${cashflow.net < 0 ? "−" : ""}${fmtOMR(Math.abs(cashflow.net))}`}
+            sub="collections − expenses"
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
@@ -1186,12 +1234,18 @@ export function TechniciansPanel({ lab, cases }) {
   const [roster, setRoster] = useState(null);
   const [error, setError] = useState("");
   const [assignOpen, setAssignOpen] = useState(false);
+  const [rates, setRates] = useState({}); // userId -> { category: OMR/unit }
+  const [ratesFor, setRatesFor] = useState(null); // tech row or null
 
   useEffect(() => {
     let cancelled = false;
     fetchLabRoster(lab.id)
       .then((r) => !cancelled && setRoster(r))
       .catch((err) => !cancelled && setError(err.message));
+    // Fail-soft: pre-Phase-26 databases just show — for commissions.
+    fetchCommissionRates(lab.id)
+      .then((r) => !cancelled && setRates(r))
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -1214,7 +1268,18 @@ export function TechniciansPanel({ lab, cases }) {
       .filter((x) => x.at);
     const unitsSince = (since) => finished.filter((x) => x.at >= since).reduce((s, x) => s + caseUnits(x.c), 0);
     const laborMonth = finished.filter((x) => x.at >= monthStart).reduce((s, x) => s + caseFee(x.c).total, 0);
+    // Flat OMR-per-unit commission: this month's completed units per
+    // category x the tech's configured rate for that category.
+    const myRates = rates[t.userId] ?? {};
+    const commissionMonth = finished
+      .filter((x) => x.at >= monthStart)
+      .reduce((sum, x) => {
+        const byCat = caseUnitsByCategory(x.c);
+        return sum + Object.entries(byCat).reduce((s, [cat, units]) => s + units * (Number(myRates[cat]) || 0), 0);
+      }, 0);
     return {
+      commissionMonth,
+      hasRates: Object.values(myRates).some((v) => Number(v) > 0),
       ...t,
       activeLoad: assigned.filter((c) => c.stageIndex < STAGE_INDEX.WORK_COMPLETE).length,
       unitsDay: unitsSince(dayStart),
@@ -1260,20 +1325,22 @@ export function TechniciansPanel({ lab, cases }) {
                 <th className="px-2 py-2.5 text-right">Month</th>
                 <th className="px-2 py-2.5 text-right">Year</th>
                 <th className="px-2 py-2.5 text-right">Value (OMR/mo)</th>
+                <th className="px-2 py-2.5 text-right">Commission (OMR/mo)</th>
                 <th className="px-2 py-2.5 text-right">Remake %</th>
+                <th className="px-2 py-2.5" />
               </tr>
             </thead>
             <tbody>
               {roster === null && !error && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-400">
                     Loading roster…
                   </td>
                 </tr>
               )}
               {roster !== null && rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-400">
                     No technicians yet — invite your team from the Staff tab.
                   </td>
                 </tr>
@@ -1305,8 +1372,19 @@ export function TechniciansPanel({ lab, cases }) {
                   <td className="px-2 py-2.5 text-right text-sm text-slate-600">{t.unitsMonth}</td>
                   <td className="px-2 py-2.5 text-right text-sm text-slate-600">{t.unitsYear}</td>
                   <td className="px-2 py-2.5 text-right text-sm text-slate-600">{fmtMoney(t.laborMonth)}</td>
+                  <td className="px-2 py-2.5 text-right text-sm font-semibold text-emerald-700">
+                    {t.hasRates ? fmtMoney(t.commissionMonth) : "—"}
+                  </td>
                   <td className="px-2 py-2.5 text-right text-sm text-slate-600">
                     {t.remakeRate == null ? "—" : `${t.remakeRate.toFixed(1)}%`}
+                  </td>
+                  <td className="px-2 py-2.5 text-right">
+                    <button
+                      onClick={() => setRatesFor(t)}
+                      className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-700"
+                    >
+                      Rates
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1321,6 +1399,15 @@ export function TechniciansPanel({ lab, cases }) {
         techs={techs}
         cases={activeCases}
         techNameById={techNameById}
+      />
+
+      <CommissionRatesModal
+        open={!!ratesFor}
+        tech={ratesFor}
+        labId={lab.id}
+        initial={ratesFor ? rates[ratesFor.userId] ?? {} : {}}
+        onClose={() => setRatesFor(null)}
+        onSaved={(userId, next) => setRates((r) => ({ ...r, [userId]: next }))}
       />
     </div>
   );
@@ -1603,3 +1690,87 @@ export function StaffPanel({ lab, meId }) {
 
 export default PriceListsManager;
 export { fmtMoney };
+
+/* ------------------------------------------------------------------ */
+/*  Commission rates — flat OMR per completed unit, per Rx category,   */
+/*  per technician ("Mr. Toney gets 5 OMR per zirconia unit").          */
+/* ------------------------------------------------------------------ */
+
+function CommissionRatesModal({ open, tech, labId, initial, onClose, onSaved }) {
+  const [draft, setDraft] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setDraft(Object.fromEntries(Object.entries(initial).map(([k, v]) => [k, String(v)])));
+    setError("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  if (!open) return null;
+
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const rates = {};
+      for (const [cat, v] of Object.entries(draft)) {
+        const n = Number(v);
+        if (n > 0) rates[cat] = n;
+      }
+      await saveCommissionRates(labId, tech.userId, rates);
+      onSaved(tech.userId, rates);
+      onClose();
+    } catch (err) {
+      setError("Couldn't save rates — " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+          <Wrench size={16} className="text-blue-600" />
+          <h3 className="min-w-0 truncate text-sm font-bold text-slate-800">Commission rates — {tech.name}</h3>
+          <button onClick={onClose} className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <p className="mb-3 text-[11px] text-slate-400">
+            OMR earned per completed unit of each procedure. Leave blank for no commission on that category.
+          </p>
+          <div className="space-y-1.5">
+            {CATEGORY_NAMES.map((cat) => (
+              <div key={cat} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{cat}</span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={draft[cat] ?? ""}
+                    onChange={(e) => setDraft((d) => ({ ...d, [cat]: e.target.value }))}
+                    placeholder="0"
+                    className="w-20 rounded-lg border border-transparent bg-gray-50 px-2 py-1.5 text-center text-sm text-slate-800 outline-none transition focus:bg-white focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-xs text-slate-400">OMR</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="border-t border-slate-100 p-4">
+          {error && <p className="mb-2 text-xs font-semibold text-rose-600">{error}</p>}
+          <button onClick={save} disabled={busy} className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-40">
+            {busy ? "Saving…" : "Save rates"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
