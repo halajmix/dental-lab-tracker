@@ -983,7 +983,7 @@ const emptyDraft = () => ({
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, labs, onSave, onSaveEdit, editing = null, userId, clinics = [], defaultClinicId = null }) {
+export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, editing = null, userId, clinics = [], defaultClinicId = null }) {
   const [notation, setNotation] = useState("FDI");
   const [mode, setMode] = useState("unit");
   const [selection, setSelection] = useState({}); // { universal: 'unit'|'pontic' }
@@ -1049,6 +1049,7 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, onSaveEd
   const [notes, setNotes] = useState("");
 
   const [touched, setTouched] = useState(false);
+  const [discardConfirm, setDiscardConfirm] = useState(false);
   const [step, setStep] = useState(1); // 1 = Patient & Lab, 2 = Clinical, 3 = Logistics
 
   // Brief green confirmation on the card that was just added/updated.
@@ -1128,7 +1129,79 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, onSaveEd
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  if (!open) return null;
+  const reset = () => {
+    setNotation("FDI"); setMode("unit"); setSelection({});
+    setPatientName(""); setPatientId(""); setPatientPhone(""); setShowPatientExtras(false);
+    setSelectedClinicId(defaultClinicId);
+    setIncluded([]); setIncludedOther("");
+    setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
+    setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
+    setCaseMode("restorations"); setRestorations([]); setDraftOpen(false); setDraftTouched(false); setDraft(emptyDraft());
+    setLabId(""); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]); setPickupRequested(false);
+    setImplantSystem(""); setAbutmentType(""); setAbutmentColor("");
+    setScans([]);
+    photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
+    setPhotos([]); setPhotoGroupId(crypto.randomUUID());
+    setNotes(""); setTouched(false); setDiscardConfirm(false);
+    setStep(1);
+  };
+
+  // A closed NEW-case form with content keeps living as a minimized pill —
+  // the draft already survives close (state stays mounted); this just makes
+  // that visible and offers resume / discard. Edits never minimize.
+  const hasDraft =
+    !isEditing &&
+    !wasEditingRef.current &&
+    !!(
+      patientName.trim() ||
+      patientId.trim() ||
+      patientPhone.trim() ||
+      restorations.length ||
+      Object.keys(selection).length ||
+      included.length ||
+      labId ||
+      insertionDate ||
+      notes.trim() ||
+      scans.length ||
+      photos.length ||
+      draftTouched
+    );
+
+  if (!open) {
+    if (!hasDraft) return null;
+    return (
+      <div className="fixed bottom-4 right-4 z-40 flex max-w-[calc(100vw-2rem)] items-center gap-1 rounded-full border border-blue-200 bg-white py-1.5 pl-4 pr-1.5 shadow-lg">
+        <FileText size={15} className="shrink-0 text-blue-600" />
+        <button type="button" onClick={onResume} className="min-w-0 truncate px-1 text-left text-sm font-semibold text-slate-700 hover:text-blue-700">
+          Unfinished Rx{patientName.trim() ? ` — ${patientName.trim()}` : ""}
+          <span className="ml-1.5 text-xs font-medium text-blue-600">Resume</span>
+        </button>
+        {discardConfirm ? (
+          <span className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => { reset(); setDiscardConfirm(false); }}
+              className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-700"
+            >
+              Discard
+            </button>
+            <button type="button" onClick={() => setDiscardConfirm(false)} className="rounded-full px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100">
+              Keep
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setDiscardConfirm(true)}
+            title="Discard this draft"
+            className="shrink-0 rounded-full p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+    );
+  }
 
   /* ---------------- selection handlers ---------------- */
   const toggleTooth = (u) =>
@@ -1424,22 +1497,6 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, onSaveEd
     .filter(([, bad]) => bad)
     .map(([k]) => MISSING_LABEL[k]);
 
-  const reset = () => {
-    setNotation("FDI"); setMode("unit"); setSelection({});
-    setPatientName(""); setPatientId(""); setPatientPhone(""); setShowPatientExtras(false);
-    setSelectedClinicId(defaultClinicId);
-    setIncluded([]); setIncludedOther("");
-    setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
-    setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
-    setCaseMode("restorations"); setRestorations([]); setDraftOpen(false); setDraftTouched(false); setDraft(emptyDraft());
-    setLabId(""); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]); setPickupRequested(false);
-    setImplantSystem(""); setAbutmentType(""); setAbutmentColor("");
-    setScans([]);
-    photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
-    setPhotos([]); setPhotoGroupId(crypto.randomUUID());
-    setNotes(""); setTouched(false);
-    setStep(1);
-  };
 
   // `opts.share` submits and immediately opens the share panel for the new case.
   const submit = (opts = {}) => {
@@ -2197,6 +2254,32 @@ export default function PrescriptionForm({ open, onClose, labs, onSave, onSaveEd
               <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
                 Cancel
               </button>
+              {/* Cancel keeps the draft (it minimizes to a pill); Discard
+                  actually throws the started prescription away. */}
+              {!isEditing && hasDraft && (
+                discardConfirm ? (
+                  <span className="flex items-center justify-center gap-1 sm:order-0">
+                    <button
+                      type="button"
+                      onClick={() => { reset(); onClose(); }}
+                      className="rounded-lg bg-rose-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-rose-700 sm:py-2"
+                    >
+                      Discard
+                    </button>
+                    <button type="button" onClick={() => setDiscardConfirm(false)} className="rounded-lg px-2.5 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 sm:py-2">
+                      Keep
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDiscardConfirm(true)}
+                    className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 sm:order-0 sm:py-2"
+                  >
+                    <Trash2 size={14} /> Discard draft
+                  </button>
+                )
+              )}
             </div>
           </div>
         </div>

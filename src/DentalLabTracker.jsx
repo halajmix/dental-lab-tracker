@@ -1207,6 +1207,7 @@ export default function DentalLabTracker({ auth }) {
         <PrescriptionForm
           open={showCaseModal}
           onClose={() => { setShowCaseModal(false); setEditingCase(null); }}
+          onResume={() => setShowCaseModal(true)}
           onSave={addCase}
           onSaveEdit={editCase}
           editing={editingCase}
