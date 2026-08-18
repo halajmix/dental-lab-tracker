@@ -48,7 +48,9 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: Deno.env.get("OTP_FROM_EMAIL") ?? "Dr-Crown <noreply@dr-crown.com>",
+        // Fixed sender: OTP_FROM_EMAIL is "Dr-Crown Security <...>" (set for the
+        // old device-OTP flow) — wrong voice for case/invite emails.
+        from: "Dr-Crown <noreply@dr-crown.com>",
         to: [to],
         subject,
         html,
@@ -168,7 +170,7 @@ Deno.serve(async (req) => {
         emailShell(
           `Join ${labName} on Dr-Crown`,
           `<p style="color:#475569">You've been invited to join <b>${labName}</b> as <b>${roles}</b>.</p>
-           <p style="color:#475569">Create your account with <b>this email address</b> and choose a password —
+           <p style="color:#475569">Create your account with <b>this email address</b> and choose a password &mdash;
            the invitation is linked to it, so after confirming your email you'll be offered to join
            ${labName} automatically.</p>
            <p style="margin:16px 0">
@@ -196,12 +198,12 @@ Deno.serve(async (req) => {
       // Dentist ticked "Request a lab pick-up" on the Rx form.
       const rxData = (record.prescription ?? {}) as Record<string, unknown>;
       const pickupLine = rxData.pickupRequested
-        ? `<p style="margin:10px 0;padding:8px 12px;background:#eff6ff;border-radius:8px;color:#1d4ed8;font-weight:600">&#128666; Pick-up requested — the clinic asks you to collect this case.</p>`
+        ? `<p style="margin:10px 0;padding:8px 12px;background:#eff6ff;border-radius:8px;color:#1d4ed8;font-weight:600">&#128666; Pick-up requested &mdash; the clinic asks you to collect this case.</p>`
         : "";
 
       const emailed = await sendEmail(
         recipient,
-        `New case from ${clinic?.name ?? "a clinic"} — ${record.patient_name}${rxData.pickupRequested ? " (pick-up requested)" : ""}`,
+        `New case from ${clinic?.name ?? "a clinic"}: ${record.patient_name}${rxData.pickupRequested ? " (pick-up requested)" : ""}`,
         emailShell(
           `New case sent to ${lab.name}`,
           `<p style="color:#475569">${clinic?.name ?? "A clinic"} just sent you a new case, case ID <b>${record.id}</b>.</p>${pickupLine}${caseSummaryRows(record)}`,
@@ -226,7 +228,7 @@ Deno.serve(async (req) => {
         clinic.email,
         `${lab?.name ?? "Your lab"} marked ${record.patient_name}'s case complete`,
         emailShell(
-          "Case complete — ready for pickup",
+          "Case complete: ready for pickup",
           `<p style="color:#475569">${lab?.name ?? "Your lab"} finished case <b>${record.id}</b> and it's ready to collect.</p>${caseSummaryRows(record)}`,
         ),
       );
