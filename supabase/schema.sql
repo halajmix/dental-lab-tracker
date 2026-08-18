@@ -2053,3 +2053,57 @@ alter table clinic_statements alter column clinic_id drop not null;
 alter table clinic_statements add column if not exists clinic_name text not null default '';
 alter table lab_payments alter column clinic_id drop not null;
 alter table lab_payments add column if not exists clinic_name text not null default '';
+
+/* --------------------------------------------------------------------- */
+/*  Phase 27 hotfix — cancellation guard broke for dentists              */
+/*                                                                       */
+/*  `new.lab_id = my_lab_id()` is NULL (not false) when my_lab_id() is   */
+/*  NULL — i.e. for every dentist — so `if not is_lab_writer` skipped    */
+/*  to the lab branch, which reverted the dentist's none->requested      */
+/*  transition. Live symptom: request saved a history entry but          */
+/*  cancel_status stayed 'none' and no badge appeared. coalesce() pins   */
+/*  the boolean.                                                         */
+/* --------------------------------------------------------------------- */
+
+create or replace function guard_case_cancellation()
+returns trigger
+as $$
+declare
+  is_lab_writer boolean;
+begin
+  if current_setting('role', true) = 'service_role' then
+    return new;
+  end if;
+  is_lab_writer := coalesce(new.lab_id = my_lab_id(), false);
+
+  if not is_lab_writer then
+    new.cancellation_fee := old.cancellation_fee;
+    if new.cancel_status is distinct from old.cancel_status then
+      if old.cancel_status = 'none' and new.cancel_status = 'requested'
+         and old.stage_index < 3 then
+        null; -- allowed: dentist requests before the work is complete
+      elsif old.cancel_status = 'requested' and new.cancel_status = 'none' then
+        null; -- allowed: dentist withdraws the request
+      else
+        new.cancel_status := old.cancel_status;
+      end if;
+    end if;
+  else
+    if new.cancel_status is distinct from old.cancel_status
+       and not (old.cancel_status = 'requested' and new.cancel_status in ('cancelled','declined'))
+       and not (old.cancel_status = 'declined' and new.cancel_status = 'none') then
+      new.cancel_status := old.cancel_status;
+    end if;
+    if new.cancellation_fee is not null then
+      if new.cancellation_fee < 0 then
+        raise exception 'Cancellation fee cannot be negative';
+      end if;
+      if new.total_price is not null and new.cancellation_fee > new.total_price then
+        raise exception 'Cancellation fee (%.3f OMR) cannot exceed the case price (%.3f OMR)',
+          new.cancellation_fee, new.total_price;
+      end if;
+    end if;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
