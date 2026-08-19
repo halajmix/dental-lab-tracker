@@ -454,6 +454,48 @@ function ClinicTierRow({ clinic, rule, schedules, busy, onChange, onClear }) {
 // Charged history window for the generated clinic price lists.
 const CHARGED_SINCE = "2026-01-01";
 
+// Maps a lab's historical procedure names ("Zircon Crown", "PFM Bridge")
+// onto the Rx form's category names so a clinic price list built from
+// history can auto-price future platform cases. Deliberately conservative:
+// temporaries, repairs, trays, retainers, night guards and other
+// one-off/auxiliary work stay unmapped (reference rows) — mapping a 3 OMR
+// temporary crown onto "Crown - tooth" would misprice every real crown.
+function mapToRxCategory(name) {
+  const s = String(name).toLowerCase();
+  if (/repair|temp\b|temporary|provisional|wax|tray|study|model|post|core|\bbar\b|guard|retainer|bleach/.test(s)) return null;
+  if (/implant/.test(s) && /bridge|fpd/.test(s)) return "Bridge - implant";
+  if (/implant/.test(s)) return "Crown - implant";
+  if (/maryland|resin\s*bond/.test(s)) return "Bridge - tooth (Resin Bonded)";
+  if (/bridge|fpd/.test(s)) return "Bridge - tooth (conventional)";
+  if (/veneer|laminate/.test(s)) return "Veneer";
+  if (/crown/.test(s)) return "Crown - tooth";
+  if (/michigan/.test(s)) return "Michigan splint";
+  if (/denture|rpd|\bpartial\b|flexible/.test(s)) return "Removable denture";
+  return null;
+}
+
+// One schedule item per mapped Rx category — the clinic's DOMINANT variant
+// (most billed, tie -> most recent) sets the price; its origin is kept in
+// the item's code (visible in CSV export). Unmapped items ride along under
+// their historical names as reference rows the pricing trigger ignores.
+function buildScheduleItemsFromHistory(items) {
+  const byCat = new Map();
+  const reference = [];
+  for (const it of items) {
+    const rx = mapToRxCategory(it.name);
+    if (!rx) {
+      reference.push(it);
+      continue;
+    }
+    const cur = byCat.get(rx);
+    if (!cur || it.count > cur.count || (it.count === cur.count && it.lastDate > cur.lastDate)) byCat.set(rx, it);
+  }
+  return [
+    ...[...byCat.entries()].map(([category, src]) => ({ category, code: `from ${src.name}`, basePrice: src.lastPrice })),
+    ...reference.map((it) => ({ category: it.name, code: "history reference", basePrice: it.lastPrice })),
+  ];
+}
+
 export function PriceListsManager({ lab, clinicsById, cases = [] }) {
   const [schedules, setSchedules] = useState(null); // null = loading
   const [rules, setRules] = useState([]);
@@ -815,7 +857,7 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                                     onClick={() =>
                                       mutate(async () => {
                                         const schedId = await createPriceSchedule(lab.id, c.name, {
-                                          items: c.items.map((it) => ({ category: it.name, basePrice: it.lastPrice })),
+                                          items: buildScheduleItemsFromHistory(c.items),
                                         });
                                         if (registered) {
                                           await upsertClinicPriceRule(lab.id, registered.id, { priceScheduleId: schedId });
@@ -833,10 +875,12 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                               {!editableCopy && (
                                 <p className="border-b border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-400">
                                   This view is read-only history. “Make editable price list” copies it into a price-list
-                                  card above where every item and price can be changed, added, or removed
+                                  card above where every item and price can be changed, added, or removed. Items marked
+                                  with an arrow map automatically onto the Rx form's categories (the most-billed variant
+                                  sets the price)
                                   {registered
-                                    ? " — and links it to this clinic so it prices their future cases (items named after the Rx form's categories price automatically; historical names are reference-only until renamed)."
-                                    : ". This clinic isn't registered on Dr-Crown yet, so the list is a rate reference until they join."}
+                                    ? " and will price this clinic's future cases; the rest ride along as reference rows."
+                                    : "; this clinic isn't registered on Dr-Crown yet, so the list is a rate reference until they join."}
                                 </p>
                               )}
                               <div className="overflow-x-auto">
@@ -854,6 +898,9 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                                           <p className="text-sm font-medium text-slate-700">{it.name}</p>
                                           <p className="text-[11px] text-slate-400">
                                             billed ×{it.count} ({it.units} unit{it.units === 1 ? "" : "s"})
+                                            {mapToRxCategory(it.name) && (
+                                              <span className="ml-1.5 text-blue-500">→ {mapToRxCategory(it.name)}</span>
+                                            )}
                                           </p>
                                         </td>
                                         <td className="px-2 py-2 text-right align-top">
