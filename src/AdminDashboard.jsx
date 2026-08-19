@@ -20,6 +20,8 @@ import {
   Wrench,
   UserCog,
   Crown,
+  Clock,
+  Check,
 } from "lucide-react";
 import {
   fetchAllClinics,
@@ -30,6 +32,7 @@ import {
   adminDeleteOrg,
   adminDeleteCase,
   adminSetLabStatus,
+  adminSetClinicStatus,
   adminSetLabRoles,
   adminTransferLabOwnership,
   adminFetchPriceSchedules,
@@ -46,6 +49,14 @@ import { AnalyticsDashboard } from "./Analytics.jsx";
 /*  independently re-checks role='admin' server-side — this file is not */
 /*  the security boundary, just the UI for it.                          */
 /* ------------------------------------------------------------------ */
+
+function StatusBadge({ status }) {
+  if (status === "pending")
+    return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Pending</span>;
+  if (status === "suspended")
+    return <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Suspended</span>;
+  return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Active</span>;
+}
 
 function StatCard({ icon: Icon, label, value, tone, sub }) {
   return (
@@ -137,6 +148,12 @@ export default function AdminDashboard({ auth }) {
     const d = new Date(c.createdDate);
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }).length;
+
+  // Phase 30: new signups wait as 'pending' until activated from here.
+  const pendingOrgs = [
+    ...clinics.filter((c) => c.status === "pending").map((c) => ({ ...c, kind: "clinic" })),
+    ...labs.filter((l) => l.status === "pending").map((l) => ({ ...l, kind: "lab" })),
+  ];
 
   const stageCounts = STAGES.map((_, i) => cases.filter((c) => c.stageIndex === i).length);
   const maxStageCount = Math.max(1, ...stageCounts);
@@ -262,6 +279,47 @@ export default function AdminDashboard({ auth }) {
               <p className="text-sm text-slate-500">Every clinic and lab on Dr-Crown, at a glance.</p>
             </div>
 
+            {/* Phase 30 — new signups queue here until activated */}
+            {pendingOrgs.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-amber-800">
+                  <Clock size={15} /> Awaiting activation ({pendingOrgs.length})
+                </h3>
+                <p className="mt-0.5 text-xs text-amber-700">
+                  New accounts can't use Dr-Crown until you activate them.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {pendingOrgs.map((o) => (
+                    <div
+                      key={`${o.kind}-${o.id}`}
+                      className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-800">
+                          {o.name}
+                          <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-slate-500">
+                            {o.kind}
+                          </span>
+                        </p>
+                        <p className="truncate text-xs text-slate-500">{[o.dentist, o.email, o.contact].filter(Boolean).join(" · ") || "—"}</p>
+                      </div>
+                      <button
+                        onClick={() =>
+                          runAction(() =>
+                            o.kind === "lab" ? adminSetLabStatus(o.id, "active") : adminSetClinicStatus(o.id, "active")
+                          )
+                        }
+                        disabled={busy}
+                        className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                      >
+                        <Check size={13} /> Activate
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Top-level totals */}
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <StatCard icon={Building2} tone="text-blue-500" label="Clinics" value={clinics.length} />
@@ -308,12 +366,13 @@ export default function AdminDashboard({ auth }) {
                       <th className="px-5 py-2">Email</th>
                       <th className="px-5 py-2">Cases</th>
                       <th className="px-5 py-2">Login</th>
+                      <th className="px-5 py-2">Status</th>
                       <th className="px-5 py-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {clinics.length === 0 && (
-                      <tr><td colSpan={6} className="px-5 py-6 text-center text-slate-400">No clinics yet.</td></tr>
+                      <tr><td colSpan={7} className="px-5 py-6 text-center text-slate-400">No clinics yet.</td></tr>
                     )}
                     {clinics.map((c) => (
                       <tr key={c.id} className="hover:bg-slate-50/60">
@@ -329,7 +388,41 @@ export default function AdminDashboard({ auth }) {
                           )}
                         </td>
                         <td className="px-5 py-2.5">
+                          <StatusBadge status={c.status} />
+                        </td>
+                        <td className="px-5 py-2.5">
                           <div className="flex justify-end gap-1.5">
+                            {c.ownerId && c.status === "pending" && (
+                              <button
+                                onClick={() => runAction(() => adminSetClinicStatus(c.id, "active"))}
+                                disabled={busy}
+                                className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                                title="Activate this clinic"
+                              >
+                                <Check size={12} /> Activate
+                              </button>
+                            )}
+                            {c.ownerId && c.status !== "pending" && (
+                              <button
+                                onClick={() =>
+                                  c.status === "suspended"
+                                    ? runAction(() => adminSetClinicStatus(c.id, "active"))
+                                    : setConfirmTarget({
+                                        message: `Suspend "${c.name}"? The dentist loses access to all their cases instantly until re-activated.`,
+                                        run: () => adminSetClinicStatus(c.id, "suspended"),
+                                      })
+                                }
+                                disabled={busy}
+                                className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold disabled:opacity-60 ${
+                                  c.status === "suspended"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                    : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                }`}
+                                title={c.status === "suspended" ? "Re-activate this clinic" : "Suspend this clinic"}
+                              >
+                                <Power size={12} /> {c.status === "suspended" ? "Activate" : "Suspend"}
+                              </button>
+                            )}
                             {c.ownerId && (
                               <button
                                 onClick={() => viewAs(c.ownerId)}
@@ -391,15 +484,21 @@ export default function AdminDashboard({ auth }) {
                           )}
                         </td>
                         <td className="px-5 py-2.5">
-                          {l.status === "suspended" ? (
-                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Suspended</span>
-                          ) : (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Active</span>
-                          )}
+                          <StatusBadge status={l.status} />
                         </td>
                         <td className="px-5 py-2.5">
                           <div className="flex justify-end gap-1.5">
-                            {l.ownerId && (
+                            {l.ownerId && l.status === "pending" && (
+                              <button
+                                onClick={() => runAction(() => adminSetLabStatus(l.id, "active"))}
+                                disabled={busy}
+                                className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                                title="Activate this lab"
+                              >
+                                <Check size={12} /> Activate
+                              </button>
+                            )}
+                            {l.ownerId && l.status !== "pending" && (
                               <button
                                 onClick={() =>
                                   l.status === "suspended"

@@ -72,6 +72,8 @@ export const clinicFromRow = (r) => ({
   dentistLicense: r.dentist_license ?? "",
   email: r.email ?? "",
   ownerId: r.owner_id ?? null,
+  // Phase 30 activation gate — rows created before the column existed are active.
+  status: r.status ?? "active",
 });
 
 export async function fetchClinicsByIds(ids) {
@@ -607,6 +609,10 @@ export async function adminGetImpersonationToken(userId) {
 
 export async function adminSetLabStatus(labId, status) {
   await callAdminAction("set-lab-status", { labId, status });
+}
+
+export async function adminSetClinicStatus(clinicId, status) {
+  await callAdminAction("set-clinic-status", { clinicId, status });
 }
 
 export async function adminSetLabRoles(userId, labId, roles) {

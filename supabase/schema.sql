@@ -2136,3 +2136,53 @@ begin
   return new;
 end;
 $$ language plpgsql;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 30 — super-admin activation gate for new accounts              */
+/*                                                                       */
+/*  New self-registered labs AND clinics now start as 'pending' and stay */
+/*  dark (no cases, invisible to the other side) until the super admin   */
+/*  activates them from the Admin Dashboard. Existing rows are           */
+/*  grandfathered to 'active' by the column defaults at add time.        */
+/*  Orphan/unclaimed rows stay 'active' on purpose: the claim flows      */
+/*  go through my_lab_id()/my_clinic_id(), which now require an active   */
+/*  org — a pending orphan would make the claim a silent RLS no-op.      */
+/* --------------------------------------------------------------------- */
+
+-- labs: 'pending' joins the active|suspended lifecycle; new rows pending.
+alter table labs drop constraint if exists labs_status_check;
+alter table labs add constraint labs_status_check
+  check (status in ('pending', 'active', 'suspended'));
+alter table labs alter column status set default 'pending';
+
+-- clinics get the same lifecycle. Adding the column with default 'active'
+-- stamps every EXISTING clinic as active; only then does the default flip
+-- to 'pending' for future signups.
+alter table clinics add column if not exists status text not null default 'active'
+  check (status in ('pending', 'active', 'suspended'));
+alter table clinics alter column status set default 'pending';
+
+-- my_clinic_id() now mirrors my_lab_id(): it resolves only while the
+-- clinic is active, so every clinic-side policy (cases, case_notes,
+-- statements, …) goes dark for pending/suspended clinics in one place.
+-- The dentist can still read their own clinic row (clinics_select owner
+-- branch) — that's what lets the client show the "awaiting activation"
+-- screen instead of a blank app.
+create or replace function my_clinic_id()
+returns uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select p.clinic_id from profiles p
+  join clinics c on c.id = p.clinic_id
+  where p.id = auth.uid()
+    and c.status = 'active';
+$$;
+
+create or replace function my_owned_clinic_ids()
+returns setof uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select id from clinics where owner_id = auth.uid() and status = 'active';
+$$;

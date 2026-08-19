@@ -21,7 +21,11 @@
  *   delete-case    — { caseId } -> deletes one case row
  *   set-lab-status — { labId, status: "active"|"suspended" } -> tenant on/off;
  *                    a suspended lab's members lose all data access via
- *                    my_lab_id() until re-activated
+ *                    my_lab_id() until re-activated. Also how a 'pending'
+ *                    (Phase 30 signup-approval) lab gets activated.
+ *   set-clinic-status — { clinicId, status: "active"|"suspended" } -> same
+ *                    lifecycle for clinics via my_clinic_id(); activates
+ *                    'pending' new-signup clinics and can suspend one.
  *   set-lab-role   — { userId, labId, roles: ["lab_admin"?, "lab_tech"?] } ->
  *                    sync a member's lab_members rows to exactly those roles
  *                    (e.g. upgrade a tech to dual-role). At least one role
@@ -155,6 +159,17 @@ Deno.serve(async (req) => {
           return json({ error: "labId and status (active|suspended) required" }, 400);
         }
         const { error } = await admin.from("labs").update({ status }).eq("id", labId);
+        if (error) throw error;
+        return json({ ok: true });
+      }
+
+      case "set-clinic-status": {
+        const clinicId = String(body.clinicId ?? "");
+        const status = String(body.status ?? "");
+        if (!clinicId || (status !== "active" && status !== "suspended")) {
+          return json({ error: "clinicId and status (active|suspended) required" }, 400);
+        }
+        const { error } = await admin.from("clinics").update({ status }).eq("id", clinicId);
         if (error) throw error;
         return json({ ok: true });
       }

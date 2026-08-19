@@ -649,7 +649,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId }) {
   );
 }
 
-function SuspendedScreen({ labName, onSignOut }) {
+function SuspendedScreen({ labName, message, onSignOut }) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-6 py-20 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
@@ -658,7 +658,7 @@ function SuspendedScreen({ labName, onSignOut }) {
       <div>
         <h3 className="text-sm font-bold text-rose-700">Account suspended</h3>
         <p className="mt-1 max-w-sm text-sm text-rose-600">
-          Your access to {labName || "this lab"} has been suspended. Contact your lab administrator.
+          {message || `Your access to ${labName || "this lab"} has been suspended. Contact your lab administrator.`}
         </p>
       </div>
       <button
@@ -667,6 +667,50 @@ function SuspendedScreen({ labName, onSignOut }) {
       >
         <LogOut size={15} /> Sign out
       </button>
+    </div>
+  );
+}
+
+/* Phase 30 — new clinics and labs start 'pending' and see this screen
+   until the Dr-Crown super admin activates them. RLS keeps a pending org
+   fully dark server-side; this is just the honest face on top of it. */
+function PendingApprovalScreen({ orgType, orgName, onRefresh, onSignOut }) {
+  const [checking, setChecking] = useState(false);
+  const check = async () => {
+    setChecking(true);
+    try {
+      await onRefresh?.();
+    } finally {
+      setChecking(false);
+    }
+  };
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-6 py-20 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">
+        <Clock size={22} />
+      </div>
+      <div>
+        <h3 className="text-sm font-bold text-amber-800">Awaiting activation</h3>
+        <p className="mt-1 max-w-sm text-sm text-amber-700">
+          {orgName ? `"${orgName}"` : `Your ${orgType}`} has been registered and is waiting for the
+          Dr-Crown team to review and activate it. You'll get full access as soon as it's approved.
+        </p>
+      </div>
+      <div className="flex flex-col items-center gap-2 sm:flex-row">
+        <button
+          onClick={check}
+          disabled={checking}
+          className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+        >
+          <RefreshCcw size={15} className={checking ? "animate-spin" : ""} /> Check again
+        </button>
+        <button
+          onClick={onSignOut}
+          className="flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+        >
+          <LogOut size={15} /> Sign out
+        </button>
+      </div>
     </div>
   );
 }
@@ -693,6 +737,14 @@ export default function DentalLabTracker({ auth }) {
   const isDualLab = hasAdminRole && hasTechRole;
   // Mirrors RLS: my_lab_id() nulls out when ANY membership row is suspended.
   const isSuspended = !isDentist && memberships.some((m) => m.status === "suspended");
+  // Phase 30 signup-approval gate: the whole org (clinic or lab) is pending
+  // admin activation, or was suspended platform-wide by the admin. RLS-side
+  // my_clinic_id()/my_lab_id() already return null for these, so the data
+  // is dark regardless — these flags just pick the right screen.
+  const orgStatus = (isDentist ? clinic?.status : lab?.status) ?? "active";
+  const isPendingApproval = orgStatus === "pending";
+  const isOrgSuspended = orgStatus === "suspended";
+  const orgBlocked = isPendingApproval || isOrgSuspended;
 
   const [workspacePref, setWorkspacePref] = useState(() => {
     try {
@@ -824,7 +876,9 @@ export default function DentalLabTracker({ auth }) {
   // dentists can no longer create placeholder lab rows themselves.
   // Suspended labs (deactivated tenants) drop out of dentist-facing pickers;
   // labById still resolves their names on old cases.
-  const registeredLabs = useMemo(() => labs.filter((l) => l.ownerId && l.status !== "suspended"), [labs]);
+  // Dentists only ever see fully activated labs — 'pending' (awaiting admin
+  // approval, Phase 30) and 'suspended' labs are both hidden.
+  const registeredLabs = useMemo(() => labs.filter((l) => l.ownerId && l.status === "active"), [labs]);
 
   // Which case's lifecycle drawer is open.
   const [drawerCaseId, setDrawerCaseId] = useState(null);
@@ -1052,10 +1106,10 @@ export default function DentalLabTracker({ auth }) {
           </div>
 
           <div className="flex items-center gap-2">
-            {isDualLab && !isSuspended && (
+            {isDualLab && !isSuspended && !orgBlocked && (
               <WorkspaceSwitcher workspace={activeWorkspace} onChange={switchWorkspace} />
             )}
-            {(isDentist || hasAdminRole) && (
+            {(isDentist || hasAdminRole) && !orgBlocked && (
               <button
                 onClick={() => setShowSettings(true)}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
@@ -1073,7 +1127,7 @@ export default function DentalLabTracker({ auth }) {
               onSignOut={signOut}
               onOpenProfile={() => setShowProfileSettings(true)}
             />
-            {isDentist && (
+            {isDentist && !orgBlocked && (
               <button
                 onClick={() => setShowCaseModal(true)}
                 className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
@@ -1095,7 +1149,7 @@ export default function DentalLabTracker({ auth }) {
             governorate can't join the Rx form's "Near you" lab grouping.
             One button opens the right editor directly. Lab side gates on
             hasAdminRole (techs can't open Lab Settings to fix it). */}
-        {!loadingData && isDentist && myClinics.some((c) => !c.governorate) && (
+        {!loadingData && !orgBlocked && isDentist && myClinics.some((c) => !c.governorate) && (
           <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-start gap-2 text-sm font-medium text-amber-800">
               <MapPin size={16} className="mt-0.5 shrink-0" />
@@ -1112,7 +1166,7 @@ export default function DentalLabTracker({ auth }) {
             </button>
           </div>
         )}
-        {!loadingData && !isDentist && lab && hasAdminRole && !isSuspended && !lab.governorate && (
+        {!loadingData && !orgBlocked && !isDentist && lab && hasAdminRole && !isSuspended && !lab.governorate && (
           <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-start gap-2 text-sm font-medium text-amber-800">
               <MapPin size={16} className="mt-0.5 shrink-0" />
@@ -1131,6 +1185,18 @@ export default function DentalLabTracker({ auth }) {
         )}
         {loadingData ? (
           <div className="flex items-center justify-center py-24 text-sm text-slate-400">Loading…</div>
+        ) : isPendingApproval ? (
+          <PendingApprovalScreen
+            orgType={isDentist ? "clinic" : "lab"}
+            orgName={isDentist ? clinic?.name : lab?.name}
+            onRefresh={refreshProfile}
+            onSignOut={signOut}
+          />
+        ) : isOrgSuspended ? (
+          <SuspendedScreen
+            message={`${(isDentist ? clinic?.name : lab?.name) || (isDentist ? "Your clinic" : "Your lab")} has been suspended by Dr-Crown. Contact support to restore access.`}
+            onSignOut={signOut}
+          />
         ) : isDentist ? (
           <DentistDashboard
             labById={labById}
@@ -1212,7 +1278,7 @@ export default function DentalLabTracker({ auth }) {
           editing={editingCase}
           labs={registeredLabs}
           userId={auth.session?.user?.id}
-          clinics={myClinics}
+          clinics={myClinics.filter((c) => c.status === "active")}
           defaultClinicId={clinic?.id}
         />
       )}
@@ -1243,11 +1309,23 @@ export default function DentalLabTracker({ auth }) {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-semibold text-slate-800">{c.name}</p>
-                      {c.id === clinic?.id && (
-                        <span className="inline-flex shrink-0 items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
-                          Default
-                        </span>
-                      )}
+                      <span className="flex shrink-0 items-center gap-1">
+                        {c.status === "pending" && (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+                            Awaiting approval
+                          </span>
+                        )}
+                        {c.status === "suspended" && (
+                          <span className="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-inset ring-rose-200">
+                            Suspended
+                          </span>
+                        )}
+                        {c.id === clinic?.id && (
+                          <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
+                            Default
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <p className="mt-0.5 text-xs text-slate-500">
                       {[c.wilayat, c.governorate].filter(Boolean).join(", ") || "No location set"}
