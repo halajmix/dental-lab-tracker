@@ -92,6 +92,29 @@ export async function downloadStatementPdf({ lab, clinic, statement, cases, paid
     y += 5.5;
   }
 
+  // Imported-history statements have no linked cases — their detail rides
+  // on the statement itself as line_items (Phase 31).
+  if (!cases.length && statement.lineItems?.length) {
+    for (const li of statement.lineItems) {
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+        headerRow();
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+      }
+      const when = li.date ? new Date(li.date + "T00:00:00").toLocaleDateString("en-GB") : "";
+      const work = [li.procedure, li.dentist].filter(Boolean).join(" — ");
+      const patient = [li.invoice ? `#${li.invoice}` : "", li.patient ?? ""].filter(Boolean).join(" ");
+      doc.text(when, cols.date, y);
+      doc.text(doc.splitTextToSize(patient, 56)[0] ?? "", cols.patient, y);
+      doc.text(doc.splitTextToSize(work, 62)[0] ?? "", cols.type, y);
+      doc.text(li.units != null ? String(li.units) : "—", cols.units, y, { align: "right" });
+      doc.text(fmt(li.amount ?? 0), cols.amount, y, { align: "right" });
+      y += 5.5;
+    }
+  }
+
   // Totals
   y += 3;
   doc.setDrawColor(226, 232, 240);

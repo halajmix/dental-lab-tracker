@@ -2186,3 +2186,16 @@ set search_path = public
 as $$
   select id from clinics where owner_id = auth.uid() and status = 'active';
 $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 31 — imported statement line items                             */
+/*                                                                       */
+/*  Statements generated from live cases are itemized via               */
+/*  cases.statement_id; statements imported from a lab's historical      */
+/*  Excel have no case rows, so the line detail (invoice no, dentist,    */
+/*  patient, procedure, units, price) rides along as jsonb instead.      */
+/*  Shape: [{ date, invoice, dentist, patient, procedure, units,        */
+/*  price, amount }]. Empty for platform-generated statements.          */
+/* --------------------------------------------------------------------- */
+
+alter table clinic_statements add column if not exists line_items jsonb not null default '[]'::jsonb;

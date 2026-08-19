@@ -19,7 +19,7 @@ export const IMPORT_CATEGORIES = [
   {
     id: "work",
     label: "All work done per month",
-    hint: "Columns: clinic, date, amount — optional: patient, work. Rows are grouped into one statement per clinic per month. Don't also import Bills for the same months (double-counts).",
+    hint: "Columns: clinic, date, amount — optional: invoice no, doctor, patient, procedure, unit, price. Rows are grouped into one statement per clinic per month; the per-row detail is kept as statement line items. Don't also import Bills for the same months (double-counts).",
   },
   {
     id: "money_in",
@@ -136,6 +136,12 @@ export function mapImportRows(categoryId, rows) {
   const kCategory = findKey(keys, [/categor/i, /item/i, /expense/i]);
   const kDesc = findKey(keys, [/desc/i, /detail/i, /note/i, /patient/i, /work/i, /particular/i]);
   const kTech = findKey(keys, [/tech/i, /staff/i, /^name$/i, /employee/i]);
+  // Line-item detail for the "work" category (all optional).
+  const kDoctor = findKey(keys, [/doctor/i, /dentist/i, /^dr\.?\s/i]);
+  const kPatient = findKey(keys, [/patient/i]);
+  const kProc = findKey(keys, [/procedure/i, /^work/i, /treatment/i, /descript/i]);
+  const kUnit = findKey(keys, [/^units?\b/i, /qty/i, /quantit/i]);
+  const kPrice = findKey(keys, [/^price\b/i, /unit\s*price/i, /rate/i]);
 
   const clinicOf = (r) => String(kClinic ? r[kClinic] : "").trim();
   const dateOf = (r) => (kDate ? toIsoDate(r[kDate]) : null);
@@ -151,19 +157,36 @@ export function mapImportRows(categoryId, rows) {
       out.statements.push({ clinicName: clinic, month: monthOf(date), total, paid: Math.min(paid, total) });
     }
   } else if (categoryId === "work") {
+    // Each row is one piece of work; rows group into one statement per
+    // clinic per month, keeping the row detail as statement line items.
     const groups = new Map();
+    const str = (k, r) => String(k ? r[k] : "").trim();
     for (const r of rows) {
       const clinic = clinicOf(r);
       const date = dateOf(r);
       const amount = amountOf(r);
       if (!clinic || !date || !amount) { out.skipped++; continue; }
       const key = `${clinic}::${monthOf(date)}`;
-      groups.set(key, (groups.get(key) ?? 0) + amount);
+      const g = groups.get(key) ?? { total: 0, lines: [] };
+      g.total += amount;
+      g.lines.push({
+        date,
+        invoice: str(kRef, r),
+        dentist: str(kDoctor, r),
+        patient: str(kPatient, r),
+        procedure: str(kProc, r),
+        units: kUnit ? num(r[kUnit]) : null,
+        price: kPrice ? num(r[kPrice]) : null,
+        amount,
+      });
+      groups.set(key, g);
     }
-    for (const [key, total] of groups) {
+    for (const [key, g] of groups) {
       const [clinicName, month] = key.split("::");
-      out.statements.push({ clinicName, month, total, paid: 0 });
+      g.lines.sort((a, b) => a.date.localeCompare(b.date));
+      out.statements.push({ clinicName, month, total: g.total, paid: 0, lineItems: g.lines });
     }
+    out.statements.sort((a, b) => a.month.localeCompare(b.month) || a.clinicName.localeCompare(b.clinicName));
   } else if (categoryId === "money_in") {
     for (const r of rows) {
       const clinic = clinicOf(r);

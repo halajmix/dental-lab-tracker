@@ -694,6 +694,9 @@ const statementFromRow = (r) => ({
   total: Number(r.total) || 0,
   status: r.status,
   createdAt: r.created_at,
+  // Imported-history statements carry their per-row detail here (Phase 31);
+  // platform-generated statements itemize via cases.statement_id instead.
+  lineItems: r.line_items ?? [],
 });
 
 const paymentFromRow = (r) => ({
@@ -845,10 +848,24 @@ const chunked = async (rows, insertChunk) => {
 export async function importFinanceRows(labId, { statements = [], payments = [], expenses = [] }) {
   // Statements first: each may carry an already-paid amount that becomes an
   // allocated payment row, so status/recompute land correctly via trigger.
-  for (const st of statements) {
+  // Fully-unpaid statements (the whole "work done" category) don't need the
+  // returned id, so they insert in bulk — a multi-year history import is
+  // 1,000+ statements and one-by-one takes minutes.
+  const stRow = (st) => {
+    const row = { lab_id: labId, clinic_id: null, clinic_name: st.clinicName, month: st.month, total: st.total };
+    // Omitted when empty so categories without line detail still import on
+    // databases where the Phase 31 column hasn't been added yet.
+    if (st.lineItems?.length) row.line_items = st.lineItems;
+    return row;
+  };
+  await chunked(statements.filter((st) => !(st.paid > 0)), async (batch) => {
+    const { error } = await supabase.from("clinic_statements").insert(batch.map(stRow));
+    if (error) throw error;
+  });
+  for (const st of statements.filter((st) => st.paid > 0)) {
     const { data, error } = await supabase
       .from("clinic_statements")
-      .insert({ lab_id: labId, clinic_id: null, clinic_name: st.clinicName, month: st.month, total: st.total })
+      .insert(stRow(st))
       .select()
       .single();
     if (error) throw error;
