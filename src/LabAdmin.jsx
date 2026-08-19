@@ -476,9 +476,13 @@ function mapToRxCategory(name) {
 
 // One schedule item per mapped Rx category — the clinic's DOMINANT variant
 // (most billed, tie -> most recent) sets the price; its origin is kept in
-// the item's code (visible in CSV export). Unmapped items ride along under
-// their historical names as reference rows the pricing trigger ignores.
-function buildScheduleItemsFromHistory(items) {
+// the item's code (visible in CSV export). Rx categories the clinic's
+// history never covered are filled from the lab's master list (falling
+// back to the platform's standard estimates), so EVERY new case from this
+// clinic auto-prices instead of silently staying blank. Unmapped items
+// ride along under their historical names as reference rows the pricing
+// trigger ignores.
+function buildScheduleItemsFromHistory(items, masterItems = []) {
   const byCat = new Map();
   const reference = [];
   for (const it of items) {
@@ -490,8 +494,16 @@ function buildScheduleItemsFromHistory(items) {
     const cur = byCat.get(rx);
     if (!cur || it.count > cur.count || (it.count === cur.count && it.lastDate > cur.lastDate)) byCat.set(rx, it);
   }
+  const fills = [];
+  for (const category of CATEGORY_NAMES) {
+    if (byCat.has(category)) continue;
+    const master = masterItems.find((m) => m.category === category);
+    const basePrice = master?.basePrice ?? BASE_PRICE[category];
+    if (basePrice != null) fills.push({ category, code: master ? "master list rate" : "standard estimate", basePrice });
+  }
   return [
     ...[...byCat.entries()].map(([category, src]) => ({ category, code: `from ${src.name}`, basePrice: src.lastPrice })),
+    ...fills,
     ...reference.map((it) => ({ category: it.name, code: "history reference", basePrice: it.lastPrice })),
   ];
 }
@@ -857,10 +869,20 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                                     onClick={() =>
                                       mutate(async () => {
                                         const schedId = await createPriceSchedule(lab.id, c.name, {
-                                          items: buildScheduleItemsFromHistory(c.items),
+                                          items: buildScheduleItemsFromHistory(
+                                            c.items,
+                                            (schedules ?? []).find((s) => s.isDefault)?.items ?? []
+                                          ),
                                         });
                                         if (registered) {
                                           await upsertClinicPriceRule(lab.id, registered.id, { priceScheduleId: schedId });
+                                          // Existing unbilled cases from this clinic pick the new
+                                          // list up immediately (manual prices stay untouched).
+                                          const n = await repriceUnbilledCases();
+                                          setRepriceState({
+                                            confirming: false,
+                                            message: `"${c.name}" list created and linked — ${n} unbilled case${n === 1 ? "" : "s"} repriced.`,
+                                          });
                                         }
                                       })
                                     }
