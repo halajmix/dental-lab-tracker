@@ -1578,6 +1578,7 @@ function DentistDashboard({
                 <th className="px-4 py-3 font-semibold">Clinic → Lab</th>
                 <th className="px-4 py-3 font-semibold">Appt Date</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold text-right">Price</th>
                 <th className="px-4 py-3 font-semibold text-right">Cancellation fee</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
@@ -1585,7 +1586,7 @@ function DentistDashboard({
             <tbody className="divide-y divide-slate-100">
               {cases.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">
                     No cases match the current filters.
                   </td>
                 </tr>
@@ -1671,6 +1672,18 @@ function DentistDashboard({
                           <CheckCheck size={11} /> {c.handover.type === "Delivered to Clinic" ? "Delivered" : "Picked Up"}
                         </span>
                       </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 align-top text-right whitespace-nowrap">
+                    {c.totalPrice != null ? (
+                      <span
+                        className="font-semibold text-slate-700"
+                        title={c.priceOverridden ? "Final price set by the lab" : "Estimated from the lab's price list — the lab may adjust it"}
+                      >
+                        {Number(c.totalPrice).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
                     )}
                   </td>
                   <td className="px-4 py-3.5 align-top text-right whitespace-nowrap">

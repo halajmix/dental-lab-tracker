@@ -24,11 +24,12 @@ import {
   RotateCcw,
   Pencil,
   Layers3,
+  Banknote,
   Truck,
   MapPin,
   Search,
 } from "lucide-react";
-import { uploadCasePhoto } from "./lib/data.js";
+import { uploadCasePhoto, estimateCasePrice } from "./lib/data.js";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -1040,6 +1041,12 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   const [abutmentColor, setAbutmentColor] = useState("");
   const [insertionDate, setInsertionDate] = useState("");
 
+  // Live expected price (Phase 33): recomputed as the dentist picks items,
+  // via a security-definer RPC that applies THIS clinic's price agreement
+  // (clinic rule -> lab default). Best-effort — null just hides the chip.
+  const [expectedPrice, setExpectedPrice] = useState(null);
+  const estimateSeq = useRef(0);
+
   const [scans, setScans] = useState([]);
   // Real uploads to Supabase Storage (bucket `case-photos`), not simulated —
   // the lab reads these directly off the case. Grouped under one client-side
@@ -1375,6 +1382,27 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       : procTat(category);
   const effTat = baseTat;
   const today = new Date();
+  // Debounced live estimate — fires whenever the priced inputs change.
+  useEffect(() => {
+    const clinicId = selectedClinicId || defaultClinicId;
+    const hasItems = caseMode === "restorations" ? restorations.length > 0 : !!category;
+    if (!open || !labId || !clinicId || !hasItems) {
+      setExpectedPrice(null);
+      return;
+    }
+    const rx =
+      caseMode === "restorations"
+        ? { restorations: restorations.map((r) => ({ category: r.category, teeth: r.teeth })) }
+        : { category, teeth: selectedTeeth };
+    const seq = ++estimateSeq.current;
+    const t = setTimeout(async () => {
+      const n = await estimateCasePrice(labId, clinicId, rx);
+      if (seq === estimateSeq.current) setExpectedPrice(n);
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, labId, selectedClinicId, defaultClinicId, caseMode, restorations, category, selectedTeeth]);
+
   const estReady = lab ? addDays(today, effTat) : null;
   const insufficientTime =
     insertionDate && estReady && new Date(insertionDate) < new Date(iso(estReady));
@@ -2205,6 +2233,15 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               </>
             )}
             <span className="ml-auto flex shrink-0 items-center gap-3">
+              {expectedPrice != null && (
+                <span
+                  className="flex items-center gap-1 font-semibold text-emerald-700"
+                  title="Expected price from your price agreement with this lab — the lab may adjust the final amount"
+                >
+                  <Banknote size={12} className="text-emerald-500" />
+                  ~{Number(expectedPrice).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR
+                </span>
+              )}
               <span className={`flex items-center gap-1 font-semibold ${insufficientTime ? "text-rose-600" : "text-slate-700"}`}>
                 <Calendar size={12} className="text-slate-400" />
                 Ready {estReady ? iso(estReady) : "—"}

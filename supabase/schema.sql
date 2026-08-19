@@ -2314,3 +2314,73 @@ begin
   return new;
 end;
 $$ language plpgsql;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 33 — dentist-side expected-price estimate                      */
+/*                                                                       */
+/*  Dentists can't read the lab's price tables (Phase 17 keeps them      */
+/*  lab-only), so the Rx form asks this SECURITY DEFINER function for a  */
+/*  live estimate instead. It mirrors price_case()'s itemization for a   */
+/*  hypothetical prescription and only answers for a clinic the caller   */
+/*  actually owns — no price-list contents ever leave the database,      */
+/*  just the one computed number the clinic would be charged anyway.     */
+/* --------------------------------------------------------------------- */
+
+create or replace function estimate_case_price(p_lab uuid, p_clinic uuid, p_prescription jsonb)
+returns numeric
+language plpgsql security definer stable
+set search_path = public
+as $$
+declare
+  sched uuid;
+  disc numeric := 0;
+  base numeric := 0;
+  priced boolean := false;
+  r record;
+  p numeric;
+begin
+  if p_lab is null or p_clinic is null or p_prescription is null then
+    return null;
+  end if;
+  -- only the clinic's own dentist (or its member) may ask about its rates
+  if not (p_clinic in (select my_owned_clinic_ids()) or p_clinic = my_clinic_id()) then
+    return null;
+  end if;
+
+  select cpr.price_schedule_id, coalesce(cpr.discount_pct, 0)
+    into sched, disc
+    from clinic_price_rules cpr
+   where cpr.lab_id = p_lab and cpr.clinic_id = p_clinic;
+  if sched is null then
+    select ps.id into sched from price_schedules ps
+     where ps.lab_id = p_lab and ps.is_default
+     limit 1;
+  end if;
+  if sched is null then
+    return null;
+  end if;
+
+  for r in
+    select x->>'category' as category,
+           greatest(coalesce(jsonb_array_length(x->'teeth'), 0), 1) as units
+      from jsonb_array_elements(
+             coalesce(p_prescription->'restorations',
+                      jsonb_build_array(p_prescription))) as x
+  loop
+    select psi.base_price into p
+      from price_schedule_items psi
+     where psi.schedule_id = sched and psi.category = r.category;
+    if p is not null then
+      base := base + p * r.units;
+      priced := true;
+    end if;
+  end loop;
+
+  if not priced then
+    return null;
+  end if;
+  return greatest(0, round(base - (base * disc / 100.0), 3));
+exception when others then
+  return null;  -- an estimate must never break the Rx form
+end;
+$$;

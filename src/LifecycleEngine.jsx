@@ -571,15 +571,25 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                 </section>
               )}
 
-              {/* the lab's final price — editable until the case is invoiced */}
-              {role === "lab" && onSetCasePrice && (
+              {/* the lab's final price — editable by the lab until invoiced;
+                  the clinic sees it read-only once it exists */}
+              {((role === "lab" && onSetCasePrice) || (role !== "lab" && caseObj.totalPrice != null)) && (
                 <section>
                   <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Price</h4>
-                  <CasePriceField
-                    c={caseObj}
-                    onSave={(n) => onSetCasePrice(caseObj.id, n)}
-                    onReset={() => onResetCasePrice(caseObj)}
-                  />
+                  {role === "lab" && onSetCasePrice ? (
+                    <CasePriceField
+                      c={caseObj}
+                      onSave={(n) => onSetCasePrice(caseObj.id, n)}
+                      onReset={() => onResetCasePrice(caseObj)}
+                    />
+                  ) : (
+                    <p className="text-sm font-bold text-slate-800">
+                      {Number(caseObj.totalPrice).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR
+                      <span className="ml-2 text-xs font-medium text-slate-400">
+                        {caseObj.priceOverridden ? "set by the lab" : "estimated from the lab's price list"}
+                      </span>
+                    </p>
+                  )}
                 </section>
               )}
 

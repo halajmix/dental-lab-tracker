@@ -317,6 +317,22 @@ export async function fetchLabRoster(labId) {
 
 // Fires the pricing trigger on every draft case of the caller's lab.
 // Returns how many cases were re-priced.
+// Live Rx-form estimate (Phase 33). Best-effort by design: any failure —
+// RPC missing, RLS, network — just means "no estimate shown".
+export async function estimateCasePrice(labId, clinicId, prescription) {
+  try {
+    const { data, error } = await supabase.rpc("estimate_case_price", {
+      p_lab: labId,
+      p_clinic: clinicId,
+      p_prescription: prescription,
+    });
+    if (error) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export async function repriceUnbilledCases() {
   const { data, error } = await supabase.rpc("reprice_unbilled_cases");
   if (error) throw error;
