@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  ChevronRight,
 } from "lucide-react";
 import { STAGE_INDEX } from "./LifecycleEngine.jsx";
 import {
@@ -97,6 +98,8 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
   const [genMonth, setGenMonth] = useState(months[1]); // default: previous month
   const [genState, setGenState] = useState({ confirming: false, busy: false, message: "" });
   const [payFor, setPayFor] = useState(null); // statement object or null
+  // Imported-history statements expand to show their work line items.
+  const [openStatementId, setOpenStatementId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -261,28 +264,80 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
               <tbody>
                 {statements.map((s) => {
                   const paid = paidByStatement[s.id] ?? 0;
+                  const hasLines = s.lineItems?.length > 0;
+                  const open = openStatementId === s.id;
                   return (
-                    <tr key={s.id} className="border-t border-slate-100">
-                      <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">{monthLabel(s.month)}</td>
-                      <td className="max-w-[180px] truncate py-2.5 pr-3 font-semibold text-slate-700">
-                        {clinicLabel(s)}
-                      </td>
-                      <td className="py-2.5 pr-3 text-right font-semibold text-slate-800 whitespace-nowrap">{fmtOMR(s.total)}</td>
-                      <td className="py-2.5 pr-3 text-right text-slate-600 whitespace-nowrap">{fmtOMR(paid)}</td>
-                      <td className="py-2.5 pr-3">
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${STATUS_BADGE[s.status]}`}>{s.status}</span>
-                      </td>
-                      <td className="py-2.5 text-right whitespace-nowrap">
-                        {s.status !== "paid" && (
-                          <button onClick={() => setPayFor(s)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:border-emerald-300 hover:text-emerald-700">
-                            Record payment
+                    <React.Fragment key={s.id}>
+                      <tr
+                        className={`border-t border-slate-100 ${hasLines ? "cursor-pointer hover:bg-slate-50/70" : ""}`}
+                        onClick={hasLines ? () => setOpenStatementId(open ? null : s.id) : undefined}
+                      >
+                        <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">
+                          <span className="flex items-center gap-1">
+                            {hasLines && (
+                              <ChevronRight size={13} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-90" : ""}`} />
+                            )}
+                            {monthLabel(s.month)}
+                          </span>
+                        </td>
+                        <td className="max-w-[180px] truncate py-2.5 pr-3 font-semibold text-slate-700">
+                          {clinicLabel(s)}
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-semibold text-slate-800 whitespace-nowrap">{fmtOMR(s.total)}</td>
+                        <td className="py-2.5 pr-3 text-right text-slate-600 whitespace-nowrap">{fmtOMR(paid)}</td>
+                        <td className="py-2.5 pr-3">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${STATUS_BADGE[s.status]}`}>{s.status}</span>
+                        </td>
+                        <td className="py-2.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          {s.status !== "paid" && (
+                            <button onClick={() => setPayFor(s)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:border-emerald-300 hover:text-emerald-700">
+                              Record payment
+                            </button>
+                          )}
+                          <button onClick={() => downloadPdf(s)} title="Download PDF" className="ml-1.5 rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-blue-300 hover:text-blue-700">
+                            <Download size={13} />
                           </button>
-                        )}
-                        <button onClick={() => downloadPdf(s)} title="Download PDF" className="ml-1.5 rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-blue-300 hover:text-blue-700">
-                          <Download size={13} />
-                        </button>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="border-t border-slate-100 bg-slate-50/60">
+                          <td colSpan={6} className="px-3 py-3">
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[640px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                    <th className="pb-1.5 pr-3">Date</th>
+                                    <th className="pb-1.5 pr-3">Invoice</th>
+                                    <th className="pb-1.5 pr-3">Patient</th>
+                                    <th className="pb-1.5 pr-3">Doctor</th>
+                                    <th className="pb-1.5 pr-3">Procedure</th>
+                                    <th className="pb-1.5 pr-3 text-right">Units</th>
+                                    <th className="pb-1.5 pr-3 text-right">Price</th>
+                                    <th className="pb-1.5 text-right">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {s.lineItems.map((li, i) => (
+                                    <tr key={i} className="border-t border-slate-200/70">
+                                      <td className="py-1.5 pr-3 whitespace-nowrap text-slate-500">
+                                        {li.date ? new Date(li.date + "T00:00:00").toLocaleDateString("en-GB") : "—"}
+                                      </td>
+                                      <td className="py-1.5 pr-3 text-slate-600">{li.invoice || "—"}</td>
+                                      <td className="max-w-[140px] truncate py-1.5 pr-3 text-slate-700">{li.patient || "—"}</td>
+                                      <td className="max-w-[120px] truncate py-1.5 pr-3 text-slate-600">{li.dentist || "—"}</td>
+                                      <td className="max-w-[180px] truncate py-1.5 pr-3 text-slate-700">{li.procedure || "—"}</td>
+                                      <td className="py-1.5 pr-3 text-right text-slate-600">{li.units ?? "—"}</td>
+                                      <td className="py-1.5 pr-3 text-right text-slate-600">{li.price ?? "—"}</td>
+                                      <td className="py-1.5 text-right font-semibold text-slate-700 whitespace-nowrap">{fmtOMR(li.amount ?? 0)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
