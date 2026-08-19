@@ -196,9 +196,12 @@ export async function insertLab(clinicId, data) {
 /* ------------------------------------------------------------------ */
 
 export async function fetchCases() {
-  const { data, error } = await supabase.from("cases").select("*").order("created_at", { ascending: false });
-  if (error) throw error;
-  return data.map(caseFromRow);
+  // Paged for the same 1,000-row PostgREST cap as the finance fetchers —
+  // a busy lab's case list crosses it within a couple of years.
+  const rows = await fetchAllPages(() =>
+    supabase.from("cases").select("*").order("created_at", { ascending: false }).order("id")
+  );
+  return rows.map(caseFromRow);
 }
 
 function genCaseId() {
@@ -727,34 +730,40 @@ const expenseFromRow = (r) => ({
   createdAt: r.created_at,
 });
 
+// PostgREST caps any single select at 1,000 rows — a multi-year imported
+// history blows past that (silently: the Billing tab just showed nothing
+// older than ~2021). Page until a short page proves we have everything.
+const fetchAllPages = async (buildQuery) => {
+  const all = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await buildQuery().range(from, from + 999);
+    if (error) throw error;
+    all.push(...data);
+    if (data.length < 1000) return all;
+  }
+};
+
 export async function fetchStatements(labId) {
-  const { data, error } = await supabase
-    .from("clinic_statements")
-    .select("*")
-    .eq("lab_id", labId)
-    .order("month", { ascending: false });
-  if (error) throw error;
-  return data.map(statementFromRow);
+  // Secondary order on id keeps pages stable — rows sharing a month would
+  // otherwise shuffle between pages and get skipped or duplicated.
+  const rows = await fetchAllPages(() =>
+    supabase.from("clinic_statements").select("*").eq("lab_id", labId).order("month", { ascending: false }).order("id")
+  );
+  return rows.map(statementFromRow);
 }
 
 export async function fetchPayments(labId) {
-  const { data, error } = await supabase
-    .from("lab_payments")
-    .select("*")
-    .eq("lab_id", labId)
-    .order("received_date", { ascending: false });
-  if (error) throw error;
-  return data.map(paymentFromRow);
+  const rows = await fetchAllPages(() =>
+    supabase.from("lab_payments").select("*").eq("lab_id", labId).order("received_date", { ascending: false }).order("id")
+  );
+  return rows.map(paymentFromRow);
 }
 
 export async function fetchExpenses(labId) {
-  const { data, error } = await supabase
-    .from("lab_expenses")
-    .select("*")
-    .eq("lab_id", labId)
-    .order("expense_date", { ascending: false });
-  if (error) throw error;
-  return data.map(expenseFromRow);
+  const rows = await fetchAllPages(() =>
+    supabase.from("lab_expenses").select("*").eq("lab_id", labId).order("expense_date", { ascending: false }).order("id")
+  );
+  return rows.map(expenseFromRow);
 }
 
 // Sweeps unbilled completed cases into one statement per clinic for the
