@@ -774,12 +774,15 @@ export async function generateStatements(monthDate) {
   return data ?? 0;
 }
 
-export async function insertPayment(labId, { clinicId, statementId, amount, method, reference, receivedDate }) {
+export async function insertPayment(labId, { clinicId, clinicName, statementId, amount, method, reference, receivedDate }) {
   const { data, error } = await supabase
     .from("lab_payments")
     .insert({
       lab_id: labId,
       clinic_id: clinicId ?? null,
+      // Imported-history statements have no clinic_id — the name text is
+      // what keeps their payments attributable in the payments list.
+      clinic_name: clinicName ?? "",
       statement_id: statementId || null,
       amount,
       method,

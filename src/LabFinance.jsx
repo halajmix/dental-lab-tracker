@@ -15,6 +15,10 @@ import {
   CheckCircle2,
   Clock,
   ChevronRight,
+  Search,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 import { STAGE_INDEX } from "./LifecycleEngine.jsx";
 import {
@@ -100,6 +104,18 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
   const [payFor, setPayFor] = useState(null); // statement object or null
   // Imported-history statements expand to show their work line items.
   const [openStatementId, setOpenStatementId] = useState(null);
+  // Table controls: omni-search, filters, sort, pagination, bulk selection.
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [yearFilter, setYearFilter] = useState("all");
+  const [monthFilter, setMonthFilter] = useState("all");
+  const [agingFilter, setAgingFilter] = useState(null); // bucket label or null
+  const [sort, setSort] = useState({ key: "month", dir: "desc" });
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -141,22 +157,41 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
   }, [cases]);
 
   // Receivables aging: remaining balance of open statements bucketed by
-  // how long since the billed month ended.
-  const aging = useMemo(() => {
-    const buckets = { "0–30 days": 0, "31–60 days": 0, "60+ days": 0 };
+  // how long since the billed month ended. statementMeta keeps each
+  // statement's remaining balance + bucket so the cards, the bucket
+  // quick-filter, and bulk payments all share one computation.
+  const statementMeta = useMemo(() => {
+    const m = new Map();
     const now = Date.now();
     for (const s of statements) {
-      if (s.status === "paid") continue;
-      const remaining = Math.max(0, s.total - (paidByStatement[s.id] ?? 0));
-      if (remaining <= 0) continue;
-      const end = new Date(s.month + "T00:00:00");
-      end.setMonth(end.getMonth() + 1);
-      const days = Math.floor((now - end.getTime()) / 86400000);
-      buckets[days <= 30 ? "0–30 days" : days <= 60 ? "31–60 days" : "60+ days"] += remaining;
+      const remaining = s.status === "paid" ? 0 : Math.max(0, s.total - (paidByStatement[s.id] ?? 0));
+      let bucket = null;
+      if (remaining > 0) {
+        const end = new Date(s.month + "T00:00:00");
+        end.setMonth(end.getMonth() + 1);
+        const days = Math.floor((now - end.getTime()) / 86400000);
+        bucket = days <= 30 ? "0–30 days" : days <= 60 ? "31–60 days" : "60+ days";
+      }
+      m.set(s.id, { remaining, bucket });
+    }
+    return m;
+  }, [statements, paidByStatement]);
+
+  const aging = useMemo(() => {
+    const buckets = {
+      "0–30 days": { value: 0, count: 0 },
+      "31–60 days": { value: 0, count: 0 },
+      "60+ days": { value: 0, count: 0 },
+    };
+    for (const { remaining, bucket } of statementMeta.values()) {
+      if (bucket) {
+        buckets[bucket].value += remaining;
+        buckets[bucket].count += 1;
+      }
     }
     return buckets;
-  }, [statements, paidByStatement]);
-  const outstanding = Object.values(aging).reduce((a, b) => a + b, 0);
+  }, [statementMeta]);
+  const outstanding = Object.values(aging).reduce((a, b) => a + b.value, 0);
 
   const runGenerate = async () => {
     setGenState({ confirming: false, busy: true, message: "" });
@@ -183,6 +218,115 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
       cases: included,
       paidSoFar: paidByStatement[s.id] ?? 0,
     });
+  };
+
+  // One lowercase haystack per statement: clinic, month, status, and every
+  // line item's invoice/patient/dentist/procedure. Built once; each search
+  // keystroke is then a cheap substring scan even over 8 years of history.
+  const searchIndex = useMemo(() => {
+    const m = new Map();
+    for (const s of statements) {
+      const parts = [clinicLabel(s), monthLabel(s.month), s.status];
+      for (const li of s.lineItems ?? []) parts.push(li.invoice, li.patient, li.dentist, li.procedure);
+      m.set(s.id, parts.filter(Boolean).join(" ").toLowerCase());
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statements, clinicsById]);
+
+  const years = useMemo(
+    () => [...new Set(statements.map((s) => s.month.slice(0, 4)))].sort().reverse(),
+    [statements],
+  );
+
+  const filtered = useMemo(() => {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return statements.filter((s) => {
+      if (statusFilter !== "all" && s.status !== statusFilter) return false;
+      if (yearFilter !== "all" && !s.month.startsWith(yearFilter)) return false;
+      if (monthFilter !== "all" && s.month.slice(5, 7) !== monthFilter) return false;
+      if (agingFilter && statementMeta.get(s.id)?.bucket !== agingFilter) return false;
+      if (terms.length) {
+        const hay = searchIndex.get(s.id) ?? "";
+        if (!terms.every((t) => hay.includes(t))) return false;
+      }
+      return true;
+    });
+  }, [statements, query, statusFilter, yearFilter, monthFilter, agingFilter, statementMeta, searchIndex]);
+
+  const sorted = useMemo(() => {
+    const val = {
+      month: (s) => s.month,
+      clinic: (s) => clinicLabel(s).toLowerCase(),
+      total: (s) => s.total,
+      paid: (s) => paidByStatement[s.id] ?? 0,
+      status: (s) => ({ unpaid: 0, partial: 1, paid: 2 })[s.status] ?? 3,
+    }[sort.key];
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const va = val(a);
+      const vb = val(b);
+      if (va < vb) return -dir;
+      if (va > vb) return dir;
+      return a.id < b.id ? -1 : 1; // stable tiebreak
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, sort, paidByStatement, clinicsById]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / perPage));
+  const curPage = Math.min(page, totalPages);
+  const pageRows = sorted.slice((curPage - 1) * perPage, curPage * perPage);
+
+  // Any control change jumps back to the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [query, statusFilter, yearFilter, monthFilter, agingFilter, sort, perPage]);
+
+  const toggleSort = (key) =>
+    setSort((p) => ({ key, dir: p.key === key && p.dir === "desc" ? "asc" : "desc" }));
+
+  const toggleSelected = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Header checkbox drives the current page's payable rows.
+  const payablePageIds = pageRows.filter((s) => (statementMeta.get(s.id)?.remaining ?? 0) > 0).map((s) => s.id);
+  const allPageSelected = payablePageIds.length > 0 && payablePageIds.every((id) => selected.has(id));
+  const togglePageSelection = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) payablePageIds.forEach((id) => next.delete(id));
+      else payablePageIds.forEach((id) => next.add(id));
+      return next;
+    });
+
+  const selectedStatements = useMemo(
+    () => statements.filter((s) => selected.has(s.id) && (statementMeta.get(s.id)?.remaining ?? 0) > 0),
+    [statements, selected, statementMeta],
+  );
+  const selectedRemaining = selectedStatements.reduce((s, x) => s + (statementMeta.get(x.id)?.remaining ?? 0), 0);
+
+  const runBulkPayments = async ({ method, reference, date }) => {
+    let done = 0;
+    for (const s of selectedStatements) {
+      await insertPayment(lab.id, {
+        clinicId: s.clinicId,
+        clinicName: s.clinicName,
+        statementId: s.id,
+        amount: statementMeta.get(s.id)?.remaining ?? 0,
+        method,
+        reference,
+        receivedDate: date,
+      });
+      done++;
+    }
+    setSelected(new Set());
+    setBulkMsg(`${done} payment${done === 1 ? "" : "s"} recorded — ${fmtOMR(selectedRemaining)}.`);
+    await load();
   };
 
   return (
@@ -228,14 +372,28 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
         </span>
       </div>
 
-      {/* Aging */}
+      {/* Aging — each card doubles as a quick-filter for the table below */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {Object.entries(aging).map(([label, value]) => (
-          <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Outstanding {label}</p>
-            <p className={`mt-1.5 text-xl font-bold ${value > 0 && label === "60+ days" ? "text-rose-600" : "text-slate-800"}`}>{fmtOMR(value)}</p>
-          </div>
-        ))}
+        {Object.entries(aging).map(([label, { value, count }]) => {
+          const active = agingFilter === label;
+          return (
+            <button
+              key={label}
+              onClick={() => setAgingFilter(active ? null : label)}
+              aria-pressed={active}
+              title={active ? "Clear this filter" : `Show only ${label} statements`}
+              className={`rounded-2xl border bg-white p-4 text-left transition ${
+                active ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200 hover:border-blue-300"
+              }`}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Outstanding {label}</p>
+              <p className={`mt-1.5 text-xl font-bold ${value > 0 && label === "60+ days" ? "text-rose-600" : "text-slate-800"}`}>{fmtOMR(value)}</p>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-400">
+                {count} statement{count === 1 ? "" : "s"}{active ? " — tap to clear filter" : ""}
+              </p>
+            </button>
+          );
+        })}
       </div>
 
       {/* Statements */}
@@ -244,34 +402,137 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
           <h3 className="text-sm font-bold text-slate-800">Statements</h3>
           <span className="text-xs font-semibold text-slate-500">{fmtOMR(outstanding)} outstanding</span>
         </div>
+
+        {/* Omni-search + filters */}
+        {statements.length > 0 && (
+          <div className="mb-3 space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <label className="relative min-w-[220px] flex-1">
+                <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search invoice no, patient, clinic, doctor, procedure…"
+                  className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
+                />
+              </label>
+              <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600">
+                <option value="all">All years</option>
+                {years.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+              <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600">
+                <option value="all">All months</option>
+                {["01","02","03","04","05","06","07","08","09","10","11","12"].map((m) => (
+                  <option key={m} value={m}>
+                    {new Date(`2000-${m}-01T00:00:00`).toLocaleDateString("en-GB", { month: "long" })}
+                  </option>
+                ))}
+              </select>
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600">
+                <option value="all">All statuses</option>
+                <option value="unpaid">Unpaid</option>
+                <option value="partial">Partially paid</option>
+                <option value="paid">Paid</option>
+              </select>
+            </div>
+            {(selected.size > 0 || bulkMsg) && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2">
+                {selectedStatements.length > 0 ? (
+                  <>
+                    <span className="text-xs font-semibold text-emerald-800">
+                      {selectedStatements.length} statement{selectedStatements.length === 1 ? "" : "s"} selected — {fmtOMR(selectedRemaining)} due
+                    </span>
+                    <button
+                      onClick={() => setBulkOpen(true)}
+                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                    >
+                      Record selected payments
+                    </button>
+                    <button
+                      onClick={() => setSelected(new Set())}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+                    >
+                      Clear selection
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs font-semibold text-emerald-700">{bulkMsg}</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {loading ? (
           <p className="py-8 text-center text-sm text-slate-400">Loading…</p>
         ) : statements.length === 0 ? (
           <p className="py-8 text-center text-sm text-slate-400">No statements yet — generate your first monthly run above.</p>
+        ) : sorted.length === 0 ? (
+          <p className="py-8 text-center text-sm text-slate-400">Nothing matches the current search or filters.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm">
+            <table className="w-full min-w-[620px] text-sm">
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                  <th className="pb-2 pr-3">Month</th>
-                  <th className="pb-2 pr-3">Clinic</th>
-                  <th className="pb-2 pr-3 text-right">Total</th>
-                  <th className="pb-2 pr-3 text-right">Paid</th>
-                  <th className="pb-2 pr-3">Status</th>
+                  <th className="w-8 pb-2 pr-2">
+                    <input
+                      type="checkbox"
+                      checked={allPageSelected}
+                      onChange={togglePageSelection}
+                      disabled={payablePageIds.length === 0}
+                      title="Select every unpaid statement on this page"
+                      className="h-3.5 w-3.5 accent-emerald-600"
+                    />
+                  </th>
+                  {[
+                    { k: "month", label: "Month" },
+                    { k: "clinic", label: "Clinic" },
+                    { k: "total", label: "Total", right: true },
+                    { k: "paid", label: "Paid", right: true },
+                    { k: "status", label: "Status" },
+                  ].map(({ k, label, right }) => (
+                    <th key={k} className="pb-2 pr-3">
+                      <button
+                        onClick={() => toggleSort(k)}
+                        className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 hover:text-slate-600 ${right ? "ml-auto" : ""}`}
+                        title={`Sort by ${label.toLowerCase()}`}
+                      >
+                        {label}
+                        {sort.key === k ? (
+                          sort.dir === "desc" ? <ArrowDown size={11} /> : <ArrowUp size={11} />
+                        ) : (
+                          <ArrowUpDown size={11} className="opacity-40" />
+                        )}
+                      </button>
+                    </th>
+                  ))}
                   <th className="pb-2 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {statements.map((s) => {
+                {pageRows.map((s) => {
                   const paid = paidByStatement[s.id] ?? 0;
                   const hasLines = s.lineItems?.length > 0;
                   const open = openStatementId === s.id;
+                  const payable = (statementMeta.get(s.id)?.remaining ?? 0) > 0;
                   return (
                     <React.Fragment key={s.id}>
                       <tr
-                        className={`border-t border-slate-100 ${hasLines ? "cursor-pointer hover:bg-slate-50/70" : ""}`}
+                        className={`border-t border-slate-100 ${hasLines ? "cursor-pointer hover:bg-slate-50/70" : ""} ${selected.has(s.id) ? "bg-emerald-50/40" : ""}`}
                         onClick={hasLines ? () => setOpenStatementId(open ? null : s.id) : undefined}
                       >
+                        <td className="py-2.5 pr-2" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(s.id)}
+                            onChange={() => toggleSelected(s.id)}
+                            disabled={!payable}
+                            title={payable ? "Select for bulk payment" : "Already fully paid"}
+                            className="h-3.5 w-3.5 accent-emerald-600 disabled:opacity-30"
+                          />
+                        </td>
                         <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">
                           <span className="flex items-center gap-1">
                             {hasLines && (
@@ -301,7 +562,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
                       </tr>
                       {open && (
                         <tr className="border-t border-slate-100 bg-slate-50/60">
-                          <td colSpan={6} className="px-3 py-3">
+                          <td colSpan={7} className="px-3 py-3">
                             <div className="overflow-x-auto">
                               <table className="w-full min-w-[640px] text-xs">
                                 <thead>
@@ -342,6 +603,41 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
                 })}
               </tbody>
             </table>
+            {/* Pagination */}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+              <span className="text-xs text-slate-500">
+                Showing {(curPage - 1) * perPage + 1}–{Math.min(curPage * perPage, sorted.length)} of {sorted.length.toLocaleString()} statement{sorted.length === 1 ? "" : "s"}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <select
+                  value={perPage}
+                  onChange={(e) => setPerPage(Number(e.target.value))}
+                  className="rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs font-semibold text-slate-600"
+                  title="Rows per page"
+                >
+                  {[25, 50, 100].map((n) => (
+                    <option key={n} value={n}>{n} / page</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setPage(curPage - 1)}
+                  disabled={curPage <= 1}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <span className="px-1 text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  Page {curPage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(curPage + 1)}
+                  disabled={curPage >= totalPages}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -357,7 +653,100 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
         onClose={() => setPayFor(null)}
         onSaved={load}
       />
+      <BulkPaymentModal
+        open={bulkOpen}
+        count={selectedStatements.length}
+        total={selectedRemaining}
+        onClose={() => setBulkOpen(false)}
+        onConfirm={runBulkPayments}
+      />
     </div>
+  );
+}
+
+/* Bulk payment: settles the FULL remaining balance of every selected
+   statement with one method/date/reference. Runs the inserts one by one so
+   the statement status trigger fires per row; a failure stops the run with
+   what was already recorded left in place. */
+function BulkPaymentModal({ open, count, total, onClose, onConfirm }) {
+  const [method, setMethod] = useState("cash");
+  const [reference, setReference] = useState("");
+  const [date, setDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setMethod("cash");
+    setReference("");
+    setDate(new Date().toISOString().slice(0, 10));
+    setError("");
+    setBusy(false);
+  }, [open]);
+
+  if (!open) return null;
+
+  const save = async () => {
+    if (method === "cheque" && !reference.trim()) {
+      setError("Enter the cheque number as the reference.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onConfirm({ method, reference: reference.trim(), date });
+      onClose();
+    } catch (err) {
+      setError("Stopped part-way — " + err.message + ". Already-recorded payments are kept; reselect and retry the rest.");
+      setBusy(false);
+    }
+  };
+
+  const inputCls =
+    "w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm text-slate-700 focus:border-blue-400 focus:outline-none";
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
+      <div className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+          <Banknote size={16} className="text-emerald-600" />
+          <h3 className="min-w-0 truncate text-sm font-bold text-slate-800">Record {count} payment{count === 1 ? "" : "s"}</h3>
+          <button onClick={onClose} className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-3 overflow-y-auto px-4 py-4">
+          <p className="text-sm text-slate-600">
+            Each selected statement is settled in full — <b>{fmtOMR(total)}</b> across {count} statement{count === 1 ? "" : "s"}.
+          </p>
+          {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p>}
+          <label className="block text-xs font-semibold text-slate-500">
+            Method
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className={`mt-1 ${inputCls}`}>
+              <option value="cash">Cash</option>
+              <option value="bank">Bank transfer</option>
+              <option value="cheque">Cheque</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-slate-500">
+            Received date
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`mt-1 ${inputCls}`} />
+          </label>
+          <label className="block text-xs font-semibold text-slate-500">
+            Reference {method === "cheque" ? "(cheque no — required)" : "(optional)"}
+            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === "cheque" ? "Cheque number" : "Receipt / note"} className={`mt-1 ${inputCls}`} />
+          </label>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 px-4 py-3">
+          <button onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={save} disabled={busy} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+            {busy ? "Recording…" : `Record ${fmtOMR(total)}`}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -396,6 +785,7 @@ function RecordPaymentModal({ open, statement, clinic, remaining, labId, onClose
     try {
       await insertPayment(labId, {
         clinicId: statement.clinicId,
+        clinicName: statement.clinicName,
         statementId: statement.id,
         amount: n,
         method,
