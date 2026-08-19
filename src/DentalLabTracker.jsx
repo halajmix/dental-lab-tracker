@@ -934,6 +934,11 @@ export default function DentalLabTracker({ auth }) {
   // this isn't a lifecycle event, just a label the lab attaches for its
   // own accounting.
   const setInvoiceNumber = (caseId, invoiceNumber) => persist(caseId, { invoiceNumber });
+  // Phase 32: the lab's manual final price. Overridden prices are sticky —
+  // the DB pricing trigger skips them until reset, which re-sends the
+  // unchanged prescription purely to re-fire automatic pricing.
+  const setCasePrice = (caseId, totalPrice) => persist(caseId, { totalPrice, priceOverridden: true });
+  const resetCasePrice = (c) => persist(c.id, { priceOverridden: false, prescription: c.prescription });
 
   /* ---------------- Cancellation workflow (Phase 27) ----------------
      Dentist requests / withdraws; lab approves with a fee (work already
@@ -1237,6 +1242,8 @@ export default function DentalLabTracker({ auth }) {
               onOpenCase={setDrawerCaseId}
               onLogRemake={setRemakeCaseId}
               onSetInvoiceNumber={setInvoiceNumber}
+              onSetCasePrice={setCasePrice}
+              onResetCasePrice={resetCasePrice}
               onResolveCancellation={resolveCancellation}
               onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
             />
@@ -1783,7 +1790,7 @@ const QUEUE_TAB_DEFS = [
   { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
 ];
 
-function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onResolveCancellation, onExportCsv }) {
+function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onResolveCancellation, onExportCsv }) {
   const [queueTab, setQueueTab] = useState("incoming");
   // Brief confirmation after a stage change moves a case out of the tab
   // you're looking at — without this, advancing the only case in "Incoming"
@@ -1896,6 +1903,8 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
               onOpenCase={onOpenCase}
               onLogRemake={onLogRemake}
               onSetInvoiceNumber={onSetInvoiceNumber}
+              onSetCasePrice={onSetCasePrice}
+              onResetCasePrice={onResetCasePrice}
             />
           ))}
         </div>
@@ -2009,6 +2018,88 @@ function CaseCardOptionsMenu({ c, canRevert, revertLabel, onRevert, onLogRemake,
  * Enter/blur saves, Escape cancels. Distinct from the system case id: this
  * is a free-text number the lab assigns itself, never the dentist.
  */
+/* Phase 32 — the lab's final case price, always hand-editable until the
+   case lands on a statement (issued/paid cases are frozen server-side).
+   A manual price shows a "manual" chip and survives repricing until the
+   reset arrow puts the case back on automatic pricing. */
+function CasePriceField({ c, onSave, onReset }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const locked = c.invoiceStatus !== "draft" || !!c.statementId;
+  const fmt = (n) => `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR`;
+
+  const commit = () => {
+    setEditing(false);
+    const n = Number(draft);
+    if (!Number.isFinite(n) || n < 0) return;
+    if (n !== (c.totalPrice ?? null)) onSave(n);
+  };
+
+  return (
+    <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm">
+      <span className="font-medium text-slate-400">Price</span>
+      {editing ? (
+        <span className="flex items-center gap-1">
+          <input
+            ref={inputRef}
+            type="number"
+            min="0"
+            step="0.001"
+            inputMode="decimal"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            className="w-24 rounded-lg border border-blue-300 px-2 py-1 text-sm font-bold text-slate-800 outline-none ring-2 ring-blue-100"
+          />
+          <span className="text-xs font-semibold text-slate-400">OMR</span>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={commit} className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-50" title="Save price">
+            <Check size={15} />
+          </button>
+        </span>
+      ) : locked ? (
+        <span className="font-bold text-slate-700" title="This case is already on a statement — its price is locked">
+          {c.totalPrice != null ? fmt(c.totalPrice) : "—"} 🔒
+        </span>
+      ) : (
+        <button
+          onClick={() => {
+            setDraft(c.totalPrice != null ? String(c.totalPrice) : "");
+            setEditing(true);
+          }}
+          className="group flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 font-bold text-slate-800 hover:bg-blue-50"
+          title="Tap to set the final price for this case"
+        >
+          {c.totalPrice != null ? fmt(c.totalPrice) : <span className="font-semibold text-blue-600">Set price</span>}
+          <Wrench size={12} className="text-slate-300 group-hover:text-blue-500" />
+        </button>
+      )}
+      {c.priceOverridden && !editing && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+          manual
+          {!locked && (
+            <button
+              onClick={onReset}
+              className="rounded-full p-0.5 hover:bg-amber-200"
+              title="Reset to automatic pricing from the price list"
+            >
+              <RefreshCcw size={10} />
+            </button>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function InvoiceNumberField({ value, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -2143,7 +2234,7 @@ function CancellationRequestBanner({ c, onResolve }) {
   );
 }
 
-function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onResolveCancellation }) {
+function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onResolveCancellation }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -2230,6 +2321,11 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
             </span>
           )}
         </div>
+      )}
+
+      {/* The lab's final price — hand-editable any time before invoicing */}
+      {onSetCasePrice && (
+        <CasePriceField c={c} onSave={(n) => onSetCasePrice(c.id, n)} onReset={() => onResetCasePrice(c)} />
       )}
 
       {/* Visual progress — 5 dots, current step highlighted, no percentages or paragraphs */}

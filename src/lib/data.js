@@ -58,6 +58,7 @@ export const caseFromRow = (r) => ({
   statementId: r.statement_id ?? null,
   cancelStatus: r.cancel_status ?? "none",
   cancellationFee: r.cancellation_fee != null ? Number(r.cancellation_fee) : null,
+  priceOverridden: r.price_overridden ?? false,
 });
 
 export const clinicFromRow = (r) => ({
@@ -241,6 +242,10 @@ const PATCH_KEY_MAP = {
   invoiceStatus: "invoice_status",
   cancelStatus: "cancel_status",
   cancellationFee: "cancellation_fee",
+  // Phase 32: lab-set final price. totalPrice writes pass the financial
+  // guard for lab members; priceOverridden makes them sticky vs repricing.
+  totalPrice: "total_price",
+  priceOverridden: "price_overridden",
 };
 
 export async function updateCase(id, patch) {
@@ -734,6 +739,7 @@ const paymentFromRow = (r) => ({
   statementId: r.statement_id ?? null,
   cancelStatus: r.cancel_status ?? "none",
   cancellationFee: r.cancellation_fee != null ? Number(r.cancellation_fee) : null,
+  priceOverridden: r.price_overridden ?? false,
   amount: Number(r.amount) || 0,
   method: r.method,
   reference: r.reference ?? "",

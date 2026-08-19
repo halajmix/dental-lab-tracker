@@ -2199,3 +2199,118 @@ $$;
 /* --------------------------------------------------------------------- */
 
 alter table clinic_statements add column if not exists line_items jsonb not null default '[]'::jsonb;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 32 — lab-editable final case price                             */
+/*                                                                       */
+/*  The lab can always set a case's final price by hand before the work  */
+/*  goes back to the clinic. A manual price is STICKY: the pricing       */
+/*  trigger skips overridden cases entirely, so Rx edits and the         */
+/*  "Re-price unbilled cases" RPC (whose no-op prescription write fires  */
+/*  this same trigger) can never clobber it. Clearing the flag while     */
+/*  touching prescription recomputes automatically. Dentists can't flip  */
+/*  the flag — it joins the lab-only financial column guard.             */
+/* --------------------------------------------------------------------- */
+
+alter table cases add column if not exists price_overridden boolean not null default false;
+
+create or replace function price_case()
+returns trigger
+security definer
+set search_path = public
+as $$
+declare
+  sched uuid;
+  disc numeric := 0;
+  base numeric := 0;
+  priced boolean := false;
+  r record;
+  p numeric;
+  adj jsonb := '[]'::jsonb;
+  credit numeric := 0;
+begin
+  -- issued/paid invoices are frozen; new lab-less cases can't be priced
+  if tg_op = 'UPDATE' and old.invoice_status in ('issued', 'paid') then
+    return new;
+  end if;
+  -- Phase 32: manually set final prices are sticky until the lab clears them
+  if tg_op = 'UPDATE' and new.price_overridden then
+    return new;
+  end if;
+  if new.lab_id is null then
+    return new;
+  end if;
+
+  -- clinic-specific schedule/discount, else the lab's default list
+  select cpr.price_schedule_id, coalesce(cpr.discount_pct, 0)
+    into sched, disc
+    from clinic_price_rules cpr
+   where cpr.lab_id = new.lab_id and cpr.clinic_id = new.clinic_id;
+  if sched is null then
+    select ps.id into sched from price_schedules ps
+     where ps.lab_id = new.lab_id and ps.is_default
+     limit 1;
+  end if;
+  if sched is null then
+    return new;  -- lab has no price list yet: leave fee columns alone
+  end if;
+
+  -- itemize: multi-restoration cart, or the flat legacy/appliance shape
+  for r in
+    select x->>'category' as category,
+           greatest(coalesce(jsonb_array_length(x->'teeth'), 0), 1) as units
+      from jsonb_array_elements(
+             coalesce(new.prescription->'restorations',
+                      jsonb_build_array(new.prescription))) as x
+  loop
+    select psi.base_price into p
+      from price_schedule_items psi
+     where psi.schedule_id = sched and psi.category = r.category;
+    if p is not null then
+      base := base + p * r.units;
+      priced := true;
+    end if;
+  end loop;
+
+  if not priced then
+    return new;  -- nothing matched the list: don't write misleading zeros
+  end if;
+
+  if disc <> 0 then
+    adj := adj || jsonb_build_array(jsonb_build_object(
+      'label', 'Clinic rate ' || (case when disc > 0 then '−' else '+' end) || abs(disc)::text || '%',
+      'amount', round(-(base * disc / 100.0), 3)));
+  end if;
+  if new.remake is not null and coalesce((new.remake->>'cost')::numeric, 0) > 0 then
+    credit := (new.remake->>'cost')::numeric;
+    adj := adj || jsonb_build_array(jsonb_build_object('label', 'Remake credit', 'amount', -credit));
+  end if;
+
+  new.base_fee := round(base, 3);
+  new.adjustments := adj;
+  new.total_price := greatest(0, round(base - (base * disc / 100.0) - credit, 3));
+  return new;
+exception when others then
+  -- pricing must NEVER block a clinical case write
+  return new;
+end;
+$$ language plpgsql;
+
+create or replace function guard_lab_financial_columns()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) is distinct from 'service_role'
+     and (new.lab_id is null or new.lab_id is distinct from my_lab_id()) then
+    new.assigned_tech_id := old.assigned_tech_id;
+    new.invoice_status := old.invoice_status;
+    new.base_fee := old.base_fee;
+    new.adjustments := old.adjustments;
+    new.total_price := old.total_price;
+    new.statement_id := old.statement_id;
+    new.invoice_number := old.invoice_number;
+    new.price_overridden := old.price_overridden;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
