@@ -641,7 +641,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId }) {
       ) : tab === "expenses" ? (
         <ExpensesPanel lab={lab} />
       ) : tab === "prices" ? (
-        <PriceListsManager lab={lab} clinicsById={clinicsById} />
+        <PriceListsManager lab={lab} clinicsById={clinicsById} cases={cases} />
       ) : (
         <StaffPanel lab={lab} meId={meId} />
       )}

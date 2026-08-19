@@ -20,6 +20,9 @@ import {
   X,
   Shield,
   Wrench,
+  Search,
+  ChevronRight,
+  History,
 } from "lucide-react";
 import { CATEGORY_NAMES } from "./PrescriptionForm.jsx";
 import { BASE_PRICE, caseFee } from "./Analytics.jsx";
@@ -35,6 +38,7 @@ import {
   fetchClinicPriceRules,
   upsertClinicPriceRule,
   deleteClinicPriceRule,
+  fetchChargedLineItems,
   fetchLabRoster,
   fetchCommissionRates,
   saveCommissionRates,
@@ -447,7 +451,10 @@ function ClinicTierRow({ clinic, rule, schedules, busy, onChange, onClear }) {
 
 /* ---------------- top-level manager ---------------- */
 
-export function PriceListsManager({ lab, clinicsById }) {
+// Charged history window for the generated clinic price lists.
+const CHARGED_SINCE = "2026-01-01";
+
+export function PriceListsManager({ lab, clinicsById, cases = [] }) {
   const [schedules, setSchedules] = useState(null); // null = loading
   const [rules, setRules] = useState([]);
   const [error, setError] = useState("");
@@ -455,6 +462,106 @@ export function PriceListsManager({ lab, clinicsById }) {
   const [addingList, setAddingList] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [repriceState, setRepriceState] = useState({ confirming: false, message: "" });
+  // Clinic-specific price lists generated from charged history.
+  const [chargedRows, setChargedRows] = useState(null); // null = loading
+  const [chargedError, setChargedError] = useState("");
+  const [clinicQuery, setClinicQuery] = useState("");
+  const [openClinicKey, setOpenClinicKey] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchChargedLineItems(lab.id, CHARGED_SINCE)
+      .then((rows) => !cancelled && setChargedRows(rows))
+      .catch((err) => {
+        if (!cancelled) {
+          setChargedRows([]);
+          setChargedError(err.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lab.id]);
+
+  // One pass over charged history (+ billed platform cases) → per clinic, a
+  // de-duplicated item list with the price that clinic actually paid.
+  // "Last charged" wins when a price changed over time; a range is kept so
+  // the UI can flag items whose price varied inside the window.
+  const clinicPriceLists = useMemo(() => {
+    const norm = (s) => String(s ?? "").trim().replace(/\s+/g, " ");
+    const clinics = new Map(); // lowercase clinic name -> clinic entry
+    const add = (clinicName, itemName, units, unitPrice, amount, dateIso) => {
+      const cName = norm(clinicName);
+      const iName = norm(itemName);
+      if (!cName || !iName || !(unitPrice > 0)) return;
+      const cKey = cName.toLowerCase();
+      let c = clinics.get(cKey);
+      if (!c) {
+        c = { key: cKey, name: cName, items: new Map(), total: 0, lastDate: "" };
+        clinics.set(cKey, c);
+      }
+      c.total += amount;
+      if (dateIso > c.lastDate) c.lastDate = dateIso;
+      const iKey = iName.toLowerCase();
+      let it = c.items.get(iKey);
+      if (!it) {
+        it = { name: iName, count: 0, units: 0, lastPrice: unitPrice, lastDate: "", min: unitPrice, max: unitPrice };
+        c.items.set(iKey, it);
+      }
+      it.count += 1;
+      it.units += units;
+      it.min = Math.min(it.min, unitPrice);
+      it.max = Math.max(it.max, unitPrice);
+      if (dateIso >= it.lastDate) {
+        it.lastDate = dateIso;
+        it.lastPrice = unitPrice;
+      }
+    };
+
+    for (const st of chargedRows ?? []) {
+      const clinicName = clinicsById[st.clinicId]?.name ?? st.clinicName;
+      for (const li of st.lineItems ?? []) {
+        const amount = Number(li.amount);
+        if (!li.procedure || !(amount > 0)) continue;
+        const units = Number(li.units) > 0 ? Number(li.units) : 1;
+        const unitPrice = Number(li.price) > 0 ? Number(li.price) : amount / units;
+        add(clinicName, li.procedure, units, unitPrice, amount, li.date || st.month);
+      }
+    }
+    // Billed platform cases in the window (single-category ones — a unit
+    // price is only meaningful when the whole fee belongs to one item).
+    for (const c of cases) {
+      if (!(c.totalPrice > 0)) continue;
+      if (!c.statementId && c.invoiceStatus === "draft") continue; // not charged yet
+      const day = (c.createdAt ?? c.createdDate ?? "").slice(0, 10);
+      if (!day || day < CHARGED_SINCE) continue;
+      const clinicName = clinicsById[c.clinicId]?.name;
+      if (!clinicName) continue;
+      const rest = c.prescription?.restorations;
+      const cats = rest?.length
+        ? [...new Set(rest.map((r) => r.category).filter(Boolean))]
+        : [c.prescription?.category].filter(Boolean);
+      if (cats.length !== 1) continue;
+      const units = rest?.length
+        ? rest.reduce((n, r) => n + (r.teeth?.length || 1), 0)
+        : c.prescription?.teeth?.length || 1;
+      add(clinicName, cats[0], units, c.totalPrice / units, c.totalPrice, day);
+    }
+
+    return [...clinics.values()]
+      .map((c) => ({
+        ...c,
+        items: [...c.items.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [chargedRows, cases, clinicsById]);
+
+  const visibleClinicLists = useMemo(() => {
+    const q = clinicQuery.trim().toLowerCase();
+    if (!q) return clinicPriceLists;
+    return clinicPriceLists.filter((c) => c.name.toLowerCase().includes(q));
+  }, [clinicPriceLists, clinicQuery]);
+  const openClinic = clinicPriceLists.find((c) => c.key === openClinicKey) ?? null;
 
   const load = () => {
     Promise.all([fetchPriceSchedules(lab.id), fetchClinicPriceRules(lab.id)])
@@ -620,6 +727,115 @@ export function PriceListsManager({ lab, clinicsById }) {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+
+          {/* ---- Clinic price lists generated from charged history ---- */}
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
+              <History size={15} className="text-blue-600" />
+              <h3 className="text-sm font-bold text-slate-800">Clinic price lists</h3>
+              <p className="ml-auto text-xs text-slate-400">
+                What each clinic actually paid per item since 1 Jan 2026
+              </p>
+            </div>
+            {chargedError && (
+              <p className="border-b border-slate-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">
+                Couldn't load charged history — {chargedError}
+              </p>
+            )}
+            {chargedRows === null ? (
+              <p className="px-4 py-8 text-center text-sm text-slate-400">Loading charged history…</p>
+            ) : clinicPriceLists.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-slate-400">
+                No charged work since 1 January 2026 yet — these lists build themselves from statements
+                and billed cases.
+              </p>
+            ) : (
+              <div className="space-y-3 p-4">
+                <label className="relative block max-w-sm">
+                  <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={clinicQuery}
+                    onChange={(e) => setClinicQuery(e.target.value)}
+                    placeholder={`Search ${clinicPriceLists.length} clinics…`}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-2 text-sm outline-none transition focus:border-blue-400 focus:bg-white"
+                  />
+                </label>
+                {visibleClinicLists.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-400">No clinic matches that search.</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {visibleClinicLists.map((c) => {
+                      const active = openClinicKey === c.key;
+                      return (
+                        <button
+                          key={c.key}
+                          onClick={() => setOpenClinicKey(active ? null : c.key)}
+                          aria-pressed={active}
+                          className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
+                            active ? "border-blue-400 bg-blue-50/60 ring-2 ring-blue-200" : "border-slate-200 hover:border-blue-300"
+                          }`}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-slate-800">{c.name}</span>
+                            <span className="block text-[11px] text-slate-400">
+                              {c.items.length} item{c.items.length === 1 ? "" : "s"} · {fmtOMR(c.total)} billed
+                            </span>
+                          </span>
+                          <ChevronRight
+                            size={14}
+                            className={`shrink-0 text-slate-400 transition-transform ${active ? "rotate-90" : ""}`}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {openClinic && (
+                  <div className="overflow-hidden rounded-xl border border-blue-200">
+                    <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-blue-50/50 px-3 py-2.5">
+                      <h4 className="text-sm font-bold text-slate-800">{openClinic.name}</h4>
+                      <p className="ml-auto text-[11px] text-slate-500">
+                        {openClinic.items.length} distinct items · generated from charged history
+                      </p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[420px]">
+                        <thead>
+                          <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            <th className="px-3 py-2">Restoration</th>
+                            <th className="px-2 py-2 text-right">Price (OMR)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {openClinic.items.map((it) => (
+                            <tr key={it.name} className="border-t border-slate-100">
+                              <td className="px-3 py-2">
+                                <p className="text-sm font-medium text-slate-700">{it.name}</p>
+                                <p className="text-[11px] text-slate-400">
+                                  billed ×{it.count} ({it.units} unit{it.units === 1 ? "" : "s"})
+                                </p>
+                              </td>
+                              <td className="px-2 py-2 text-right align-top">
+                                <p className="text-sm font-semibold tabular-nums text-slate-800">{fmtOMR(it.lastPrice)}</p>
+                                {it.min !== it.max && (
+                                  <p
+                                    className="text-[11px] tabular-nums text-amber-600"
+                                    title="This clinic paid different prices for this item inside the window — the main figure is the most recently charged one."
+                                  >
+                                    varied {fmtOMR(it.min)}–{fmtOMR(it.max)}
+                                  </p>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

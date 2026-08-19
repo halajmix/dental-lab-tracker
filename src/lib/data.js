@@ -494,6 +494,30 @@ export async function fetchClinicPriceRules(labId) {
   return data.map(clinicRuleFromRow);
 }
 
+// Charged history for the clinic-specific price lists: every statement line
+// item since `sinceMonth`. Kept lean on purpose — four columns, an indexed
+// lab_id + month range, statements without line detail excluded server-side,
+// and paged past the 1,000-row cap. Aggregation happens client-side in one
+// pass over what is at most a few thousand small rows.
+export async function fetchChargedLineItems(labId, sinceMonth) {
+  const rows = await fetchAllPages(() =>
+    supabase
+      .from("clinic_statements")
+      .select("clinic_id, clinic_name, month, line_items")
+      .eq("lab_id", labId)
+      .gte("month", sinceMonth)
+      .neq("line_items", "[]")
+      .order("month", { ascending: true })
+      .order("id")
+  );
+  return rows.map((r) => ({
+    clinicId: r.clinic_id,
+    clinicName: r.clinic_name ?? "",
+    month: r.month,
+    lineItems: r.line_items ?? [],
+  }));
+}
+
 export async function upsertClinicPriceRule(labId, clinicId, { priceScheduleId = null, discountPct = 0 }) {
   const { data, error } = await supabase
     .from("clinic_price_rules")
