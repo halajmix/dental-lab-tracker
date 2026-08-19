@@ -561,7 +561,6 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
     if (!q) return clinicPriceLists;
     return clinicPriceLists.filter((c) => c.name.toLowerCase().includes(q));
   }, [clinicPriceLists, clinicQuery]);
-  const openClinic = clinicPriceLists.find((c) => c.key === openClinicKey) ?? null;
 
   const load = () => {
     Promise.all([fetchPriceSchedules(lab.id), fetchClinicPriceRules(lab.id)])
@@ -770,70 +769,74 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                     {visibleClinicLists.map((c) => {
                       const active = openClinicKey === c.key;
                       return (
-                        <button
-                          key={c.key}
-                          onClick={() => setOpenClinicKey(active ? null : c.key)}
-                          aria-pressed={active}
-                          className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
-                            active ? "border-blue-400 bg-blue-50/60 ring-2 ring-blue-200" : "border-slate-200 hover:border-blue-300"
-                          }`}
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-semibold text-slate-800">{c.name}</span>
-                            <span className="block text-[11px] text-slate-400">
-                              {c.items.length} item{c.items.length === 1 ? "" : "s"} · {fmtOMR(c.total)} billed
+                        <React.Fragment key={c.key}>
+                          <button
+                            onClick={() => setOpenClinicKey(active ? null : c.key)}
+                            aria-pressed={active}
+                            className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
+                              active ? "border-blue-400 bg-blue-50/60 ring-2 ring-blue-200" : "border-slate-200 hover:border-blue-300"
+                            }`}
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-semibold text-slate-800">{c.name}</span>
+                              <span className="block text-[11px] text-slate-400">
+                                {c.items.length} item{c.items.length === 1 ? "" : "s"} · {fmtOMR(c.total)} billed
+                              </span>
                             </span>
-                          </span>
-                          <ChevronRight
-                            size={14}
-                            className={`shrink-0 text-slate-400 transition-transform ${active ? "rotate-90" : ""}`}
-                          />
-                        </button>
+                            <ChevronRight
+                              size={14}
+                              className={`shrink-0 text-slate-400 transition-transform ${active ? "rotate-90" : ""}`}
+                            />
+                          </button>
+                          {/* The detail expands right under the clicked card's
+                              row — col-span-full breaks it onto its own grid
+                              row, so it's never below a 100-card grid. */}
+                          {active && (
+                            <div className="col-span-full overflow-hidden rounded-xl border border-blue-200">
+                              <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-blue-50/50 px-3 py-2.5">
+                                <h4 className="text-sm font-bold text-slate-800">{c.name}</h4>
+                                <p className="ml-auto text-[11px] text-slate-500">
+                                  {c.items.length} distinct items · generated from charged history
+                                </p>
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="w-full min-w-[420px]">
+                                  <thead>
+                                    <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                      <th className="px-3 py-2">Restoration</th>
+                                      <th className="px-2 py-2 text-right">Price (OMR)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {c.items.map((it) => (
+                                      <tr key={it.name} className="border-t border-slate-100">
+                                        <td className="px-3 py-2">
+                                          <p className="text-sm font-medium text-slate-700">{it.name}</p>
+                                          <p className="text-[11px] text-slate-400">
+                                            billed ×{it.count} ({it.units} unit{it.units === 1 ? "" : "s"})
+                                          </p>
+                                        </td>
+                                        <td className="px-2 py-2 text-right align-top">
+                                          <p className="text-sm font-semibold tabular-nums text-slate-800">{fmtOMR(it.lastPrice)}</p>
+                                          {it.min !== it.max && (
+                                            <p
+                                              className="text-[11px] tabular-nums text-amber-600"
+                                              title="This clinic paid different prices for this item inside the window — the main figure is the most recently charged one."
+                                            >
+                                              varied {fmtOMR(it.min)}–{fmtOMR(it.max)}
+                                            </p>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+                        </React.Fragment>
                       );
                     })}
-                  </div>
-                )}
-                {openClinic && (
-                  <div className="overflow-hidden rounded-xl border border-blue-200">
-                    <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-blue-50/50 px-3 py-2.5">
-                      <h4 className="text-sm font-bold text-slate-800">{openClinic.name}</h4>
-                      <p className="ml-auto text-[11px] text-slate-500">
-                        {openClinic.items.length} distinct items · generated from charged history
-                      </p>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[420px]">
-                        <thead>
-                          <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                            <th className="px-3 py-2">Restoration</th>
-                            <th className="px-2 py-2 text-right">Price (OMR)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {openClinic.items.map((it) => (
-                            <tr key={it.name} className="border-t border-slate-100">
-                              <td className="px-3 py-2">
-                                <p className="text-sm font-medium text-slate-700">{it.name}</p>
-                                <p className="text-[11px] text-slate-400">
-                                  billed ×{it.count} ({it.units} unit{it.units === 1 ? "" : "s"})
-                                </p>
-                              </td>
-                              <td className="px-2 py-2 text-right align-top">
-                                <p className="text-sm font-semibold tabular-nums text-slate-800">{fmtOMR(it.lastPrice)}</p>
-                                {it.min !== it.max && (
-                                  <p
-                                    className="text-[11px] tabular-nums text-amber-600"
-                                    title="This clinic paid different prices for this item inside the window — the main figure is the most recently charged one."
-                                  >
-                                    varied {fmtOMR(it.min)}–{fmtOMR(it.max)}
-                                  </p>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
                 )}
               </div>
