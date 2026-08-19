@@ -1675,7 +1675,9 @@ function DentistDashboard({
                     )}
                   </td>
                   <td className="px-4 py-3.5 align-top text-right whitespace-nowrap">
-                    {c.totalPrice != null ? (
+                    {/* Cancelled cases bill only their cancellation fee (next
+                        column) — showing the dead work price just confuses. */}
+                    {c.cancelStatus !== "cancelled" && c.totalPrice != null ? (
                       <span
                         className="font-semibold text-slate-700"
                         title={c.priceOverridden ? "Final price set by the lab" : "Estimated from the lab's price list — the lab may adjust it"}

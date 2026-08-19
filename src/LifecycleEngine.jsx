@@ -573,7 +573,8 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
 
               {/* the lab's final price — editable by the lab until invoiced;
                   the clinic sees it read-only once it exists */}
-              {((role === "lab" && onSetCasePrice) || (role !== "lab" && caseObj.totalPrice != null)) && (
+              {((role === "lab" && onSetCasePrice) ||
+                (role !== "lab" && caseObj.totalPrice != null && caseObj.cancelStatus !== "cancelled")) && (
                 <section>
                   <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Price</h4>
                   {role === "lab" && onSetCasePrice ? (

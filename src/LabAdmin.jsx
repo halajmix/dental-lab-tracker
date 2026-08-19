@@ -494,12 +494,15 @@ function buildScheduleItemsFromHistory(items, masterItems = []) {
     const cur = byCat.get(rx);
     if (!cur || it.count > cur.count || (it.count === cur.count && it.lastDate > cur.lastDate)) byCat.set(rx, it);
   }
+  // Fill gaps ONLY from the lab's own master list — never from the
+  // platform's generic estimates, which are nowhere near a real lab's
+  // rates and produced absurd auto-prices in production. A category
+  // missing from both history and master simply doesn't auto-price.
   const fills = [];
   for (const category of CATEGORY_NAMES) {
     if (byCat.has(category)) continue;
     const master = masterItems.find((m) => m.category === category);
-    const basePrice = master?.basePrice ?? BASE_PRICE[category];
-    if (basePrice != null) fills.push({ category, code: master ? "master list rate" : "standard estimate", basePrice });
+    if (master?.basePrice != null) fills.push({ category, code: "master list rate", basePrice: master.basePrice });
   }
   return [
     ...[...byCat.entries()].map(([category, src]) => ({ category, code: `from ${src.name}`, basePrice: src.lastPrice })),
