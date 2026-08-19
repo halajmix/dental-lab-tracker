@@ -791,14 +791,54 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                           {/* The detail expands right under the clicked card's
                               row — col-span-full breaks it onto its own grid
                               row, so it's never below a 100-card grid. */}
-                          {active && (
+                          {active && (() => {
+                            const nameKey = c.name.trim().toLowerCase();
+                            const editableCopy = (schedules ?? []).find(
+                              (s) => (s.name ?? "").trim().toLowerCase() === nameKey
+                            );
+                            const registered = clinics.find(
+                              (rc) => (rc.name ?? "").trim().toLowerCase() === nameKey
+                            );
+                            return (
                             <div className="col-span-full overflow-hidden rounded-xl border border-blue-200">
                               <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-blue-50/50 px-3 py-2.5">
                                 <h4 className="text-sm font-bold text-slate-800">{c.name}</h4>
-                                <p className="ml-auto text-[11px] text-slate-500">
+                                <p className="mr-auto text-[11px] text-slate-500">
                                   {c.items.length} distinct items · generated from charged history
                                 </p>
+                                {editableCopy ? (
+                                  <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                                    <CheckCheck size={12} /> Editable — see the “{editableCopy.name}” price-list card above
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() =>
+                                      mutate(async () => {
+                                        const schedId = await createPriceSchedule(lab.id, c.name, {
+                                          items: c.items.map((it) => ({ category: it.name, basePrice: it.lastPrice })),
+                                        });
+                                        if (registered) {
+                                          await upsertClinicPriceRule(lab.id, registered.id, { priceScheduleId: schedId });
+                                        }
+                                      })
+                                    }
+                                    disabled={busy}
+                                    className="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+                                    title="Copies these items and prices into a price list you can edit item by item"
+                                  >
+                                    <Plus size={12} /> Make editable price list
+                                  </button>
+                                )}
                               </div>
+                              {!editableCopy && (
+                                <p className="border-b border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-400">
+                                  This view is read-only history. “Make editable price list” copies it into a price-list
+                                  card above where every item and price can be changed, added, or removed
+                                  {registered
+                                    ? " — and links it to this clinic so it prices their future cases (items named after the Rx form's categories price automatically; historical names are reference-only until renamed)."
+                                    : ". This clinic isn't registered on Dr-Crown yet, so the list is a rate reference until they join."}
+                                </p>
+                              )}
                               <div className="overflow-x-auto">
                                 <table className="w-full min-w-[420px]">
                                   <thead>
@@ -833,7 +873,8 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                                 </table>
                               </div>
                             </div>
-                          )}
+                            );
+                          })()}
                         </React.Fragment>
                       );
                     })}
