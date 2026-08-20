@@ -1070,6 +1070,30 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     return () => clearTimeout(t);
   }, [justAddedId]);
 
+  // Debounced live price estimate (Phase 33). MUST also stay above the
+  // `if (!open)` early return — a hook below it only runs while the modal
+  // is open and the changed hook count crashes React (#310, the exact bug
+  // this file's comments warn about; re-learned the hard way 2026-08-20).
+  useEffect(() => {
+    const clinicId = selectedClinicId || defaultClinicId;
+    const hasItems = caseMode === "restorations" ? restorations.length > 0 : !!category;
+    if (!open || !labId || !clinicId || !hasItems) {
+      setExpectedPrice(null);
+      return;
+    }
+    const rx =
+      caseMode === "restorations"
+        ? { restorations: restorations.map((r) => ({ category: r.category, teeth: r.teeth })) }
+        : { category, teeth: Object.keys(selection) };
+    const seq = ++estimateSeq.current;
+    const t = setTimeout(async () => {
+      const n = await estimateCasePrice(labId, clinicId, rx);
+      if (seq === estimateSeq.current) setExpectedPrice(n);
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, labId, selectedClinicId, defaultClinicId, caseMode, restorations, category, selection]);
+
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
 
   // Edit mode: rehydrate every field from the case being edited. Keyed on the
@@ -1382,27 +1406,6 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       : procTat(category);
   const effTat = baseTat;
   const today = new Date();
-  // Debounced live estimate — fires whenever the priced inputs change.
-  useEffect(() => {
-    const clinicId = selectedClinicId || defaultClinicId;
-    const hasItems = caseMode === "restorations" ? restorations.length > 0 : !!category;
-    if (!open || !labId || !clinicId || !hasItems) {
-      setExpectedPrice(null);
-      return;
-    }
-    const rx =
-      caseMode === "restorations"
-        ? { restorations: restorations.map((r) => ({ category: r.category, teeth: r.teeth })) }
-        : { category, teeth: selectedTeeth };
-    const seq = ++estimateSeq.current;
-    const t = setTimeout(async () => {
-      const n = await estimateCasePrice(labId, clinicId, rx);
-      if (seq === estimateSeq.current) setExpectedPrice(n);
-    }, 350);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, labId, selectedClinicId, defaultClinicId, caseMode, restorations, category, selectedTeeth]);
-
   const estReady = lab ? addDays(today, effTat) : null;
   const insufficientTime =
     insertionDate && estReady && new Date(insertionDate) < new Date(iso(estReady));
