@@ -24,6 +24,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { fetchCaseNotes, insertCaseNote } from "./lib/data.js";
+import { SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 
 /* ================================================================== */
 /*  Lifecycle model — THE single source of truth for case progress    */
@@ -522,6 +523,75 @@ export function CasePriceField({ c, onSave, onReset }) {
   );
 }
 
+/* Phase 36 — the lab-determined shade for "Shade by Lab" cases. The
+   technician records the real shade before the work goes back; the
+   clinic sees it read-only. Same click-to-edit pattern as the invoice
+   number and price fields. */
+export function needsLabShade(c) {
+  const p = c?.prescription;
+  if (!p) return false;
+  const byLab = (r) => r?.shadeGuide === SHADE_BY_LAB || r?.vitaShade === SHADE_BY_LAB;
+  return p.restorations?.length ? p.restorations.some(byLab) : byLab(p);
+}
+
+export function LabShadeField({ c, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    const v = draft.trim();
+    if (v !== (c.labShade || "")) onSave(v);
+  };
+
+  return (
+    <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm">
+      <span className="font-medium text-slate-400">Shade</span>
+      {editing ? (
+        <span className="flex items-center gap-1">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            placeholder="e.g. A3, A2 incisal / A3 body"
+            className="w-48 rounded-lg border border-blue-300 px-2 py-1 text-sm font-bold text-slate-800 outline-none ring-2 ring-blue-100"
+          />
+          <button onMouseDown={(e) => e.preventDefault()} onClick={commit} className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-50" title="Save shade">
+            <Check size={15} />
+          </button>
+        </span>
+      ) : (
+        <button
+          onClick={() => {
+            setDraft(c.labShade || "");
+            setEditing(true);
+          }}
+          className="group flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 font-bold hover:bg-blue-50"
+          title="The dentist chose 'Shade by Lab' — record the shade you determined"
+        >
+          {c.labShade ? (
+            <span className="text-slate-800">{c.labShade}</span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+              Shade needed — tap to set
+            </span>
+          )}
+          <Wrench size={12} className="text-slate-300 group-hover:text-blue-500" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ================================================================== */
 /*  Case lifecycle drawer (progress + handover + audit history)        */
 /* ================================================================== */
@@ -534,7 +604,7 @@ const ACTION_META = {
   remake: { icon: RefreshCcw, tint: "text-rose-600 bg-rose-100" },
 };
 
-export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onSetCasePrice, onResetCasePrice }) {
+export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onSetCasePrice, onResetCasePrice, onSetLabShade }) {
   return (
     <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
       <div className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -568,6 +638,20 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                 <section>
                   <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Prescription</h4>
                   {rxDetails}
+                </section>
+              )}
+
+              {/* lab-determined shade for "Shade by Lab" prescriptions */}
+              {(needsLabShade(caseObj) || caseObj.labShade) && (
+                <section>
+                  <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Shade — set by lab</h4>
+                  {role === "lab" && onSetLabShade ? (
+                    <LabShadeField c={caseObj} onSave={(v) => onSetLabShade(caseObj.id, v)} />
+                  ) : (
+                    <p className="text-sm font-bold text-slate-800">
+                      {caseObj.labShade || <span className="font-medium text-slate-400">Not recorded yet</span>}
+                    </p>
+                  )}
                 </section>
               )}
 

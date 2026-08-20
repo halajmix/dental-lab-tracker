@@ -2547,3 +2547,34 @@ $$;
 /* --------------------------------------------------------------------- */
 
 alter table lab_expenses add column if not exists invoice_number text not null default '';
+
+/* --------------------------------------------------------------------- */
+/*  Phase 36 — lab-determined shade                                      */
+/*                                                                       */
+/*  When the dentist picks "Shade by Lab", the technician records the    */
+/*  actual shade here before the work returns to the clinic. Lab-only    */
+/*  writable (joins the financial-column guard); the clinic sees it      */
+/*  read-only in the case details.                                       */
+/* --------------------------------------------------------------------- */
+
+alter table cases add column if not exists lab_shade text not null default '';
+
+create or replace function guard_lab_financial_columns()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) is distinct from 'service_role'
+     and (new.lab_id is null or new.lab_id is distinct from my_lab_id()) then
+    new.assigned_tech_id := old.assigned_tech_id;
+    new.invoice_status := old.invoice_status;
+    new.base_fee := old.base_fee;
+    new.adjustments := old.adjustments;
+    new.total_price := old.total_price;
+    new.statement_id := old.statement_id;
+    new.invoice_number := old.invoice_number;
+    new.price_overridden := old.price_overridden;
+    new.lab_shade := old.lab_shade;
+  end if;
+  return new;
+end;
+$$ language plpgsql;

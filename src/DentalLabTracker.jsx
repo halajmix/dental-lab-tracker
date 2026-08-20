@@ -58,6 +58,8 @@ import {
   CaseDrawer,
   isUrgent,
   CasePriceField,
+  LabShadeField,
+  needsLabShade,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
 import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel } from "./LabAdmin.jsx";
@@ -372,7 +374,9 @@ function CaseRxDetails({ c }) {
   const specRows = (r) => {
     const shade =
       r.shadeGuide === SHADE_BY_LAB
-        ? SHADE_BY_LAB
+        ? c.labShade
+          ? `${SHADE_BY_LAB} — ${c.labShade}`
+          : SHADE_BY_LAB
         : r.vitaShade && r.vitaShade !== "N/A"
         ? `${r.vitaShade}${r.shadeGuide && r.shadeGuide !== "N/A" ? ` (${r.shadeGuide})` : ""}`
         : null;
@@ -939,6 +943,7 @@ export default function DentalLabTracker({ auth }) {
   // the DB pricing trigger skips them until reset, which re-sends the
   // unchanged prescription purely to re-fire automatic pricing.
   const setCasePrice = (caseId, totalPrice) => persist(caseId, { totalPrice, priceOverridden: true });
+  const setLabShade = (caseId, labShade) => persist(caseId, { labShade });
   const resetCasePrice = (c) => persist(c.id, { priceOverridden: false, prescription: c.prescription });
 
   /* ---------------- Cancellation workflow (Phase 27) ----------------
@@ -1245,6 +1250,7 @@ export default function DentalLabTracker({ auth }) {
               onSetInvoiceNumber={setInvoiceNumber}
               onSetCasePrice={setCasePrice}
               onResetCasePrice={resetCasePrice}
+              onSetLabShade={setLabShade}
               onResolveCancellation={resolveCancellation}
               onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
             />
@@ -1427,6 +1433,7 @@ export default function DentalLabTracker({ auth }) {
         onPrint={() => drawerCase && setPrintCaseId(drawerCase.id)}
         onSetCasePrice={!isDentist ? setCasePrice : undefined}
         onResetCasePrice={!isDentist ? resetCasePrice : undefined}
+        onSetLabShade={!isDentist ? setLabShade : undefined}
       />
 
       {/* ------------------- Phase 4 overlays ------------------- */}
@@ -1808,7 +1815,7 @@ const QUEUE_TAB_DEFS = [
   { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
 ];
 
-function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onResolveCancellation, onExportCsv }) {
+function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation, onExportCsv }) {
   const [queueTab, setQueueTab] = useState("incoming");
   // Brief confirmation after a stage change moves a case out of the tab
   // you're looking at — without this, advancing the only case in "Incoming"
@@ -1923,6 +1930,7 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
               onSetInvoiceNumber={onSetInvoiceNumber}
               onSetCasePrice={onSetCasePrice}
               onResetCasePrice={onResetCasePrice}
+              onSetLabShade={onSetLabShade}
             />
           ))}
         </div>
@@ -2170,7 +2178,7 @@ function CancellationRequestBanner({ c, onResolve }) {
   );
 }
 
-function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onResolveCancellation }) {
+function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -2262,6 +2270,11 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
       {/* The lab's final price — hand-editable any time before invoicing */}
       {onSetCasePrice && (
         <CasePriceField c={c} onSave={(n) => onSetCasePrice(c.id, n)} onReset={() => onResetCasePrice(c)} />
+      )}
+
+      {/* "Shade by Lab" cases: the technician records the shade here */}
+      {onSetLabShade && (needsLabShade(c) || c.labShade) && (
+        <LabShadeField c={c} onSave={(v) => onSetLabShade(c.id, v)} />
       )}
 
       {/* Visual progress — 5 dots, current step highlighted, no percentages or paragraphs */}

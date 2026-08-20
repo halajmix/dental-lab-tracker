@@ -59,6 +59,8 @@ export const caseFromRow = (r) => ({
   cancelStatus: r.cancel_status ?? "none",
   cancellationFee: r.cancellation_fee != null ? Number(r.cancellation_fee) : null,
   priceOverridden: r.price_overridden ?? false,
+  // Phase 36: shade determined by the lab when the Rx said "Shade by Lab".
+  labShade: r.lab_shade ?? "",
 });
 
 export const clinicFromRow = (r) => ({
@@ -246,6 +248,7 @@ const PATCH_KEY_MAP = {
   // guard for lab members; priceOverridden makes them sticky vs repricing.
   totalPrice: "total_price",
   priceOverridden: "price_overridden",
+  labShade: "lab_shade",
 };
 
 export async function updateCase(id, patch) {
