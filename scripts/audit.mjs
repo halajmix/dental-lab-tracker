@@ -124,6 +124,11 @@ for (const l of labs.filter((x) => x.owner_id)) {
   const n = def ? (itemsBySched.get(def)?.size ?? 0) : 0;
   say(n ? "PASS" : "WARN", `lab "${l.name}": default price list ${def ? `has ${n} items` : "MISSING"}`, n === 0 && def ? "empty — clinics without their own list get NO auto-pricing" : "");
 }
+const clinicName = new Map(clinics.map((c) => [c.id, c.name]));
+for (const s of schedules.filter((x) => !x.is_default)) {
+  const linked = rules.filter((r) => r.price_schedule_id === s.id).map((r) => clinicName.get(r.clinic_id) ?? r.clinic_id);
+  say("INFO", `  clinic list "${s.name}": ${itemsBySched.get(s.id)?.size ?? 0} items`, linked.length ? `rule-linked to ${linked.join(", ")}` : "NOT rule-linked to any clinic — never used for pricing");
+}
 
 // ---------- 6. client crash reports ----------
 const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
