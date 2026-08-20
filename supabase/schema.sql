@@ -2766,3 +2766,24 @@ create policy "login_events_insert_own" on login_events for insert
 drop policy if exists "login_events_select_admin" on login_events;
 create policy "login_events_select_admin" on login_events for select
   using (is_admin());
+
+/* --------------------------------------------------------------------- */
+/*  Phase 37b — lab admins read their own staff's sign-in log            */
+/*                                                                       */
+/*  Scoped strictly to users whose profile belongs to the admin's lab —  */
+/*  clinics and other labs stay super-admin-only.                        */
+/* --------------------------------------------------------------------- */
+
+create or replace function same_lab_user(target uuid)
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select my_lab_id() is not null and exists (
+    select 1 from profiles p where p.id = target and p.lab_id = my_lab_id()
+  );
+$$;
+
+drop policy if exists "login_events_select_lab_admin" on login_events;
+create policy "login_events_select_lab_admin" on login_events for select
+  using (is_lab_admin() and same_lab_user(user_id));

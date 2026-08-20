@@ -39,6 +39,7 @@ import {
   upsertClinicPriceRule,
   deleteClinicPriceRule,
   fetchChargedLineItems,
+  fetchLoginEvents,
   fetchLabRoster,
   fetchCommissionRates,
   saveCommissionRates,
@@ -2069,6 +2070,66 @@ export function StaffPanel({ lab, meId }) {
         Suspended members lose all access instantly; read-only members can view but not change anything. The owner
         and your own row can't be locked out from here.
       </p>
+    </div>
+  );
+}
+
+/* Lab-side staff sign-in log (Phase 37b) — RLS scopes the rows to this
+   lab's own members; clinics and other labs never appear here. */
+export function LabStaffLogsPanel() {
+  const [events, setEvents] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = () => {
+    setEvents(null);
+    setError("");
+    fetchLoginEvents(300)
+      .then(setEvents)
+      .catch((err) => {
+        setEvents([]);
+        setError(err.message);
+      });
+  };
+  useEffect(load, []);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
+        <h3 className="text-sm font-bold text-slate-800">Staff sign-ins</h3>
+        <p className="text-xs text-slate-400">Every login by your lab's members, newest first.</p>
+        <button onClick={load} className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600" title="Refresh">
+          <RefreshCcw size={14} />
+        </button>
+      </div>
+      {error && <p className="border-b border-slate-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">{error}</p>}
+      {events === null ? (
+        <p className="px-4 py-10 text-center text-sm text-slate-400">Loading sign-ins…</p>
+      ) : events.length === 0 ? (
+        <p className="px-4 py-10 text-center text-sm text-slate-400">
+          No sign-ins recorded yet — entries appear as your staff log in from now on.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[420px] text-left text-sm">
+            <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-4 py-2">Date &amp; time</th>
+                <th className="px-4 py-2">Name</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {events.map((e) => (
+                <tr key={e.id}>
+                  <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-slate-600">
+                    {new Date(e.at).toLocaleString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </td>
+                  <td className="px-4 py-2.5 font-semibold text-slate-800">{e.name || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -62,7 +62,7 @@ import {
   needsLabShade,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
-import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel } from "./LabAdmin.jsx";
+import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel, LabStaffLogsPanel } from "./LabAdmin.jsx";
 import { BillingPanel, ExpensesPanel } from "./LabFinance.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
@@ -619,6 +619,7 @@ const ADMIN_TABS = [
   { id: "expenses", label: "Expenses", icon: Wallet },
   { id: "prices", label: "Price Lists", icon: Tags },
   { id: "staff", label: "Staff", icon: UserPlus },
+  { id: "logs", label: "Staff logs", icon: HistoryIcon },
 ];
 
 const ACCOUNTANT_TAB_IDS = ["queue", "billing", "expenses", "prices"];
@@ -660,6 +661,8 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly =
         <ExpensesPanel lab={lab} />
       ) : tab === "prices" ? (
         <PriceListsManager lab={lab} clinicsById={clinicsById} cases={cases} />
+      ) : tab === "logs" ? (
+        <LabStaffLogsPanel />
       ) : (
         <StaffPanel lab={lab} meId={meId} />
       )}
