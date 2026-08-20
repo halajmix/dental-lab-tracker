@@ -238,6 +238,7 @@ export function mapImportRows(categoryId, rows) {
         amount,
         method: toMethod(kMethod ? r[kMethod] : ""),
         description: String(kDesc ? r[kDesc] : "").trim(),
+        invoiceNumber: String(kRef ? r[kRef] : "").trim(),
         expenseDate: date,
       });
     }

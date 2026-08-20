@@ -871,7 +871,7 @@ export function ExpensesPanel({ lab }) {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ category: "Materials", amount: "", method: "cash", description: "", date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ category: "Materials", amount: "", method: "cash", description: "", invoiceNumber: "", date: new Date().toISOString().slice(0, 10) });
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -920,8 +920,8 @@ export function ExpensesPanel({ lab }) {
     setBusy(true);
     setError("");
     try {
-      await insertExpense(lab.id, { category: form.category, amount: n, method: form.method, description: form.description.trim(), expenseDate: form.date });
-      setForm((f) => ({ ...f, amount: "", description: "" }));
+      await insertExpense(lab.id, { category: form.category, amount: n, method: form.method, description: form.description.trim(), invoiceNumber: form.invoiceNumber.trim(), expenseDate: form.date });
+      setForm((f) => ({ ...f, amount: "", description: "", invoiceNumber: "" }));
       await load();
     } catch (err) {
       setError("Couldn't save the expense — " + err.message);
@@ -984,7 +984,7 @@ export function ExpensesPanel({ lab }) {
       {/* Add expense */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <h3 className="mb-3 text-sm font-bold text-slate-800">Add expense</h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-slate-600">Category</span>
             <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} className={inputCls}>
@@ -1009,6 +1009,10 @@ export function ExpensesPanel({ lab }) {
             <span className="mb-1 block text-xs font-medium text-slate-600">Date</span>
             <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className={inputCls} />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">Invoice #</span>
+            <input value={form.invoiceNumber} onChange={(e) => setForm((f) => ({ ...f, invoiceNumber: e.target.value }))} className={inputCls} placeholder="Supplier invoice no." />
+          </label>
           <label className="block sm:col-span-2 lg:col-span-1">
             <span className="mb-1 block text-xs font-medium text-slate-600">Description</span>
             <input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className={inputCls} placeholder="Zirconia discs, July rent…" />
@@ -1028,12 +1032,13 @@ export function ExpensesPanel({ lab }) {
           <p className="py-8 text-center text-sm text-slate-400">No expenses recorded yet.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
+            <table className="w-full min-w-[600px] text-sm">
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   <th className="pb-2 pr-3">Date</th>
                   <th className="pb-2 pr-3">Category</th>
                   <th className="pb-2 pr-3">Description</th>
+                  <th className="pb-2 pr-3">Invoice #</th>
                   <th className="pb-2 pr-3">Method</th>
                   <th className="pb-2 pr-3 text-right">Amount</th>
                   <th className="pb-2" />
@@ -1045,6 +1050,7 @@ export function ExpensesPanel({ lab }) {
                     <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">{e.expenseDate}</td>
                     <td className="py-2.5 pr-3 font-semibold text-slate-700">{e.category}</td>
                     <td className="max-w-[220px] truncate py-2.5 pr-3 text-slate-500">{e.description || "—"}</td>
+                    <td className="py-2.5 pr-3 whitespace-nowrap text-slate-500">{e.invoiceNumber || "—"}</td>
                     <td className="py-2.5 pr-3 text-slate-500">{METHOD_LABEL[e.method]}</td>
                     <td className="py-2.5 pr-3 text-right font-semibold text-slate-800 whitespace-nowrap">{fmtOMR(e.amount)}</td>
                     <td className="py-2.5 text-right">

@@ -772,6 +772,7 @@ const expenseFromRow = (r) => ({
   amount: Number(r.amount) || 0,
   method: r.method,
   description: r.description ?? "",
+  invoiceNumber: r.invoice_number ?? "",
   expenseDate: r.expense_date,
   createdAt: r.created_at,
 });
@@ -860,10 +861,13 @@ export async function deletePayment(paymentId) {
   if (error) throw error;
 }
 
-export async function insertExpense(labId, { category, amount, method, description, expenseDate }) {
+export async function insertExpense(labId, { category, amount, method, description, invoiceNumber, expenseDate }) {
+  const row = { lab_id: labId, category, amount, method, description: description ?? "", expense_date: expenseDate };
+  // Omitted when empty so inserts still work before the Phase 35 column exists.
+  if (invoiceNumber) row.invoice_number = invoiceNumber;
   const { data, error } = await supabase
     .from("lab_expenses")
-    .insert({ lab_id: labId, category, amount, method, description: description ?? "", expense_date: expenseDate })
+    .insert(row)
     .select()
     .single();
   if (error) throw error;
@@ -961,14 +965,18 @@ export async function importFinanceRows(labId, { statements = [], payments = [],
   });
   await chunked(expenses, async (batch) => {
     const { error } = await supabase.from("lab_expenses").insert(
-      batch.map((e) => ({
-        lab_id: labId,
-        category: e.category,
-        amount: e.amount,
-        method: e.method,
-        description: e.description ?? "",
-        expense_date: e.expenseDate,
-      })),
+      batch.map((e) => {
+        const row = {
+          lab_id: labId,
+          category: e.category,
+          amount: e.amount,
+          method: e.method,
+          description: e.description ?? "",
+          expense_date: e.expenseDate,
+        };
+        if (e.invoiceNumber) row.invoice_number = e.invoiceNumber;
+        return row;
+      }),
     );
     if (error) throw error;
   });

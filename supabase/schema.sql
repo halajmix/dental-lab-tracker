@@ -2541,3 +2541,9 @@ exception when others then
   return null;
 end;
 $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 35 — supplier invoice number on expenses                       */
+/* --------------------------------------------------------------------- */
+
+alter table lab_expenses add column if not exists invoice_number text not null default '';
