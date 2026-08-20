@@ -16,6 +16,10 @@ export function reportError(message, stack) {
   try {
     const msg = String(message ?? "Unknown error");
     if (IGNORE_RE.test(msg)) return;
+    // Service-worker registration rejections (in-app browsers, private
+    // mode, extensions wrapping the API) — the app runs fine without a SW,
+    // just with no offline shell; nothing to act on.
+    if (/ServiceWorkerContainer/.test(String(stack ?? ""))) return;
     const key = msg.slice(0, 200);
     if (seen.has(key) || seen.size >= 20) return; // per-session dedupe + cap
     seen.add(key);

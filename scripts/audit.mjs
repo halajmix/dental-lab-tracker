@@ -124,4 +124,23 @@ for (const l of labs.filter((x) => x.owner_id)) {
   const n = def ? (itemsBySched.get(def)?.size ?? 0) : 0;
   say(n ? "PASS" : "WARN", `lab "${l.name}": default price list ${def ? `has ${n} items` : "MISSING"}`, n === 0 && def ? "empty — clinics without their own list get NO auto-pricing" : "");
 }
+
+// ---------- 6. client crash reports ----------
+const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+const errors = await get(`client_errors?select=at,message,stack,url,alerted&at=gte.${weekAgo}&order=at.desc`);
+const errDay = errors.filter((e) => new Date(e.at).getTime() > dayAgo);
+const unalerted = errors.filter((e) => !e.alerted);
+say(errDay.length ? "WARN" : "PASS", `client errors: ${errDay.length} in last 24h, ${errors.length} in last 7d, ${unalerted.length} awaiting the hourly digest`);
+const groups = new Map();
+for (const e of errors) {
+  const msg = (e.message || "").replace(/\s+/g, " ").slice(0, 100);
+  const g = groups.get(msg) ?? { n: 0, latest: e };
+  g.n++;
+  groups.set(msg, g);
+}
+for (const [msg, g] of [...groups].sort((a, b) => b[1].n - a[1].n).slice(0, 6)) {
+  say("WARN", `  ${g.n}x, latest ${g.latest.at.slice(0, 16)}Z: ${msg}`);
+  const frames = (g.latest.stack || "").split("\n").slice(1).filter((l) => l.trim());
+  frames.slice(0, 2).forEach((f) => say("WARN", `      ${f.trim().slice(0, 110)}`));
+}
 console.log("\nAudit complete.");
