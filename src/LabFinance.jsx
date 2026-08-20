@@ -1036,9 +1036,9 @@ export function ExpensesPanel({ lab }) {
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
                   <th className="pb-2 pr-3">Date</th>
+                  <th className="pb-2 pr-3">Invoice #</th>
                   <th className="pb-2 pr-3">Category</th>
                   <th className="pb-2 pr-3">Description</th>
-                  <th className="pb-2 pr-3">Invoice #</th>
                   <th className="pb-2 pr-3">Method</th>
                   <th className="pb-2 pr-3 text-right">Amount</th>
                   <th className="pb-2" />
@@ -1048,9 +1048,9 @@ export function ExpensesPanel({ lab }) {
                 {expenses.map((e) => (
                   <tr key={e.id} className="border-t border-slate-100">
                     <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">{e.expenseDate}</td>
+                    <td className="py-2.5 pr-3 whitespace-nowrap text-slate-500">{e.invoiceNumber || "—"}</td>
                     <td className="py-2.5 pr-3 font-semibold text-slate-700">{e.category}</td>
                     <td className="max-w-[220px] truncate py-2.5 pr-3 text-slate-500">{e.description || "—"}</td>
-                    <td className="py-2.5 pr-3 whitespace-nowrap text-slate-500">{e.invoiceNumber || "—"}</td>
                     <td className="py-2.5 pr-3 text-slate-500">{METHOD_LABEL[e.method]}</td>
                     <td className="py-2.5 pr-3 text-right font-semibold text-slate-800 whitespace-nowrap">{fmtOMR(e.amount)}</td>
                     <td className="py-2.5 text-right">
