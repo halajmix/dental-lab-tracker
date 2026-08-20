@@ -2233,15 +2233,16 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               </>
             )}
             <span className="ml-auto flex shrink-0 items-center gap-3">
-              {expectedPrice != null && (
-                <span
-                  className="flex items-center gap-1 font-semibold text-emerald-700"
-                  title="Expected price from your price agreement with this lab — the lab may adjust the final amount"
-                >
-                  <Banknote size={12} className="text-emerald-500" />
-                  ~{Number(expectedPrice).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR
-                </span>
-              )}
+              {/* Always mounted, visibility-toggled: unmounting/remounting this
+                  span next to translated siblings is exactly the DOM shuffle
+                  that crashed React under browser page-translation. */}
+              <span
+                className={`items-center gap-1 font-semibold text-emerald-700 ${expectedPrice != null ? "flex" : "hidden"}`}
+                title="Expected price from your price agreement with this lab — the lab may adjust the final amount"
+              >
+                <Banknote size={12} className="text-emerald-500" />
+                <span>~{expectedPrice != null ? Number(expectedPrice).toLocaleString(undefined, { maximumFractionDigits: 3 }) : ""} OMR</span>
+              </span>
               <span className={`flex items-center gap-1 font-semibold ${insufficientTime ? "text-rose-600" : "text-slate-700"}`}>
                 <Calendar size={12} className="text-slate-400" />
                 Ready {estReady ? iso(estReady) : "—"}

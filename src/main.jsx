@@ -13,6 +13,30 @@ import "./index.css";
 // to the client_errors table; an hourly job emails the admin a digest.
 installGlobalErrorReporting();
 
+// Browser page translation (Google Translate & friends) rewrites text nodes
+// underneath React; React's next commit then throws removeChild/insertBefore
+// "not a child of this node" and white-screens the app — caught live via the
+// error digest (both messages, 2026-08-20). The standard facebook/react#11538
+// hardening: degrade gracefully instead of crashing.
+if (typeof Node !== "undefined" && Node.prototype) {
+  const origRemoveChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function (child, ...rest) {
+    if (child && child.parentNode !== this) {
+      console.warn("removeChild skipped: node was reparented (browser translation?)");
+      return child;
+    }
+    return origRemoveChild.call(this, child, ...rest);
+  };
+  const origInsertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function (newNode, referenceNode, ...rest) {
+    if (referenceNode && referenceNode.parentNode !== this) {
+      console.warn("insertBefore fallback: reference was reparented (browser translation?)");
+      return this.appendChild(newNode);
+    }
+    return origInsertBefore.call(this, newNode, referenceNode, ...rest);
+  };
+}
+
 // Role-gated and rarely used — keep it out of the initial bundle everyone
 // else (dentist/lab logins) pays for. The .catch mirrors ErrorBoundary's
 // stale-deploy self-heal: if this chunk's old hashed name is gone after a
