@@ -628,6 +628,12 @@ const ACCOUNTANT_TAB_IDS = ["queue", "billing", "expenses", "prices"];
 function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly = false, isAdminPreview = false }) {
   const [tab, setTab] = useState("queue");
   const tabs = financeOnly ? ADMIN_TABS.filter((t) => ACCOUNTANT_TAB_IDS.includes(t.id)) : ADMIN_TABS;
+  // The open-tab state survives switching between the Admin and Accountant
+  // views — without this clamp, an admin-only tab (e.g. Staff logs) kept
+  // rendering its CONTENT in the accountant view after its nav button was
+  // already filtered out (caught live by the user).
+  const rawTab = tab;
+  const activeTab = financeOnly && !ACCOUNTANT_TAB_IDS.includes(rawTab) ? "queue" : rawTab;
   return (
     <div>
       {isAdminPreview && (
@@ -643,26 +649,26 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly =
             key={id}
             onClick={() => setTab(id)}
             className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              tab === id ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+              activeTab === id ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
             }`}
           >
             <Icon size={14} /> {label}
           </button>
         ))}
       </nav>
-      {tab === "queue" ? (
+      {activeTab === "queue" ? (
         queue
-      ) : tab === "overview" ? (
+      ) : activeTab === "overview" ? (
         <OverviewDashboard cases={cases} clinicsById={clinicsById} lab={lab} />
-      ) : tab === "technicians" ? (
+      ) : activeTab === "technicians" ? (
         <TechniciansPanel lab={lab} cases={cases} />
-      ) : tab === "billing" ? (
+      ) : activeTab === "billing" ? (
         <BillingPanel lab={lab} clinicsById={clinicsById} cases={cases} />
-      ) : tab === "expenses" ? (
+      ) : activeTab === "expenses" ? (
         <ExpensesPanel lab={lab} />
-      ) : tab === "prices" ? (
+      ) : activeTab === "prices" ? (
         <PriceListsManager lab={lab} clinicsById={clinicsById} cases={cases} />
-      ) : tab === "logs" ? (
+      ) : activeTab === "logs" ? (
         <LabStaffLogsPanel />
       ) : (
         <StaffPanel lab={lab} meId={meId} />
