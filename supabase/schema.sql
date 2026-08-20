@@ -2796,3 +2796,39 @@ create policy "login_events_select_lab_admin" on login_events for select
 
 alter table login_events add column if not exists action text not null default 'sign-in';
 alter table login_events add column if not exists detail text not null default '';
+
+/* --------------------------------------------------------------------- */
+/*  Phase 39 — payment reminders start 25 September 2026                 */
+/*                                                                       */
+/*  The platform wasn't ready for the first firing (25 Aug 2026 — price  */
+/*  lists still being rebuilt after Phase 34), so the monthly reminder   */
+/*  run is a no-op before this date. The cron job still fires on the     */
+/*  25th; the guard simply returns early. Nothing to undo later — from   */
+/*  25 Sep 2026 onward the guard always passes.                          */
+/* --------------------------------------------------------------------- */
+
+create or replace function private.run_payment_reminders()
+returns void
+security definer
+set search_path = public, private
+as $$
+declare
+  secret text;
+begin
+  -- Skip firings before the go-live date (see Phase 39 header).
+  if current_date < date '2026-09-25' then
+    return;
+  end if;
+  select value into secret from private.webhook_config where key = 'case_notify_secret';
+  perform net.http_post(
+    url := 'https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/payment-reminders',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-webhook-secret', coalesce(secret, '')
+    ),
+    body := jsonb_build_object('source', 'pg_cron'),
+    -- Give the function time to email every clinic before pg_net hangs up.
+    timeout_milliseconds := 30000
+  );
+end;
+$$ language plpgsql;
