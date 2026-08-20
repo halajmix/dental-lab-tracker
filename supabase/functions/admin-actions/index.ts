@@ -178,7 +178,7 @@ Deno.serve(async (req) => {
         const userId = String(body.userId ?? "");
         const labId = String(body.labId ?? "");
         const roles = Array.isArray(body.roles)
-          ? body.roles.filter((r: unknown) => r === "lab_admin" || r === "lab_tech")
+          ? body.roles.filter((r: unknown) => r === "lab_admin" || r === "lab_tech" || r === "accountant")
           : [];
         if (!userId || !labId) return json({ error: "userId and labId required" }, 400);
         if (!roles.length) return json({ error: "at least one role required" }, 400);

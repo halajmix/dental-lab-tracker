@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
-import { clinicFromRow, labFromRow, fetchMyLabMemberships } from "./data.js";
+import { clinicFromRow, labFromRow, fetchMyLabMemberships, logLoginEvent } from "./data.js";
 
 /**
  * Session + profile/org loader. `profile` carries the role; `clinic`/`lab`
@@ -30,6 +30,9 @@ export function useAuth() {
   // (Supabase fires auth events in bursts — token refresh, tab focus).
   const loadedUserRef = useRef(null);
   const loadSeqRef = useRef(0);
+  // Set when a REAL sign-in happens (not token refresh / tab refocus);
+  // consumed after the profile loads so the audit row carries name + org.
+  const pendingLoginLogRef = useRef(false);
 
   const loadProfile = useCallback(async (userId) => {
     const seq = ++loadSeqRef.current;
@@ -40,9 +43,11 @@ export function useAuth() {
     setProfile(prof ?? null);
     loadedUserRef.current = userId;
 
+    let clinicRow = null;
     if (prof?.clinic_id) {
       const { data: c } = await supabase.from("clinics").select("*").eq("id", prof.clinic_id).maybeSingle();
       if (!fresh()) return;
+      clinicRow = c ?? null;
       setClinic(c ? clinicFromRow(c) : null);
     } else {
       setClinic(null);
@@ -67,6 +72,27 @@ export function useAuth() {
       setLab(null);
       setLabMemberships(null);
     }
+
+    // Sign-in audit ("Staff logs"): one row per genuine sign-in, written
+    // after the profile/org loaded so the row is human-readable.
+    if (pendingLoginLogRef.current) {
+      pendingLoginLogRef.current = false;
+      let orgName = clinicRow?.name ?? "";
+      if (!orgName && prof?.lab_id) {
+        try {
+          const { data: l } = await supabase.from("labs").select("name").eq("id", prof.lab_id).maybeSingle();
+          orgName = l?.name ?? "";
+        } catch {
+          orgName = "";
+        }
+      }
+      logLoginEvent({
+        userId,
+        name: prof?.name ?? "",
+        role: prof?.role ?? "no profile yet",
+        orgName,
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -85,6 +111,9 @@ export function useAuth() {
     const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
       if (cancelled) return;
       if (event === "PASSWORD_RECOVERY") setRecovery(true);
+      if (event === "SIGNED_IN" && next?.user && next.user.id !== loadedUserRef.current) {
+        pendingLoginLogRef.current = true;
+      }
       setSession(next);
       if (next?.user) {
         // Same signed-in user (routine token refresh / tab refocus — fires

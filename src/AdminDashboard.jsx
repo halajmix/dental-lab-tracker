@@ -34,6 +34,7 @@ import {
   adminSetLabStatus,
   adminSetClinicStatus,
   adminSetLabRoles,
+  fetchLoginEvents,
   adminTransferLabOwnership,
   adminFetchPriceSchedules,
   fetchLabRoster,
@@ -109,6 +110,85 @@ function ConfirmDialog({ target, busy, onCancel, onConfirm }) {
   );
 }
 
+/* "Staff logs" — the append-only sign-in audit (Phase 37): every clinic
+   and lab account entry, newest first. */
+function StaffLogsPanel() {
+  const [events, setEvents] = useState(null); // null = loading
+  const [error, setError] = useState("");
+  const [q, setQ] = useState("");
+
+  const load = () => {
+    setEvents(null);
+    setError("");
+    fetchLoginEvents(500)
+      .then(setEvents)
+      .catch((err) => {
+        setEvents([]);
+        setError(err.message);
+      });
+  };
+  useEffect(load, []);
+
+  const visible = (events ?? []).filter((e) => {
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return [e.name, e.role, e.orgName].join(" ").toLowerCase().includes(s);
+  });
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-3">
+        <Clock size={15} className="text-blue-500" />
+        <h3 className="text-sm font-bold text-slate-800">Sign-ins ({events?.length ?? "…"})</h3>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Filter by name, role, organization…"
+          className="ml-auto w-64 max-w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-400 focus:bg-white"
+        />
+        <button onClick={load} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600" title="Refresh">
+          <RefreshCcw size={14} />
+        </button>
+      </div>
+      {error && <p className="border-b border-slate-100 bg-rose-50 px-5 py-2 text-xs font-semibold text-rose-700">{error}</p>}
+      {events === null ? (
+        <p className="px-5 py-10 text-center text-sm text-slate-400">Loading sign-ins…</p>
+      ) : visible.length === 0 ? (
+        <p className="px-5 py-10 text-center text-sm text-slate-400">
+          No sign-ins recorded{q ? " matching that filter" : " yet — entries appear as people log in from now on"}.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-5 py-2">Date &amp; time</th>
+                <th className="px-5 py-2">Name</th>
+                <th className="px-5 py-2">Role</th>
+                <th className="px-5 py-2">Organization</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visible.map((e) => (
+                <tr key={e.id} className="hover:bg-slate-50/60">
+                  <td className="whitespace-nowrap px-5 py-2.5 tabular-nums text-slate-600">
+                    {new Date(e.at).toLocaleString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </td>
+                  <td className="px-5 py-2.5 font-semibold text-slate-800">{e.name || "—"}</td>
+                  <td className="px-5 py-2.5">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-slate-500">{e.role || "?"}</span>
+                  </td>
+                  <td className="px-5 py-2.5 text-slate-600">{e.orgName || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminDashboard({ auth }) {
   const { profile, signOut } = auth;
 
@@ -121,6 +201,7 @@ export default function AdminDashboard({ auth }) {
   const [actionError, setActionError] = useState("");
 
   const [confirmTarget, setConfirmTarget] = useState(null); // { message, run: () => Promise }
+  const [view, setView] = useState("overview"); // "overview" | "logs" (Staff logs)
   const [busy, setBusy] = useState(false);
   const [viewAsBusyId, setViewAsBusyId] = useState(null);
 
@@ -274,10 +355,34 @@ export default function AdminDashboard({ auth }) {
           </div>
         ) : (
           <>
-            <div>
-              <h2 className="text-lg font-bold text-slate-800">Platform Overview</h2>
-              <p className="text-sm text-slate-500">Every clinic and lab on Dr-Crown, at a glance.</p>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">{view === "logs" ? "Staff logs" : "Platform Overview"}</h2>
+                <p className="text-sm text-slate-500">
+                  {view === "logs"
+                    ? "Every sign-in across the platform — clinic and lab accounts alike."
+                    : "Every clinic and lab on Dr-Crown, at a glance."}
+                </p>
+              </div>
+              <nav className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
+                {[["overview", "Overview"], ["logs", "Staff logs"]].map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setView(id)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      view === id ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
             </div>
+
+            {view === "logs" ? (
+              <StaffLogsPanel />
+            ) : (
+            <>
 
             {/* Phase 30 — new signups queue here until activated */}
             {pendingOrgs.length > 0 && (
@@ -651,6 +756,8 @@ export default function AdminDashboard({ auth }) {
                 instead of one lab's/clinic's — gives lab performance comparison +
                 remake root-cause breakdown across every lab for free. */}
             <AnalyticsDashboard cases={cases} labs={labs} />
+            </>
+            )}
           </>
         )}
       </main>

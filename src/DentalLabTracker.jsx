@@ -618,12 +618,15 @@ const ADMIN_TABS = [
   { id: "staff", label: "Staff", icon: UserPlus },
 ];
 
-function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId }) {
+const ACCOUNTANT_TAB_IDS = ["queue", "billing", "expenses", "prices"];
+
+function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly = false }) {
   const [tab, setTab] = useState("queue");
+  const tabs = financeOnly ? ADMIN_TABS.filter((t) => ACCOUNTANT_TAB_IDS.includes(t.id)) : ADMIN_TABS;
   return (
     <div>
       <nav className="mb-5 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
-        {ADMIN_TABS.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -739,7 +742,11 @@ export default function DentalLabTracker({ auth }) {
     .map((m) => m.role);
   const hasAdminRole = !isDentist && (isLegacyLabOwner || activeRoles.includes("lab_admin"));
   const hasTechRole = !isDentist && (isLegacyLabOwner || activeRoles.includes("lab_tech"));
-  const isDualLab = hasAdminRole && hasTechRole;
+  // Phase 37: accountants run billing/expenses/price lists + the case
+  // queue, but none of the admin-only panels (Overview/Technicians/Staff).
+  const hasAccountantRole = !isDentist && activeRoles.includes("accountant");
+  const hasBackOffice = hasAdminRole || hasAccountantRole;
+  const isDualLab = hasBackOffice && hasTechRole;
   // Mirrors RLS: my_lab_id() nulls out when ANY membership row is suspended.
   const isSuspended = !isDentist && memberships.some((m) => m.status === "suspended");
   // Phase 30 signup-approval gate: the whole org (clinic or lab) is pending
@@ -768,7 +775,7 @@ export default function DentalLabTracker({ auth }) {
   };
   // Single-role members are pinned to their one workspace regardless of
   // any stale stored preference.
-  const activeWorkspace = hasAdminRole ? (hasTechRole ? workspacePref : "admin") : "tech";
+  const activeWorkspace = hasBackOffice ? (hasTechRole ? workspacePref : "admin") : "tech";
 
   const [labs, setLabs] = useState([]);
   const [cases, setCases] = useState([]);
@@ -1246,7 +1253,7 @@ export default function DentalLabTracker({ auth }) {
               onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
               onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
               onOpenCase={setDrawerCaseId}
-              onLogRemake={setRemakeCaseId}
+              onLogRemake={hasTechRole || hasAdminRole ? setRemakeCaseId : undefined}
               onSetInvoiceNumber={setInvoiceNumber}
               onSetCasePrice={setCasePrice}
               onResetCasePrice={resetCasePrice}
@@ -1256,7 +1263,7 @@ export default function DentalLabTracker({ auth }) {
             />
           );
           return activeWorkspace === "admin" ? (
-            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} cases={labQueue} meId={profile.id} />
+            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} cases={labQueue} meId={profile.id} financeOnly={!hasAdminRole} />
           ) : (
             labDashboard
           );
@@ -1429,7 +1436,7 @@ export default function DentalLabTracker({ auth }) {
         onAdvance={() => drawerCase && advanceStage(drawerCase.id, currentUser, currentRole)}
         onRevert={() => drawerCase && revertStage(drawerCase.id, currentUser, currentRole)}
         onSaveHandover={(data) => drawerCase && saveHandover(drawerCase.id, data, currentUser)}
-        onLogRemake={() => drawerCase && setRemakeCaseId(drawerCase.id)}
+        onLogRemake={hasTechRole || hasAdminRole || isDentist ? () => drawerCase && setRemakeCaseId(drawerCase.id) : undefined}
         onPrint={() => drawerCase && setPrintCaseId(drawerCase.id)}
         onSetCasePrice={!isDentist ? setCasePrice : undefined}
         onResetCasePrice={!isDentist ? resetCasePrice : undefined}

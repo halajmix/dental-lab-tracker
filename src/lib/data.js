@@ -662,6 +662,38 @@ export async function adminSetLabStatus(labId, status) {
   await callAdminAction("set-lab-status", { labId, status });
 }
 
+// Sign-in audit (Phase 37). Fire-and-forget: an audit hiccup must never
+// affect login itself.
+export async function logLoginEvent({ userId, name, role, orgName }) {
+  try {
+    await supabase.from("login_events").insert({
+      user_id: userId,
+      name: name ?? "",
+      role: role ?? "",
+      org_name: orgName ?? "",
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function fetchLoginEvents(limit = 500) {
+  const { data, error } = await supabase
+    .from("login_events")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data.map((r) => ({
+    id: r.id,
+    userId: r.user_id,
+    name: r.name,
+    role: r.role,
+    orgName: r.org_name,
+    at: r.created_at,
+  }));
+}
+
 export async function adminSetClinicStatus(clinicId, status) {
   await callAdminAction("set-clinic-status", { clinicId, status });
 }

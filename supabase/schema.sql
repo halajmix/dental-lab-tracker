@@ -2578,3 +2578,191 @@ begin
   return new;
 end;
 $$ language plpgsql;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 37 — "Accountant" lab role + sign-in audit log                 */
+/*                                                                       */
+/*  Accountants run the money side (billing, expenses, price lists) and  */
+/*  work the technician case queue, but they are NOT admins: no          */
+/*  Overview/financial analysis, no Technicians panel, no Staff          */
+/*  management, no Lab Settings. Their view of bills and expenses is     */
+/*  capped at the last 2 calendar months — EXCEPT statements a clinic    */
+/*  still owes money on, which stay visible at any age so collections    */
+/*  keep working. All enforced here in RLS, not just hidden in the UI.   */
+/*                                                                       */
+/*  login_events is an append-only sign-in audit (every clinic and lab   */
+/*  user), readable only by the platform super admin ("Staff logs").     */
+/* --------------------------------------------------------------------- */
+
+alter table lab_members drop constraint if exists lab_members_role_check;
+alter table lab_members add constraint lab_members_role_check
+  check (role in ('lab_admin', 'lab_tech', 'accountant'));
+
+create or replace function is_lab_accountant()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from lab_members m
+    where m.user_id = auth.uid()
+      and m.lab_id = (select lab_id from profiles where id = auth.uid())
+      and m.role = 'accountant' and m.status = 'active'
+  );
+$$;
+
+-- Money-side write access: admins and accountants alike.
+create or replace function is_lab_finance()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select is_lab_admin() or is_lab_accountant();
+$$;
+
+-- The accountant's rolling visibility window: first day of the month,
+-- two months back (e.g. on 20 Aug the cutoff is 1 Jun).
+create or replace function accountant_cutoff()
+returns date
+language sql stable
+as $$
+  select (date_trunc('month', now()) - interval '2 months')::date;
+$$;
+
+-- Statements: admins see everything; accountants see the recent window
+-- plus ANY statement that still has money owing on it.
+drop policy if exists "statements_all" on clinic_statements;
+create policy "statements_select" on clinic_statements for select
+  using (
+    is_admin()
+    or (lab_id = my_lab_id()
+        and (is_lab_admin()
+             or (is_lab_accountant() and (month >= accountant_cutoff() or status <> 'paid'))))
+  );
+drop policy if exists "statements_insert" on clinic_statements;
+create policy "statements_insert" on clinic_statements for insert
+  with check (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "statements_update" on clinic_statements;
+create policy "statements_update" on clinic_statements for update
+  using (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "statements_delete" on clinic_statements;
+create policy "statements_delete" on clinic_statements for delete
+  using (lab_id = my_lab_id() and is_lab_finance());
+
+drop policy if exists "payments_all" on lab_payments;
+create policy "payments_select" on lab_payments for select
+  using (
+    is_admin()
+    or (lab_id = my_lab_id()
+        and (is_lab_admin()
+             or (is_lab_accountant() and received_date >= accountant_cutoff())))
+  );
+drop policy if exists "payments_insert" on lab_payments;
+create policy "payments_insert" on lab_payments for insert
+  with check (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "payments_update" on lab_payments;
+create policy "payments_update" on lab_payments for update
+  using (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "payments_delete" on lab_payments;
+create policy "payments_delete" on lab_payments for delete
+  using (lab_id = my_lab_id() and is_lab_finance());
+
+drop policy if exists "expenses_all" on lab_expenses;
+create policy "expenses_select" on lab_expenses for select
+  using (
+    is_admin()
+    or (lab_id = my_lab_id()
+        and (is_lab_admin()
+             or (is_lab_accountant() and expense_date >= accountant_cutoff())))
+  );
+drop policy if exists "expenses_insert" on lab_expenses;
+create policy "expenses_insert" on lab_expenses for insert
+  with check (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "expenses_update" on lab_expenses;
+create policy "expenses_update" on lab_expenses for update
+  using (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "expenses_delete" on lab_expenses;
+create policy "expenses_delete" on lab_expenses for delete
+  using (lab_id = my_lab_id() and is_lab_finance());
+
+-- Price lists: accountants manage them too (writes were admin-only).
+drop policy if exists "price_schedules_insert_admin" on price_schedules;
+create policy "price_schedules_insert_admin" on price_schedules for insert
+  with check (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "price_schedules_update_admin" on price_schedules;
+create policy "price_schedules_update_admin" on price_schedules for update
+  using (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "price_schedules_delete_admin" on price_schedules;
+create policy "price_schedules_delete_admin" on price_schedules for delete
+  using (lab_id = my_lab_id() and is_lab_finance());
+
+drop policy if exists "price_items_insert_admin" on price_schedule_items;
+create policy "price_items_insert_admin" on price_schedule_items for insert
+  with check (exists (
+    select 1 from price_schedules s
+     where s.id = schedule_id and s.lab_id = my_lab_id() and is_lab_finance()
+  ));
+drop policy if exists "price_items_update_admin" on price_schedule_items;
+create policy "price_items_update_admin" on price_schedule_items for update
+  using (exists (
+    select 1 from price_schedules s
+     where s.id = schedule_id and s.lab_id = my_lab_id() and is_lab_finance()
+  ));
+drop policy if exists "price_items_delete_admin" on price_schedule_items;
+create policy "price_items_delete_admin" on price_schedule_items for delete
+  using (exists (
+    select 1 from price_schedules s
+     where s.id = schedule_id and s.lab_id = my_lab_id() and is_lab_finance()
+  ));
+
+drop policy if exists "clinic_price_rules_insert_admin" on clinic_price_rules;
+create policy "clinic_price_rules_insert_admin" on clinic_price_rules for insert
+  with check (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "clinic_price_rules_update_admin" on clinic_price_rules;
+create policy "clinic_price_rules_update_admin" on clinic_price_rules for update
+  using (lab_id = my_lab_id() and is_lab_finance());
+drop policy if exists "clinic_price_rules_delete_admin" on clinic_price_rules;
+create policy "clinic_price_rules_delete_admin" on clinic_price_rules for delete
+  using (lab_id = my_lab_id() and is_lab_finance());
+
+-- Repricing goes with price-list editing.
+create or replace function reprice_unbilled_cases()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n integer;
+begin
+  if my_lab_id() is null or not is_lab_finance() then
+    raise exception 'Only an active lab admin or accountant can re-price cases';
+  end if;
+  update cases
+     set prescription = prescription
+   where lab_id = my_lab_id()
+     and invoice_status = 'draft';
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Sign-in audit ("Staff logs" on the super admin dashboard). Append-only:
+-- each user may insert their own row at sign-in; only the platform admin
+-- reads; nobody updates or deletes through the API.
+create table if not exists login_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  name text not null default '',
+  role text not null default '',
+  org_name text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists login_events_created_idx on login_events (created_at desc);
+alter table login_events enable row level security;
+drop policy if exists "login_events_insert_own" on login_events;
+create policy "login_events_insert_own" on login_events for insert
+  with check (user_id = auth.uid());
+drop policy if exists "login_events_select_admin" on login_events;
+create policy "login_events_select_admin" on login_events for select
+  using (is_admin());
