@@ -31,6 +31,7 @@ import {
   insertExpense,
   deleteExpense,
   importFinanceRows,
+  logActivity,
 } from "./lib/data.js";
 import { downloadStatementPdf } from "./lib/statementPdf.js";
 import { IMPORT_CATEGORIES, readWorkbookRows, mapImportRows } from "./lib/financeImport.js";
@@ -197,6 +198,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
     setGenState({ confirming: false, busy: true, message: "" });
     try {
       const n = await generateStatements(genMonth);
+      logActivity("generated statements", `${n} for ${genMonth.slice(0, 7)}`);
       setGenState({ confirming: false, busy: false, message: n ? `${n} statement${n === 1 ? "" : "s"} generated.` : "Nothing to bill for that month." });
       await load();
     } catch (err) {
@@ -211,6 +213,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
     const included = cases
       .filter((c) => c.statementId === s.id)
       .map((c) => ({ ...c, completedAtLabel: completedAt(c)?.toLocaleDateString("en-GB") ?? "" }));
+    logActivity("downloaded statement PDF", `${clinicLabel(s)} — ${s.month.slice(0, 7)} — ${s.total} OMR`);
     await downloadStatementPdf({
       lab,
       clinic: clinicsById[s.clinicId] ?? { name: s.clinicName || "Clinic" },
@@ -324,6 +327,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
       });
       done++;
     }
+    logActivity("recorded payments (bulk)", `${done} statements — ${fmtOMR(selectedRemaining)}`);
     setSelected(new Set());
     setBulkMsg(`${done} payment${done === 1 ? "" : "s"} recorded — ${fmtOMR(selectedRemaining)}.`);
     await load();
@@ -792,6 +796,7 @@ function RecordPaymentModal({ open, statement, clinic, remaining, labId, onClose
         reference: reference.trim(),
         receivedDate: date,
       });
+      logActivity("recorded payment", `${fmtOMR(n)} — ${clinic?.name ?? statement.clinicName ?? ""}`);
       await onSaved();
       onClose();
     } catch (err) {
@@ -921,6 +926,7 @@ export function ExpensesPanel({ lab }) {
     setError("");
     try {
       await insertExpense(lab.id, { category: form.category, amount: n, method: form.method, description: form.description.trim(), invoiceNumber: form.invoiceNumber.trim(), expenseDate: form.date });
+      logActivity("added expense", `${fmtOMR(n)} — ${form.category}${form.description ? ` — ${form.description.trim()}` : ""}`);
       setForm((f) => ({ ...f, amount: "", description: "", invoiceNumber: "" }));
       await load();
     } catch (err) {
@@ -1129,6 +1135,7 @@ function ImportHistoryCard({ lab, onImported }) {
     setError("");
     try {
       await importFinanceRows(lab.id, mapped);
+      logActivity("imported finance history", mapped.summary ?? "");
       setDone(`Imported: ${mapped.summary}`);
       setMapped(null);
       setFileName("");

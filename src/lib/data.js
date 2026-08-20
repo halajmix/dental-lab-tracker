@@ -662,15 +662,40 @@ export async function adminSetLabStatus(labId, status) {
   await callAdminAction("set-lab-status", { labId, status });
 }
 
-// Sign-in audit (Phase 37). Fire-and-forget: an audit hiccup must never
-// affect login itself.
+// Activity audit (Phases 37/38). The context is set once per session by
+// useAuth after the profile loads; every logActivity call rides on it.
+// All fire-and-forget: an audit hiccup must never affect the app.
+let activityCtx = null;
+export function setActivityContext(ctx) {
+  activityCtx = ctx; // { userId, name, role, orgName }
+}
+
+export async function logActivity(action, detail = "") {
+  const ctx = activityCtx;
+  if (!ctx?.userId) return;
+  try {
+    await supabase.from("login_events").insert({
+      user_id: ctx.userId,
+      name: ctx.name ?? "",
+      role: ctx.role ?? "",
+      org_name: ctx.orgName ?? "",
+      action,
+      detail: String(detail).slice(0, 300),
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function logLoginEvent({ userId, name, role, orgName }) {
+  setActivityContext({ userId, name, role, orgName });
   try {
     await supabase.from("login_events").insert({
       user_id: userId,
       name: name ?? "",
       role: role ?? "",
       org_name: orgName ?? "",
+      action: "sign-in",
     });
   } catch {
     /* ignore */
@@ -690,6 +715,8 @@ export async function fetchLoginEvents(limit = 500) {
     name: r.name,
     role: r.role,
     orgName: r.org_name,
+    action: r.action ?? "sign-in",
+    detail: r.detail ?? "",
     at: r.created_at,
   }));
 }

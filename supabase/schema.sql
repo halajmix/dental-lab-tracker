@@ -2787,3 +2787,12 @@ $$;
 drop policy if exists "login_events_select_lab_admin" on login_events;
 create policy "login_events_select_lab_admin" on login_events for select
   using (is_lab_admin() and same_lab_user(user_id));
+
+/* --------------------------------------------------------------------- */
+/*  Phase 38 — sign-in log grows into a full activity log                */
+/*  What each user DID: viewed a case, downloaded a PDF, exported a CSV, */
+/*  recorded a payment, added an expense, submitted a prescription, ...  */
+/* --------------------------------------------------------------------- */
+
+alter table login_events add column if not exists action text not null default 'sign-in';
+alter table login_events add column if not exists detail text not null default '';

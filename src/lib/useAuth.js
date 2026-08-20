@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
-import { clinicFromRow, labFromRow, fetchMyLabMemberships, logLoginEvent } from "./data.js";
+import { clinicFromRow, labFromRow, fetchMyLabMemberships, logLoginEvent, setActivityContext } from "./data.js";
 
 /**
  * Session + profile/org loader. `profile` carries the role; `clinic`/`lab`
@@ -53,9 +53,11 @@ export function useAuth() {
       setClinic(null);
     }
 
+    let labRowName = "";
     if (prof?.lab_id) {
       const { data: l } = await supabase.from("labs").select("*").eq("id", prof.lab_id).maybeSingle();
       if (!fresh()) return;
+      labRowName = l?.name ?? "";
       setLab(l ? labFromRow(l) : null);
       // Fail-soft: if lab_members doesn't exist yet (schema phase not run)
       // or the read fails, fall back to [] = legacy full access, matching
@@ -72,6 +74,16 @@ export function useAuth() {
       setLab(null);
       setLabMemberships(null);
     }
+
+    // Keep the activity-log context fresh on every profile load, so any
+    // later logActivity() call carries name/role/org even without a new
+    // sign-in this app-load.
+    setActivityContext({
+      userId,
+      name: prof?.name ?? "",
+      role: prof?.role ?? "",
+      orgName: clinicRow?.name || labRowName || "",
+    });
 
     // Sign-in audit ("Staff logs"): one row per genuine sign-in, written
     // after the profile/org loaded so the row is human-readable.

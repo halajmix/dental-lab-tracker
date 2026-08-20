@@ -53,6 +53,7 @@ import {
   addMemberRole,
   removeMemberRole,
   removeLabMember,
+  logActivity,
 } from "./lib/data.js";
 
 /* ================================================================== */
@@ -728,6 +729,7 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                 await mutate(async () => {
                   count = await repriceUnbilledCases();
                 });
+                logActivity("re-priced unbilled cases", `${count ?? 0} cases`);
                 return count;
               }}
             />
@@ -902,6 +904,7 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                                             (schedules ?? []).find((s) => s.isDefault)?.items ?? []
                                           ),
                                         });
+                                        logActivity("created clinic price list", c.name);
                                         if (registered) {
                                           await upsertClinicPriceRule(lab.id, registered.id, { priceScheduleId: schedId });
                                           // Existing unbilled cases from this clinic pick the new
@@ -2096,7 +2099,7 @@ export function LabStaffLogsPanel() {
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
         <h3 className="text-sm font-bold text-slate-800">Staff sign-ins</h3>
-        <p className="text-xs text-slate-400">Every login by your lab's members, newest first.</p>
+        <p className="text-xs text-slate-400">Sign-ins and actions by your lab's members, newest first.</p>
         <button onClick={load} className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600" title="Refresh">
           <RefreshCcw size={14} />
         </button>
@@ -2110,11 +2113,13 @@ export function LabStaffLogsPanel() {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[420px] text-left text-sm">
+          <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-4 py-2">Date &amp; time</th>
                 <th className="px-4 py-2">Name</th>
+                <th className="px-4 py-2">Action</th>
+                <th className="px-4 py-2">Detail</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -2124,6 +2129,12 @@ export function LabStaffLogsPanel() {
                     {new Date(e.at).toLocaleString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </td>
                   <td className="px-4 py-2.5 font-semibold text-slate-800">{e.name || "—"}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5">
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${e.action === "sign-in" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"}`}>
+                      {e.action}
+                    </span>
+                  </td>
+                  <td className="max-w-[240px] truncate px-4 py-2.5 text-slate-500" title={e.detail}>{e.detail || "—"}</td>
                 </tr>
               ))}
             </tbody>

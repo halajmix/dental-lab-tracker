@@ -83,6 +83,7 @@ import {
   uploadAvatar,
   updateLab,
   fetchLabRoster,
+  logActivity,
 } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 
@@ -977,6 +978,18 @@ export default function DentalLabTracker({ auth }) {
   // unchanged prescription purely to re-fire automatic pricing.
   const setCasePrice = (caseId, totalPrice) => persist(caseId, { totalPrice, priceOverridden: true });
   const setLabShade = (caseId, labShade) => persist(caseId, { labShade });
+  // Activity-log wrappers (Phase 38): views/downloads land in Staff logs.
+  const openCaseDrawer = (id) => {
+    const c = cases.find((x) => x.id === id);
+    logActivity("viewed case", c ? `${c.id} — ${c.patientName}` : id);
+    setDrawerCaseId(id);
+  };
+  const openRxSheet = (id, share = false) => {
+    const c = cases.find((x) => x.id === id);
+    logActivity(share ? "shared Rx PDF" : "opened Rx print sheet", c ? `${c.id} — ${c.patientName}` : id);
+    if (share) setAutoShare(true);
+    setPrintCaseId(id);
+  };
   const resetCasePrice = (c) => persist(c.id, { priceOverridden: false, prescription: c.prescription });
 
   /* ---------------- Cancellation workflow (Phase 27) ----------------
@@ -1038,6 +1051,7 @@ export default function DentalLabTracker({ auth }) {
   };
 
   const addCase = async (data, opts = {}) => {
+    logActivity("submitted prescription", `${data.patientName ?? ""}`);
     // Multi-clinic: the Rx form's "Sending Clinic" selector (only shown when
     // the dentist owns more than one) passes clinicId explicitly; falls
     // back to the profile's default clinic for everyone else.
@@ -1260,7 +1274,7 @@ export default function DentalLabTracker({ auth }) {
             query={query}
             setQuery={setQuery}
             onAdvance={(id) => advanceStage(id, currentUser, "dentist")}
-            onOpenCase={setDrawerCaseId}
+            onOpenCase={openCaseDrawer}
             canEditRx={canEditRx}
             onRequestCancel={requestCancellation}
             onWithdrawCancel={withdrawCancellation}
@@ -1270,9 +1284,9 @@ export default function DentalLabTracker({ auth }) {
               setEditingCase(c);
               setShowCaseModal(true);
             }}
-            onShareRx={(id) => { setAutoShare(true); setPrintCaseId(id); }}
+            onShareRx={(id) => openRxSheet(id, true)}
             onContactLab={setContactCaseId}
-            onExportCsv={() => exportCasesCSV(filteredDentistCases, labs, clinic?.dentist, "dentatrack-clinic-cases.csv")}
+            onExportCsv={() => { logActivity("exported cases CSV", `${filteredDentistCases.length} cases`); exportCasesCSV(filteredDentistCases, labs, clinic?.dentist, "dentatrack-clinic-cases.csv"); }}
           />
         ) : isSuspended ? (
           <SuspendedScreen labName={lab?.name} onSignOut={signOut} />
@@ -1284,14 +1298,14 @@ export default function DentalLabTracker({ auth }) {
               clinicsById={clinicsById}
               onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
               onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
-              onOpenCase={setDrawerCaseId}
+              onOpenCase={openCaseDrawer}
               onLogRemake={hasTechRole || hasAdminRole ? setRemakeCaseId : undefined}
               onSetInvoiceNumber={setInvoiceNumber}
               onSetCasePrice={setCasePrice}
               onResetCasePrice={resetCasePrice}
               onSetLabShade={setLabShade}
               onResolveCancellation={resolveCancellation}
-              onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
+              onExportCsv={() => { logActivity("exported cases CSV", `${labQueue.length} cases`); exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`); }}
             />
           );
           return activeWorkspace === "admin" || activeWorkspace === "accountant" ? (
@@ -1477,7 +1491,7 @@ export default function DentalLabTracker({ auth }) {
         onRevert={() => drawerCase && revertStage(drawerCase.id, currentUser, currentRole)}
         onSaveHandover={(data) => drawerCase && saveHandover(drawerCase.id, data, currentUser)}
         onLogRemake={hasTechRole || hasAdminRole || isDentist ? () => drawerCase && setRemakeCaseId(drawerCase.id) : undefined}
-        onPrint={() => drawerCase && setPrintCaseId(drawerCase.id)}
+        onPrint={() => drawerCase && openRxSheet(drawerCase.id)}
         onSetCasePrice={!isDentist ? setCasePrice : undefined}
         onResetCasePrice={!isDentist ? resetCasePrice : undefined}
         onSetLabShade={!isDentist ? setLabShade : undefined}

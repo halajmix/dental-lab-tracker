@@ -132,7 +132,7 @@ function StaffLogsPanel() {
   const visible = (events ?? []).filter((e) => {
     const s = q.trim().toLowerCase();
     if (!s) return true;
-    return [e.name, e.role, e.orgName].join(" ").toLowerCase().includes(s);
+    return [e.name, e.role, e.orgName, e.action, e.detail].join(" ").toLowerCase().includes(s);
   });
 
   return (
@@ -159,13 +159,15 @@ function StaffLogsPanel() {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-sm">
+          <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-5 py-2">Date &amp; time</th>
                 <th className="px-5 py-2">Name</th>
                 <th className="px-5 py-2">Role</th>
                 <th className="px-5 py-2">Organization</th>
+                <th className="px-5 py-2">Action</th>
+                <th className="px-5 py-2">Detail</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -179,6 +181,12 @@ function StaffLogsPanel() {
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-slate-500">{e.role || "?"}</span>
                   </td>
                   <td className="px-5 py-2.5 text-slate-600">{e.orgName || "—"}</td>
+                  <td className="whitespace-nowrap px-5 py-2.5">
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${e.action === "sign-in" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"}`}>
+                      {e.action}
+                    </span>
+                  </td>
+                  <td className="max-w-[260px] truncate px-5 py-2.5 text-slate-500" title={e.detail}>{e.detail || "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -360,7 +368,7 @@ export default function AdminDashboard({ auth }) {
                 <h2 className="text-lg font-bold text-slate-800">{view === "logs" ? "Staff logs" : "Platform Overview"}</h2>
                 <p className="text-sm text-slate-500">
                   {view === "logs"
-                    ? "Every sign-in across the platform — clinic and lab accounts alike."
+                    ? "Every sign-in and action across the platform — views, downloads, payments and more."
                     : "Every clinic and lab on Dr-Crown, at a glance."}
                 </p>
               </div>
