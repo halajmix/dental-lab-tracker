@@ -52,7 +52,26 @@ export default class ErrorBoundary extends React.Component {
     }
   }
 
-  reload = () => window.location.reload();
+  // A crash is very often "old cached bundle hit a new-code path" — the
+  // installed PWA's service worker keeps serving the stale build and a
+  // plain reload changes nothing. Reloading from a crash therefore does a
+  // FULL self-heal: unregister every service worker and drop CacheStorage
+  // so the next load fetches the current deploy from the network.
+  reload = async () => {
+    try {
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+      if (window.caches?.keys) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+    } catch {
+      /* ignore — plain reload is still better than nothing */
+    }
+    window.location.reload();
+  };
 
   resetData = () => {
     try {
