@@ -586,7 +586,7 @@ function CaseActionsMenu({ c, lab, onOpenCase, onContactLab, onShareRx, onAdvanc
 /* ------------------------------------------------------------------ */
 
 // Segmented workspace control, shown only to dual-role lab users.
-function WorkspaceSwitcher({ workspace, onChange }) {
+function WorkspaceSwitcher({ workspace, onChange, hasAdminRole, hasTechRole, hasAccountantRole }) {
   const seg = (id, Icon, label) => (
     <button
       key={id}
@@ -602,8 +602,11 @@ function WorkspaceSwitcher({ workspace, onChange }) {
   );
   return (
     <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-slate-100 p-0.5">
-      {seg("admin", Shield, "Lab Admin")}
-      {seg("tech", Wrench, "Technician")}
+      {hasAdminRole && seg("admin", Shield, "Lab Admin")}
+      {/* Admins can preview the accountant workspace; real accountants land
+          here as their own back-office view. */}
+      {(hasAdminRole || hasAccountantRole) && seg("accountant", Wallet, "Accountant")}
+      {(hasTechRole || hasAdminRole) && seg("tech", Wrench, "Technician")}
     </div>
   );
 }
@@ -620,11 +623,18 @@ const ADMIN_TABS = [
 
 const ACCOUNTANT_TAB_IDS = ["queue", "billing", "expenses", "prices"];
 
-function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly = false }) {
+function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly = false, isAdminPreview = false }) {
   const [tab, setTab] = useState("queue");
   const tabs = financeOnly ? ADMIN_TABS.filter((t) => ACCOUNTANT_TAB_IDS.includes(t.id)) : ADMIN_TABS;
   return (
     <div>
+      {isAdminPreview && (
+        <p className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-medium text-emerald-800">
+          Viewing as Accountant — these are the tabs an accountant gets. Note: a real accountant also only
+          sees the last 2 months of bills, payments and expenses (plus any statement a clinic still owes on);
+          as an admin you're shown everything.
+        </p>
+      )}
       <nav className="mb-5 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
@@ -775,7 +785,20 @@ export default function DentalLabTracker({ auth }) {
   };
   // Single-role members are pinned to their one workspace regardless of
   // any stale stored preference.
-  const activeWorkspace = hasBackOffice ? (hasTechRole ? workspacePref : "admin") : "tech";
+  // Workspaces this user may open: admins get all three (Accountant is a
+  // preview of that role's workspace); accountants get theirs + tech.
+  const allowedWorkspaces = hasAdminRole
+    ? ["admin", "accountant", "tech"]
+    : hasAccountantRole
+      ? [...(hasTechRole ? ["tech"] : []), "accountant"]
+      : ["tech"];
+  const activeWorkspace = allowedWorkspaces.includes(workspacePref)
+    ? workspacePref
+    : hasAdminRole
+      ? "admin"
+      : hasAccountantRole
+        ? "accountant"
+        : "tech";
 
   const [labs, setLabs] = useState([]);
   const [cases, setCases] = useState([]);
@@ -1124,8 +1147,14 @@ export default function DentalLabTracker({ auth }) {
           </div>
 
           <div className="flex items-center gap-2">
-            {isDualLab && !isSuspended && !orgBlocked && (
-              <WorkspaceSwitcher workspace={activeWorkspace} onChange={switchWorkspace} />
+            {allowedWorkspaces.length > 1 && !isDentist && !isSuspended && !orgBlocked && (
+              <WorkspaceSwitcher
+                workspace={activeWorkspace}
+                onChange={switchWorkspace}
+                hasAdminRole={hasAdminRole}
+                hasTechRole={hasTechRole}
+                hasAccountantRole={hasAccountantRole}
+              />
             )}
             {(isDentist || hasAdminRole) && !orgBlocked && (
               <button
@@ -1262,8 +1291,16 @@ export default function DentalLabTracker({ auth }) {
               onExportCsv={() => exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`)}
             />
           );
-          return activeWorkspace === "admin" ? (
-            <LabAdminWorkspace queue={labDashboard} lab={lab} clinicsById={clinicsById} cases={labQueue} meId={profile.id} financeOnly={!hasAdminRole} />
+          return activeWorkspace === "admin" || activeWorkspace === "accountant" ? (
+            <LabAdminWorkspace
+              queue={labDashboard}
+              lab={lab}
+              clinicsById={clinicsById}
+              cases={labQueue}
+              meId={profile.id}
+              financeOnly={activeWorkspace === "accountant" || !hasAdminRole}
+              isAdminPreview={activeWorkspace === "accountant" && hasAdminRole}
+            />
           ) : (
             labDashboard
           );
