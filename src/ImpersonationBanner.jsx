@@ -26,7 +26,11 @@ export default function ImpersonationBanner() {
   };
 
   return (
-    <div className="sticky top-0 z-[100] flex items-center justify-center gap-3 bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-md">
+    // z-40: above the app header (z-30) but BELOW every overlay — modals,
+    // drawers, and the Print/Share Rx preview live at z-50/z-[70], and at
+    // z-[100] this banner used to sit on top of their close buttons,
+    // trapping the admin inside full-screen views.
+    <div className="sticky top-0 z-40 flex items-center justify-center gap-3 bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-md">
       <Eye size={15} />
       <span>Viewing as a user — Super Admin support mode</span>
       <button
