@@ -200,7 +200,9 @@ function ItemRow({ item, busy, onSave, onDelete }) {
 
 /* ---------------- one price list card ---------------- */
 
-function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete }) {
+function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete, onReprice }) {
+  // "Update case prices" feedback — count of unbilled cases recomputed.
+  const [repriceMsg, setRepriceMsg] = useState("");
   const fileRef = useRef(null);
   const [adding, setAdding] = useState(false);
   const [newCat, setNewCat] = useState("");
@@ -263,6 +265,21 @@ function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete }) {
           </button>
         )}
         <div className="ml-auto flex items-center gap-1">
+          {repriceMsg && <span className="mr-1 text-xs font-semibold text-emerald-600">{repriceMsg}</span>}
+          {onReprice && (
+            <button
+              onClick={async () => {
+                setRepriceMsg("");
+                const n = await onReprice();
+                if (n != null) setRepriceMsg(`${n} case${n === 1 ? "" : "s"} updated.`);
+              }}
+              disabled={busy}
+              className="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+              title="Re-apply the current price lists to every unbilled case (manually set prices are never touched)"
+            >
+              <RefreshCcw size={13} /> Update case prices
+            </button>
+          )}
           <button
             onClick={exportCsv}
             className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
@@ -705,6 +722,13 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
               onMutate={mutate}
               onMakeDefault={(id) => mutate(() => setDefaultSchedule(lab.id, id))}
               onDelete={(id) => mutate(() => deletePriceSchedule(id))}
+              onReprice={async () => {
+                let count = null;
+                await mutate(async () => {
+                  count = await repriceUnbilledCases();
+                });
+                return count;
+              }}
             />
           ))}
 
