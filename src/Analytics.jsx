@@ -15,7 +15,7 @@ export const BASE_PRICE = {
   "Bridge - tooth (Resin Bonded)": 460,
   "Bridge - implant": 950,
   Veneer: 480,
-  "Removable denture": 680,
+  "Removable partial denture": 680,
   "Orthodontics splint": 300,
   "Single layer splint - soft": 180,
   "Double layer splint - soft": 240,

@@ -23,7 +23,7 @@ const get = async (p) => {
 const say = (level, label, extra = "") => console.log(`${level.padEnd(5)} ${label}${extra ? " — " + extra : ""}`);
 
 // Must mirror price_case()'s appliance list (Phase 34, extended Phase 45).
-const APPLIANCE = new Set(["Removable denture","Complete denture","Michigan splint","Orthodontics splint","Single layer splint - soft","Double layer splint - soft","Double layer splint - outer hard, inner soft","Clear retainer","Night guard","Fixed retainer","Study model","Special tray","Others - refer to notes"]);
+const APPLIANCE = new Set(["Removable partial denture","Complete denture","Michigan splint","Orthodontics splint","Single layer splint - soft","Double layer splint - soft","Double layer splint - outer hard, inner soft","Clear retainer","Night guard","Fixed retainer","Study model","Special tray","Others - refer to notes"]);
 
 const [labs, clinics, cases, schedules, items, rules, statements, payments, expenses, profiles, members, logins] = await Promise.all([
   get("labs?select=id,name,status,owner_id"),
@@ -67,9 +67,9 @@ for (const c of cases) {
     const teeth = r?.teeth?.length ?? 0;
     // Mirror price_case(): arch appliances use the both-arches price when
     // chosen+set; the denture adds per-tooth fee x marked teeth (Phases 44/45).
-    const ARCH = new Set(["Removable denture","Complete denture","Clear retainer","Night guard","Fixed retainer","Study model","Special tray"]);
+    const ARCH = new Set(["Removable partial denture","Complete denture","Clear retainer","Night guard","Fixed retainer","Study model","Special tray"]);
     const lineBase = ARCH.has(r.category) && r?.arches === "both" && it.pba != null ? it.pba : it.base;
-    if (r.category === "Removable denture" && it.ptf != null) {
+    if (r.category === "Removable partial denture" && it.ptf != null) {
       // first tooth included in the base; only extras add the fee (Phase 47)
       base += lineBase + it.ptf * Math.max(teeth - 1, 0);
     } else {

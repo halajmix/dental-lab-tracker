@@ -104,7 +104,7 @@ const CATEGORIES = {
       "PMMA Provisional",
     ],
   },
-  "Removable denture": {
+  "Removable partial denture": {
     materials: [
       "Cobalt-Chrome RPD Framework",
       "Removable Partial Denture - Acrylic (with clasps)",
@@ -137,9 +137,9 @@ const CATEGORIES = {
 
 // Appliances made per dental arch: the dentist picks Upper / Lower / Both and
 // the lab prices a single arch vs both arches separately (schema Phase 45).
-// Removable denture included — a complete denture is upper, lower, or both.
+// The partial denture included — a complete denture is upper, lower, or both.
 export const ARCH_CATEGORIES = [
-  "Removable denture",
+  "Removable partial denture",
   "Complete denture",
   "Clear retainer",
   "Night guard",
@@ -1921,7 +1921,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     // one tooth is required.
     teeth:
       caseMode === "appliance" &&
-      (!ARCH_CATEGORIES.includes(category) || category === "Removable denture") &&
+      (!ARCH_CATEGORIES.includes(category) || category === "Removable partial denture") &&
       selectedTeeth.length === 0,
     material: caseMode === "appliance" && !isSplint && !material,
     implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
@@ -2401,7 +2401,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <Field label="Appliance Type" required>
                     <select className={inputCls} value={category} onChange={(e) => onCategoryChange(e.target.value)}>
                       {APPLIANCE_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>{c === "Removable denture" ? "Removable denture (partial)" : c}</option>
+                        <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
                   </Field>

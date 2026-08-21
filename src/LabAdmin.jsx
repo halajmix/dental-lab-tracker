@@ -175,7 +175,7 @@ function parsePriceCsv(text) {
 
 // Only the denture is priced base + per-tooth (user decision 2026-08-21);
 // splints and everything else stay flat.
-const PER_TOOTH_CATEGORY = "Removable denture";
+const PER_TOOTH_CATEGORY = "Removable partial denture";
 
 // Small numeric field for ItemRow: commits on blur, blank commits `clear`
 // (when allowed), invalid input reverts to the saved value.
@@ -626,7 +626,7 @@ function mapToRxCategory(name) {
   if (/veneer|laminate/.test(s)) return "Veneer";
   if (/crown/.test(s)) return "Crown - tooth";
   if (/michigan/.test(s)) return "Michigan splint";
-  if (/denture|rpd|\bpartial\b|flexible/.test(s)) return "Removable denture";
+  if (/denture|rpd|\bpartial\b|flexible/.test(s)) return "Removable partial denture";
   return null;
 }
 
