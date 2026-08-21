@@ -1062,6 +1062,7 @@ export default function DentalLabTracker({ auth }) {
     if (!c) return;
     const next = c.stageIndex + 1;
     if (next > LAST_STAGE) return;
+    logActivity("advanced case stage", `${c.id} — ${c.patientName} → ${STAGES[next].label}`);
     const entry = logEntry("advance", next, by, role);
     persist(
       caseId,
@@ -1075,6 +1076,7 @@ export default function DentalLabTracker({ auth }) {
     if (!c) return;
     const prevIdx = c.stageIndex - 1;
     if (prevIdx < 0) return;
+    logActivity("reverted case stage", `${c.id} — ${c.patientName} → ${STAGES[prevIdx].label}`);
     // Reverting out of Clinic Received discards any handover record.
     const clearHandover = c.stageIndex === LAST_STAGE;
     const entry = logEntry("revert", prevIdx, by, role);
@@ -1088,12 +1090,21 @@ export default function DentalLabTracker({ auth }) {
   // Lab's own internal billing/job reference for a case — no history entry,
   // this isn't a lifecycle event, just a label the lab attaches for its
   // own accounting.
-  const setInvoiceNumber = (caseId, invoiceNumber) => persist(caseId, { invoiceNumber });
+  const setInvoiceNumber = (caseId, invoiceNumber) => {
+    logActivity("set invoice number", `${caseId} → ${invoiceNumber || "(cleared)"}`);
+    persist(caseId, { invoiceNumber });
+  };
   // Phase 32: the lab's manual final price. Overridden prices are sticky —
   // the DB pricing trigger skips them until reset, which re-sends the
   // unchanged prescription purely to re-fire automatic pricing.
-  const setCasePrice = (caseId, totalPrice) => persist(caseId, { totalPrice, priceOverridden: true });
-  const setLabShade = (caseId, labShade) => persist(caseId, { labShade });
+  const setCasePrice = (caseId, totalPrice) => {
+    logActivity("set case price", `${caseId} → ${totalPrice} OMR (manual)`);
+    persist(caseId, { totalPrice, priceOverridden: true });
+  };
+  const setLabShade = (caseId, labShade) => {
+    logActivity("set lab shade", `${caseId} → ${labShade}`);
+    persist(caseId, { labShade });
+  };
   // Activity-log wrappers (Phase 38): views/downloads land in Staff logs.
   const openCaseDrawer = (id) => {
     const c = cases.find((x) => x.id === id);
@@ -1106,7 +1117,10 @@ export default function DentalLabTracker({ auth }) {
     if (share) setAutoShare(true);
     setPrintCaseId(id);
   };
-  const resetCasePrice = (c) => persist(c.id, { priceOverridden: false, prescription: c.prescription });
+  const resetCasePrice = (c) => {
+    logActivity("reset case price to automatic", c.id);
+    persist(c.id, { priceOverridden: false, prescription: c.prescription });
+  };
 
   /* ---------------- Cancellation workflow (Phase 27) ----------------
      Dentist requests / withdraws; lab approves with a fee (work already
@@ -1125,6 +1139,7 @@ export default function DentalLabTracker({ auth }) {
   const resolveCancellation = (caseId, approved, fee) => {
     const c = cases.find((x) => x.id === caseId);
     if (!c) return;
+    logActivity(approved ? "approved cancellation" : "declined cancellation", `${c.id} — ${c.patientName}${approved ? ` · fee ${Number(fee) || 0} OMR` : ""}`);
     persist(caseId, {
       cancelStatus: approved ? "cancelled" : "declined",
       ...(approved ? { cancellationFee: Number(fee) || 0 } : {}),
@@ -1143,6 +1158,7 @@ export default function DentalLabTracker({ auth }) {
     const c = cases.find((x) => x.id === caseId);
     if (!c) return;
     const cls = data.classification === "clinical" ? "Clinical" : "Laboratory";
+    logActivity("logged remake", `${c.id} — ${c.patientName} · ${cls}: ${data.reason}`);
     const label = `Remake · ${cls}: ${data.reason}`;
     persist(caseId, { remake: { ...data }, history: [...(c.history ?? []), logEntry("remake", c.stageIndex, by, currentRole, label)] });
   };

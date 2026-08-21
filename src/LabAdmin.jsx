@@ -58,6 +58,8 @@ import {
   removeLabMember,
   logActivity,
   logDisplayName,
+  fetchLoginEventsSince,
+  logExportRows,
   fetchRoundCosts,
   upsertRoundCost,
   ROUND_KIND_LABELS,
@@ -2598,9 +2600,17 @@ export function RemakesPanel({ lab, rounds = [], cases = [], clinicsById = {}, o
 
 /* Lab-side staff sign-in log (Phase 37b) — RLS scopes the rows to this
    lab's own members; clinics and other labs never appear here. */
+const LOG_EXPORT_PERIODS = [
+  { id: "1m", label: "Past month", days: 30 },
+  { id: "2m", label: "Past 2 months", days: 60 },
+  { id: "6m", label: "Past 6 months", days: 180 },
+];
+
 export function LabStaffLogsPanel() {
   const [events, setEvents] = useState(null);
   const [error, setError] = useState("");
+  const [exportPeriod, setExportPeriod] = useState("1m");
+  const [exporting, setExporting] = useState(false);
 
   const load = () => {
     setEvents(null);
@@ -2614,14 +2624,55 @@ export function LabStaffLogsPanel() {
   };
   useEffect(load, []);
 
+  // Excel download: fetch the FULL period (paginated — the on-screen list is
+  // capped at 300 rows, the export must not be), then write via SheetJS
+  // (dynamic import, same pattern as the finance history import).
+  const downloadExcel = async () => {
+    setExporting(true);
+    try {
+      const p = LOG_EXPORT_PERIODS.find((x) => x.id === exportPeriod) ?? LOG_EXPORT_PERIODS[0];
+      const since = new Date(Date.now() - p.days * 86_400_000).toISOString();
+      const all = await fetchLoginEventsSince(since);
+      const XLSX = await import("xlsx");
+      const ws = XLSX.utils.aoa_to_sheet(logExportRows(all));
+      ws["!cols"] = [{ wch: 20 }, { wch: 22 }, { wch: 28 }, { wch: 10 }, { wch: 22 }, { wch: 22 }, { wch: 46 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Staff logs");
+      XLSX.writeFile(wb, `staff-logs-${p.id}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      logActivity("exported staff logs", `${p.label} · ${all.length} rows`);
+    } catch (err) {
+      alert("Couldn't export the logs — " + err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
         <h3 className="text-sm font-bold text-slate-800">Staff sign-ins</h3>
         <p className="text-xs text-slate-400">Sign-ins and actions by your lab's members, newest first.</p>
-        <button onClick={load} className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600" title="Refresh">
-          <RefreshCcw size={14} />
-        </button>
+        <span className="ml-auto flex items-center gap-1.5">
+          <select
+            value={exportPeriod}
+            onChange={(e) => setExportPeriod(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600"
+          >
+            {LOG_EXPORT_PERIODS.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={downloadExcel}
+            disabled={exporting}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white ${exporting ? "cursor-wait bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700"}`}
+          >
+            <Download size={13} /> {exporting ? "Preparing…" : "Download Excel"}
+          </button>
+          <button onClick={load} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600" title="Refresh">
+            <RefreshCcw size={14} />
+          </button>
+        </span>
       </div>
       {error && <p className="border-b border-slate-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">{error}</p>}
       {events === null ? (

@@ -844,6 +844,42 @@ export function logDisplayName(row) {
   return (row?.email ?? "").trim() || name || "Unknown user";
 }
 
+// Every log row since `sinceIso`, paginated past the PostgREST 1000-row cap
+// (an Excel export of 6 months can easily exceed the panel's display limit).
+export async function fetchLoginEventsSince(sinceIso) {
+  const rows = await fetchAllPages(() =>
+    supabase.from("login_events").select("*").gte("created_at", sinceIso).order("created_at", { ascending: false })
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.user_id,
+    name: r.name,
+    email: r.email ?? "",
+    role: r.role,
+    orgName: r.org_name,
+    action: r.action ?? "sign-in",
+    detail: r.detail ?? "",
+    at: r.created_at,
+  }));
+}
+
+// Pure mapper for the Excel export (kept separate so it's unit-testable):
+// header row + one row per event, person resolved via logDisplayName.
+export function logExportRows(events) {
+  return [
+    ["Date & time", "Name", "Email", "Role", "Organization", "Action", "Detail"],
+    ...events.map((e) => [
+      e.at ? new Date(e.at).toLocaleString() : "",
+      logDisplayName(e),
+      e.email ?? "",
+      e.role ?? "",
+      e.orgName ?? "",
+      e.action ?? "",
+      e.detail ?? "",
+    ]),
+  ];
+}
+
 export async function adminSetClinicStatus(clinicId, status) {
   await callAdminAction("set-clinic-status", { clinicId, status });
 }
