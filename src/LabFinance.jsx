@@ -296,22 +296,93 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
       return next;
     });
 
-  // Header checkbox drives the current page's payable rows.
-  const payablePageIds = pageRows.filter((s) => (statementMeta.get(s.id)?.remaining ?? 0) > 0).map((s) => s.id);
-  const allPageSelected = payablePageIds.length > 0 && payablePageIds.every((id) => selected.has(id));
+  // Header checkbox drives ALL of the current page's rows — any statement can
+  // be selected for Excel/PDF export; only the payable subset can take a
+  // bulk payment.
+  const pageIds = pageRows.map((s) => s.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
   const togglePageSelection = () =>
     setSelected((prev) => {
       const next = new Set(prev);
-      if (allPageSelected) payablePageIds.forEach((id) => next.delete(id));
-      else payablePageIds.forEach((id) => next.add(id));
+      if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
       return next;
     });
 
+  // Everything ticked (for exports) vs the still-owing subset (for payments).
+  const selectedAll = useMemo(() => statements.filter((s) => selected.has(s.id)), [statements, selected]);
   const selectedStatements = useMemo(
-    () => statements.filter((s) => selected.has(s.id) && (statementMeta.get(s.id)?.remaining ?? 0) > 0),
-    [statements, selected, statementMeta],
+    () => selectedAll.filter((s) => (statementMeta.get(s.id)?.remaining ?? 0) > 0),
+    [selectedAll, statementMeta],
   );
   const selectedRemaining = selectedStatements.reduce((s, x) => s + (statementMeta.get(x.id)?.remaining ?? 0), 0);
+
+  const [exporting, setExporting] = useState(false);
+  const exportItems = () =>
+    selectedAll.map((s) => ({
+      clinic: clinicsById[s.clinicId] ?? { name: s.clinicName || "Clinic" },
+      statement: s,
+      cases: (cases ?? []).filter((c) => c.statementId === s.id),
+      paidSoFar: paidByStatement[s.id] ?? 0,
+    }));
+
+  const downloadSelectedPdf = async () => {
+    setExporting(true);
+    try {
+      const { downloadStatementsPdf } = await import("./lib/statementPdf.js");
+      await downloadStatementsPdf({ lab, items: exportItems() });
+      logActivity("downloaded statements PDF (bulk)", `${selectedAll.length} statements`);
+    } catch (err) {
+      alert("Couldn't build the PDF — " + err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const downloadSelectedExcel = async () => {
+    setExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const items = exportItems();
+      const summary = [
+        ["Clinic", "Month", "Total (OMR)", "Paid (OMR)", "Balance (OMR)", "Status"],
+        ...items.map(({ clinic, statement: s, paidSoFar }) => [
+          clinic?.name ?? "",
+          s.month?.slice(0, 7) ?? "",
+          Number(s.total ?? 0),
+          Number(paidSoFar ?? 0),
+          Math.max(0, Number(s.total ?? 0) - Number(paidSoFar ?? 0)),
+          s.status,
+        ]),
+      ];
+      const detail = [["Clinic", "Month", "Date", "Invoice", "Patient", "Doctor", "Procedure", "Units", "Price", "Amount (OMR)"]];
+      for (const { clinic, statement: s, cases: linked } of items) {
+        for (const c of linked) {
+          const rest = c.prescription?.restorations;
+          const label = rest?.length ? rest.map((r) => r.category).join(", ") : c.prescription?.category ?? "";
+          const units = rest?.length ? rest.reduce((n, r) => n + (r.teeth?.length || 1), 0) : c.prescription?.teeth?.length || 1;
+          const cancelled = c.cancelStatus === "cancelled";
+          detail.push([clinic?.name ?? "", s.month?.slice(0, 7) ?? "", c.completedAtLabel ?? "", c.invoiceNumber ?? "", c.patientName ?? "", "", cancelled ? `Cancellation fee — ${label}` : label, units, "", Number(cancelled ? c.cancellationFee ?? 0 : c.totalPrice ?? 0)]);
+        }
+        for (const li of s.lineItems ?? []) {
+          detail.push([clinic?.name ?? "", s.month?.slice(0, 7) ?? "", li.date ?? "", li.invoice ?? "", li.patient ?? "", li.dentist ?? "", li.procedure ?? "", li.units ?? "", li.price ?? "", Number(li.amount ?? 0)]);
+        }
+      }
+      const wb = XLSX.utils.book_new();
+      const ws1 = XLSX.utils.aoa_to_sheet(summary);
+      ws1["!cols"] = [{ wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
+      XLSX.utils.book_append_sheet(wb, ws1, "Statements");
+      const ws2 = XLSX.utils.aoa_to_sheet(detail);
+      ws2["!cols"] = [{ wch: 28 }, { wch: 10 }, { wch: 11 }, { wch: 10 }, { wch: 22 }, { wch: 18 }, { wch: 26 }, { wch: 7 }, { wch: 8 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, ws2, "Line items");
+      XLSX.writeFile(wb, `statements-${selectedAll.length}x-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      logActivity("exported statements Excel (bulk)", `${selectedAll.length} statements`);
+    } catch (err) {
+      alert("Couldn't build the Excel file — " + err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const runBulkPayments = async ({ method, reference, date }) => {
     let done = 0;
@@ -443,17 +514,34 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
             </div>
             {(selected.size > 0 || bulkMsg) && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2">
-                {selectedStatements.length > 0 ? (
+                {selectedAll.length > 0 ? (
                   <>
                     <span className="text-xs font-semibold text-emerald-800">
-                      {selectedStatements.length} statement{selectedStatements.length === 1 ? "" : "s"} selected — {fmtOMR(selectedRemaining)} due
+                      {selectedAll.length} statement{selectedAll.length === 1 ? "" : "s"} selected
+                      {selectedStatements.length > 0 ? ` — ${fmtOMR(selectedRemaining)} due` : ""}
                     </span>
                     <button
-                      onClick={() => setBulkOpen(true)}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                      onClick={downloadSelectedExcel}
+                      disabled={exporting}
+                      className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                     >
-                      Record selected payments
+                      <Download size={12} /> Excel
                     </button>
+                    <button
+                      onClick={downloadSelectedPdf}
+                      disabled={exporting}
+                      className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      <Download size={12} /> PDF
+                    </button>
+                    {selectedStatements.length > 0 && (
+                      <button
+                        onClick={() => setBulkOpen(true)}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                      >
+                        Record selected payments
+                      </button>
+                    )}
                     <button
                       onClick={() => setSelected(new Set())}
                       className="text-xs font-semibold text-slate-500 hover:text-slate-700"
@@ -485,8 +573,8 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
                       type="checkbox"
                       checked={allPageSelected}
                       onChange={togglePageSelection}
-                      disabled={payablePageIds.length === 0}
-                      title="Select every unpaid statement on this page"
+                      disabled={pageIds.length === 0}
+                      title="Select every statement on this page"
                       className="h-3.5 w-3.5 accent-emerald-600"
                     />
                   </th>
@@ -532,9 +620,8 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
                             type="checkbox"
                             checked={selected.has(s.id)}
                             onChange={() => toggleSelected(s.id)}
-                            disabled={!payable}
-                            title={payable ? "Select for bulk payment" : "Already fully paid"}
-                            className="h-3.5 w-3.5 accent-emerald-600 disabled:opacity-30"
+                            title={payable ? "Select for export or bulk payment" : "Select for export (already fully paid)"}
+                            className="h-3.5 w-3.5 accent-emerald-600"
                           />
                         </td>
                         <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">
