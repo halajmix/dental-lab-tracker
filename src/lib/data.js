@@ -489,6 +489,8 @@ const priceItemFromRow = (r) => ({
   category: r.category,
   code: r.code ?? "",
   basePrice: Number(r.base_price),
+  // Phase 44: denture base + per-tooth fee. null = flat price (old behavior).
+  perToothFee: r.per_tooth_fee == null ? null : Number(r.per_tooth_fee),
 });
 
 const priceScheduleFromRow = (r) => ({
@@ -540,20 +542,21 @@ export async function createPriceSchedule(labId, name, { isDefault = false, item
   return sched.id;
 }
 
-export async function addPriceItem(scheduleId, { category, code = "", basePrice }) {
-  const { data, error } = await supabase
-    .from("price_schedule_items")
-    .insert({ schedule_id: scheduleId, category, code, base_price: basePrice })
-    .select()
-    .single();
+export async function addPriceItem(scheduleId, { category, code = "", basePrice, perToothFee }) {
+  const row = { schedule_id: scheduleId, category, code, base_price: basePrice };
+  // Key omitted when unset so inserts still work before the Phase 44 SQL runs.
+  if (perToothFee !== undefined && perToothFee !== null && perToothFee !== "") row.per_tooth_fee = perToothFee;
+  const { data, error } = await supabase.from("price_schedule_items").insert(row).select().single();
   if (error) throw error;
   return priceItemFromRow(data);
 }
 
-export async function updatePriceItem(id, { code, basePrice }) {
+export async function updatePriceItem(id, { code, basePrice, perToothFee }) {
   const patch = {};
   if (code !== undefined) patch.code = code;
   if (basePrice !== undefined) patch.base_price = basePrice;
+  // null clears the fee (back to flat); undefined leaves it untouched.
+  if (perToothFee !== undefined) patch.per_tooth_fee = perToothFee === "" ? null : perToothFee;
   const { error } = await supabase.from("price_schedule_items").update(patch).eq("id", id);
   if (error) throw error;
 }

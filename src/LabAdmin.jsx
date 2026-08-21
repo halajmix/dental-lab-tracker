@@ -114,9 +114,9 @@ const fmtMoney = (n) =>
 const csvEscape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
 
 function scheduleToCsv(schedule) {
-  const lines = ["category,code,price"];
+  const lines = ["category,code,price,per_tooth_fee"];
   for (const it of schedule.items) {
-    lines.push([csvEscape(it.category), csvEscape(it.code), it.basePrice].join(","));
+    lines.push([csvEscape(it.category), csvEscape(it.code), it.basePrice, it.perToothFee ?? ""].join(","));
   }
   return lines.join("\n");
 }
@@ -155,47 +155,95 @@ function parsePriceCsv(text) {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
-    const [category, code, price] = splitCsvLine(line);
+    const [category, code, price, fee] = splitCsvLine(line);
     if (!category || category.toLowerCase() === "category") continue; // header
     const basePrice = Number.parseFloat(price);
     if (!Number.isFinite(basePrice) || basePrice < 0) continue;
-    rows.push({ category, code: code ?? "", basePrice });
+    // Optional 4th column (Phase 44): denture per-tooth fee. Absent/blank in
+    // old 3-column files -> null, which keeps/clears nothing on import below.
+    const feeNum = Number.parseFloat(fee);
+    const perToothFee = Number.isFinite(feeNum) && feeNum >= 0 ? feeNum : null;
+    rows.push({ category, code: code ?? "", basePrice, perToothFee });
   }
   return rows;
 }
 
 /* ---------------- editable item row (uncontrolled; keyed by saved value) ---------------- */
 
+// Only the denture is priced base + per-tooth (user decision 2026-08-21);
+// splints and everything else stay flat.
+const PER_TOOTH_CATEGORY = "Removable denture";
+
 function ItemRow({ item, busy, onSave, onDelete }) {
   // `code` survives in the row object and CSV round-trip even though the
   // column was removed from the UI (2026-08-17, user request) — commit()
   // passes it through untouched so imports/legacy data are never wiped.
   const commit = (patch) => {
-    const next = { code: item.code, basePrice: item.basePrice, ...patch };
-    if (next.code === item.code && next.basePrice === item.basePrice) return;
+    const next = { code: item.code, basePrice: item.basePrice, perToothFee: item.perToothFee, ...patch };
+    if (next.code === item.code && next.basePrice === item.basePrice && next.perToothFee === item.perToothFee) return;
     onSave(item.id, next);
   };
+  const perTooth = item.category === PER_TOOTH_CATEGORY;
   return (
     <tr className="border-t border-slate-100">
-      <td className="min-w-0 px-3 py-2 text-sm text-slate-700">{item.category}</td>
+      <td className="min-w-0 px-3 py-2 text-sm text-slate-700">
+        {item.category}
+        {perTooth && (
+          <span className="mt-0.5 block text-[10px] leading-tight text-slate-400">
+            base price + fee × each marked tooth (leave fee empty for a flat price)
+          </span>
+        )}
+      </td>
       <td className="px-2 py-1.5">
-        <input
-          type="number"
-          min="0"
-          step="any"
-          inputMode="decimal"
-          defaultValue={item.basePrice}
-          disabled={busy}
-          onBlur={(e) => {
-            const v = Number.parseFloat(e.target.value);
-            if (!Number.isFinite(v) || v < 0) {
-              e.target.value = item.basePrice; // revert bad input
-              return;
-            }
-            commit({ basePrice: v });
-          }}
-          className="w-24 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-sm outline-none transition focus:border-blue-400 focus:bg-white"
-        />
+        <span className="flex items-center justify-end gap-1">
+          <input
+            type="number"
+            min="0"
+            step="any"
+            inputMode="decimal"
+            defaultValue={item.basePrice}
+            disabled={busy}
+            title={perTooth ? "Base price (the denture itself)" : undefined}
+            onBlur={(e) => {
+              const v = Number.parseFloat(e.target.value);
+              if (!Number.isFinite(v) || v < 0) {
+                e.target.value = item.basePrice; // revert bad input
+                return;
+              }
+              commit({ basePrice: v });
+            }}
+            className="w-24 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-sm outline-none transition focus:border-blue-400 focus:bg-white"
+          />
+          {perTooth && (
+            <>
+              <span className="text-xs text-slate-400">+</span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                inputMode="decimal"
+                defaultValue={item.perToothFee ?? ""}
+                placeholder="/tooth"
+                disabled={busy}
+                title="Fee added for each marked tooth"
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  if (raw === "") {
+                    commit({ perToothFee: "" }); // clear -> flat pricing
+                    return;
+                  }
+                  const v = Number.parseFloat(raw);
+                  if (!Number.isFinite(v) || v < 0) {
+                    e.target.value = item.perToothFee ?? "";
+                    return;
+                  }
+                  commit({ perToothFee: v });
+                }}
+                className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-sm outline-none transition focus:border-blue-400 focus:bg-white"
+              />
+            </>
+          )}
+        </span>
       </td>
       <td className="px-2 py-1.5 text-right">
         <button
@@ -239,12 +287,16 @@ function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete, onRep
       const byCategory = Object.fromEntries(schedule.items.map((it) => [it.category, it]));
       for (const row of rows) {
         const existing = byCategory[row.category];
+        // A legacy 3-column file has no fee column (null): leave any existing
+        // per-tooth fee untouched rather than wiping it.
+        const feePatch = row.perToothFee == null ? {} : { perToothFee: row.perToothFee };
         if (existing) {
-          if (existing.basePrice !== row.basePrice || existing.code !== row.code) {
-            await updatePriceItem(existing.id, { code: row.code, basePrice: row.basePrice });
+          const feeChanged = row.perToothFee != null && existing.perToothFee !== row.perToothFee;
+          if (existing.basePrice !== row.basePrice || existing.code !== row.code || feeChanged) {
+            await updatePriceItem(existing.id, { code: row.code, basePrice: row.basePrice, ...feePatch });
           }
         } else {
-          await addPriceItem(schedule.id, row);
+          await addPriceItem(schedule.id, { category: row.category, code: row.code, basePrice: row.basePrice, ...feePatch });
         }
       }
     });
@@ -727,24 +779,53 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
         </div>
       ) : (
         <>
-          {schedules.map((s) => (
-            <ScheduleCard
-              key={s.id}
-              schedule={s}
-              busy={busy}
-              onMutate={mutate}
-              onMakeDefault={(id) => mutate(() => setDefaultSchedule(lab.id, id))}
-              onDelete={(id) => mutate(() => deletePriceSchedule(id))}
-              onReprice={async () => {
-                let count = null;
-                await mutate(async () => {
-                  count = await repriceUnbilledCases();
-                });
-                logActivity("re-priced unbilled cases", `${count ?? 0} cases`);
-                return count;
-              }}
-            />
-          ))}
+          {/* How the wiring works — one strip that explains the whole tab. */}
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-xs leading-relaxed text-slate-600">
+            <p className="font-bold text-slate-800">How clinic pricing is wired</p>
+            <p className="mt-0.5">
+              <b>①</b> The <b>master list</b> prices every clinic that has nothing special set up.{" "}
+              <b>②</b> Create a <b>clinic-specific list</b> only when a clinic gets different rates.{" "}
+              <b>③</b> The <b>assignment table</b> below is where you connect each clinic to its list
+              (and an optional % discount). A clinic with no assignment simply uses the master list —
+              most clinics need nothing at all.
+            </p>
+          </div>
+
+          {(() => {
+            const onReprice = async () => {
+              let count = null;
+              await mutate(async () => {
+                count = await repriceUnbilledCases();
+              });
+              logActivity("re-priced unbilled cases", `${count ?? 0} cases`);
+              return count;
+            };
+            const card = (s) => (
+              <ScheduleCard
+                key={s.id}
+                schedule={s}
+                busy={busy}
+                onMutate={mutate}
+                onMakeDefault={(id) => mutate(() => setDefaultSchedule(lab.id, id))}
+                onDelete={(id) => mutate(() => deletePriceSchedule(id))}
+                onReprice={onReprice}
+              />
+            );
+            const master = schedules.filter((s) => s.isDefault);
+            const others = schedules.filter((s) => !s.isDefault);
+            return (
+              <>
+                <h3 className="pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  ① Master price list — the default for every clinic
+                </h3>
+                {master.map(card)}
+                <h3 className="pt-1 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  ② Clinic-specific price lists {others.length === 0 ? "— none yet (that's fine)" : ""}
+                </h3>
+                {others.map(card)}
+              </>
+            );
+          })()}
 
           {addingList ? (
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3">
@@ -784,10 +865,10 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
           )}
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
               <Building2 size={15} className="text-blue-600" />
-              <h3 className="text-sm font-bold text-slate-800">Clinic rates</h3>
-              <p className="ml-auto text-xs text-slate-400">Positive % = discount</p>
+              <h3 className="text-sm font-bold text-slate-800">③ Which price list applies to each clinic</h3>
+              <p className="ml-auto text-xs text-slate-400">No selection = master list · positive % = discount</p>
             </div>
             {clinics.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-slate-400">
@@ -825,15 +906,18 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
             )}
           </div>
 
-          {/* ---- Clinic price lists generated from charged history ---- */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <History size={15} className="text-blue-600" />
-              <h3 className="text-sm font-bold text-slate-800">Clinic price lists</h3>
+          {/* ---- Historical rates, generated from charged history. Collapsed
+                  by default: it's a REFERENCE for setting your real lists, not
+                  part of the pricing wiring — mixing it in with the editable
+                  lists was the main source of confusion on this tab. ---- */}
+          <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-4 py-3 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+              <History size={15} className="text-slate-400" />
+              <h3 className="text-sm font-bold text-slate-800">Historical billed rates</h3>
               <p className="ml-auto text-xs text-slate-400">
-                What each clinic actually paid per item since 1 Jan 2026
+                Reference only — what each clinic actually paid per item · tap to open
               </p>
-            </div>
+            </summary>
             {chargedError && (
               <p className="border-b border-slate-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">
                 Couldn't load charged history — {chargedError}
@@ -993,7 +1077,7 @@ export function PriceListsManager({ lab, clinicsById, cases = [] }) {
                 )}
               </div>
             )}
-          </div>
+          </details>
 
           {/* Re-price every draft case at current rates. Issued/paid
               invoices are frozen server-side, so this can't rewrite
