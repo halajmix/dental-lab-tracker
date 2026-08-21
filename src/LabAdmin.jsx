@@ -1382,7 +1382,10 @@ export function TopPerformers({ lab, cases, clinicsById = {} }) {
   };
   useEffect(load, [lab?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { clinics, dentists } = useMemo(() => {
+  // Clinics the owner has picked to add up (key + name persist across period
+  // switches; totals re-resolve against the current period each render).
+  const [picked, setPicked] = useState([]);
+  const { clinics, dentists, allClinics } = useMemo(() => {
     const days = TOP_PERIODS.find((p) => p.id === period)?.days ?? 30;
     const cutoff = new Date(Date.now() - days * 86_400_000);
     const now = new Date();
@@ -1423,8 +1426,9 @@ export function TopPerformers({ lab, cases, clinicsById = {} }) {
       if (dentist) bump(dentistMap, dentist.toLowerCase(), dentist, fee);
     }
 
-    const top = (map) => [...map.values()].sort((a, b) => b.total - a.total || b.count - a.count).slice(0, 10);
-    return { clinics: top(clinicMap), dentists: top(dentistMap) };
+    const ranked = (map) => [...map.values()].sort((a, b) => b.total - a.total || b.count - a.count);
+    const allClinics = ranked(clinicMap);
+    return { clinics: allClinics.slice(0, 10), dentists: ranked(dentistMap).slice(0, 10), allClinics };
   }, [stmtRows, cases, clinicsById, period]);
 
   return (
@@ -1453,10 +1457,81 @@ export function TopPerformers({ lab, cases, clinicsById = {} }) {
       {stmtRows === null ? (
         <p className="rounded-2xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400">Loading top performers…</p>
       ) : (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <TopTable title="Top 10 Clinics" icon={Building2} rows={clinics} unitLabel="Cases" />
-          <TopTable title="Top 10 Dentists" icon={UserCheck} rows={dentists} unitLabel="Cases" />
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <TopTable title="Top 10 Clinics" icon={Building2} rows={clinics} unitLabel="Cases" />
+            <TopTable title="Top 10 Dentists" icon={UserCheck} rows={dentists} unitLabel="Cases" />
+          </div>
+
+          {/* Add up any set of clinics — e.g. all the clinics one dentist
+              works at. Every clinic in the data is pickable, not just the
+              top 10; totals follow the Period dropdown above. */}
+          <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-bold text-slate-800">Add up clinics</h4>
+              {picked.length > 0 && (
+                <p className="text-right">
+                  <span className="text-lg font-black tabular-nums text-blue-700">
+                    {fmtOMR(picked.reduce((s, p) => s + (allClinics.find((c) => c.key === p.key)?.total ?? 0), 0))}
+                  </span>
+                  <span className="ml-2 text-xs font-semibold text-slate-500">
+                    {picked.reduce((s, p) => s + (allClinics.find((c) => c.key === p.key)?.count ?? 0), 0)} cases ·{" "}
+                    {TOP_PERIODS.find((p) => p.id === period)?.label}
+                  </span>
+                </p>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <select
+                value=""
+                onChange={(e) => {
+                  const c = allClinics.find((x) => x.key === e.target.value);
+                  if (c && !picked.some((p) => p.key === c.key)) setPicked((prev) => [...prev, { key: c.key, name: c.name }]);
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
+              >
+                <option value="">+ Add a clinic…</option>
+                {allClinics
+                  .filter((c) => !picked.some((p) => p.key === c.key))
+                  .map((c) => (
+                    <option key={c.key} value={c.key}>{c.name} — {fmtOMR(c.total)}</option>
+                  ))}
+              </select>
+              {picked.map((p) => {
+                const cur = allClinics.find((c) => c.key === p.key);
+                return (
+                  <span key={p.key} className="flex items-center gap-1 rounded-full bg-blue-50 py-1 pl-2.5 pr-1 text-xs font-semibold text-blue-800 ring-1 ring-blue-200">
+                    {p.name}
+                    <span className="tabular-nums text-blue-500">{fmtOMR(cur?.total ?? 0)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPicked((prev) => prev.filter((x) => x.key !== p.key))}
+                      className="rounded-full p-0.5 text-blue-400 hover:bg-blue-100 hover:text-blue-700"
+                      title={`Remove ${p.name}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                );
+              })}
+              {picked.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setPicked([])}
+                  className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+            {picked.length === 0 && (
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                Pick clinics from the dropdown to see their combined billed value for the selected period —
+                e.g. every clinic one doctor works at.
+              </p>
+            )}
+          </div>
+        </>
       )}
       <p className="mt-1.5 text-[11px] text-slate-400">
         Billed value per clinic/dentist in the period — imported billing history plus completed platform cases;
