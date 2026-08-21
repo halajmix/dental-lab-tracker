@@ -342,7 +342,13 @@ function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete, onRep
   };
 
   const addItem = () => {
-    const category = newCat.trim();
+    const typed = newCat.trim();
+    // Normalize to the canonical Rx category spelling when it matches one —
+    // pricing joins on the EXACT string, so "clear retainer" must be stored
+    // as "Clear retainer" to ever price a case. Non-matching names stay as
+    // typed (rate-reference rows are allowed).
+    const canonical = CATEGORY_NAMES.find((c) => c.toLowerCase() === typed.toLowerCase());
+    const category = canonical ?? typed;
     const basePrice = Number.parseFloat(newPrice);
     if (!category || !Number.isFinite(basePrice) || basePrice < 0) return;
     onMutate(() => addPriceItem(schedule.id, { category, code: "", basePrice }));
@@ -350,6 +356,12 @@ function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete, onRep
     setNewPrice("");
     setAdding(false);
   };
+
+  // Rx categories this list can't price yet (e.g. the arch appliances added
+  // 2026-08-21 — lists created earlier have no rows for them). One tap
+  // pre-fills the add row with the exact category name; the admin types the
+  // price. Never auto-inserted: a defaulted price is how billing goes wrong.
+  const missingCategories = CATEGORY_NAMES.filter((n) => !schedule.items.some((i) => i.category === n));
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -468,6 +480,29 @@ function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete, onRep
       </div>
 
       <div className="border-t border-slate-100 px-3 py-2.5">
+        {missingCategories.length > 0 && (
+          <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2">
+            <p className="text-[11px] font-semibold text-amber-800">
+              Not yet priced in this list — tap one, then type its price:
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {missingCategories.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => {
+                    setNewCat(n);
+                    setNewPrice("");
+                    setAdding(true);
+                  }}
+                  className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300 hover:bg-amber-100"
+                >
+                  + {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {adding ? (
           <div className="flex flex-wrap items-center gap-2">
             <input
