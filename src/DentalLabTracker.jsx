@@ -62,7 +62,7 @@ import {
   needsLabShade,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
-import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel, LabStaffLogsPanel } from "./LabAdmin.jsx";
+import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel, LabStaffLogsPanel, RemakesPanel } from "./LabAdmin.jsx";
 import { BillingPanel, ExpensesPanel } from "./LabFinance.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
@@ -84,8 +84,14 @@ import {
   updateLab,
   fetchLabRoster,
   logActivity,
+  fetchCaseRounds,
+  insertCaseRound,
+  resolveCaseRound,
+  subscribeCaseRounds,
+  ROUND_KIND_LABELS,
 } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
+import { SectionBoundary } from "./ErrorBoundary.jsx";
 
 /* ------------------------------------------------------------------ */
 /*  Small shared UI pieces                                             */
@@ -614,6 +620,7 @@ function WorkspaceSwitcher({ workspace, onChange, hasAdminRole, hasTechRole, has
 
 const ADMIN_TABS = [
   { id: "queue", label: "Case Queue", icon: ClipboardCheck },
+  { id: "remakes", label: "Remakes", icon: Undo2 },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "technicians", label: "Technicians", icon: Users },
   { id: "billing", label: "Billing", icon: FileText },
@@ -623,9 +630,11 @@ const ADMIN_TABS = [
   { id: "logs", label: "Staff logs", icon: HistoryIcon },
 ];
 
-const ACCOUNTANT_TAB_IDS = ["queue", "billing", "expenses", "prices"];
+// Accountants get the finance surface + Remakes (they set each return's cost
+// estimate and fault). Technicians never reach this workspace at all.
+const ACCOUNTANT_TAB_IDS = ["queue", "remakes", "billing", "expenses", "prices"];
 
-function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly = false, isAdminPreview = false }) {
+function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = [], onResolveRound, meId, financeOnly = false, isAdminPreview = false }) {
   const [tab, setTab] = useState("queue");
   const tabs = financeOnly ? ADMIN_TABS.filter((t) => ACCOUNTANT_TAB_IDS.includes(t.id)) : ADMIN_TABS;
   // The open-tab state survives switching between the Admin and Accountant
@@ -658,6 +667,10 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, meId, financeOnly =
       </nav>
       {activeTab === "queue" ? (
         queue
+      ) : activeTab === "remakes" ? (
+        <SectionBoundary label="The Remakes tab couldn't load">
+          <RemakesPanel lab={lab} rounds={rounds} cases={allCases} clinicsById={clinicsById} onResolve={onResolveRound} />
+        </SectionBoundary>
       ) : activeTab === "overview" ? (
         <OverviewDashboard cases={cases} clinicsById={clinicsById} lab={lab} />
       ) : activeTab === "technicians" ? (
@@ -812,12 +825,14 @@ export default function DentalLabTracker({ auth }) {
 
   const [labs, setLabs] = useState([]);
   const [cases, setCases] = useState([]);
+  const [caseRounds, setCaseRounds] = useState([]); // follow-up / remake rounds (Phase 41)
   const [clinicsById, setClinicsById] = useState({});
   const [myClinics, setMyClinics] = useState([]); // multi-clinic: every clinic this dentist owns
   const [loadingData, setLoadingData] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  // Initial load, re-run if the signed-in org changes.
+  // Initial load, re-run if the signed-in org changes. Rounds fail-soft: an
+  // old client / un-migrated DB just shows no follow-ups rather than erroring.
   useEffect(() => {
     let cancelled = false;
     setLoadingData(true);
@@ -830,9 +845,20 @@ export default function DentalLabTracker({ auth }) {
       })
       .catch((err) => !cancelled && setLoadError(err.message))
       .finally(() => !cancelled && setLoadingData(false));
+    fetchCaseRounds()
+      .then((r) => !cancelled && setCaseRounds(r))
+      .catch(() => !cancelled && setCaseRounds([]));
     return () => {
       cancelled = true;
     };
+  }, [profile.id]);
+
+  // Live follow-up rounds: RLS scopes the stream to this user's cases, so both
+  // the dentist and the lab see a new return / a resolve without refreshing.
+  useEffect(() => {
+    const reload = () => fetchCaseRounds().then(setCaseRounds).catch(() => {});
+    const unsubscribe = subscribeCaseRounds(reload);
+    return unsubscribe;
   }, [profile.id]);
 
   // Realtime — the other side of a case (dentist <-> lab) sees changes live.
@@ -1085,6 +1111,29 @@ export default function DentalLabTracker({ auth }) {
     }
   };
 
+  // A follow-up / return round on an existing case (Phase 41). The parent case
+  // is never mutated; this adds a child round the lab picks up. Throws on error
+  // so the follow-up form can surface it inline (no optimistic write here — the
+  // insert can be RLS-rejected, e.g. a case that isn't the caller's).
+  const addCaseFollowup = async (round) => {
+    const parent = cases.find((c) => c.id === round.parentCaseId);
+    const saved = await insertCaseRound(round);
+    setCaseRounds((prev) => [saved, ...prev]);
+    const kindLabel = ROUND_KIND_LABELS[round.kind] ?? round.kind;
+    logActivity(`requested ${round.kind === "stage" ? "next stage" : kindLabel.toLowerCase()}`, `${parent?.patientName ?? ""} · ${round.parentCaseId}`);
+    setRxToast(`${kindLabel} sent to the lab — they'll see it on the case.`);
+  };
+
+  const resolveFollowup = async (roundId) => {
+    try {
+      const saved = await resolveCaseRound(roundId, profile.id);
+      setCaseRounds((prev) => prev.map((r) => (r.id === roundId ? saved : r)));
+      logActivity("resolved follow-up", saved.parentCaseId);
+    } catch (err) {
+      alert("Couldn't update the follow-up — " + err.message);
+    }
+  };
+
   // 30-minute Rx edit window (mirrors the cases_guard_prescription trigger,
   // which is the real enforcement — this just decides whether to show the
   // menu item). Legacy rows without created_at simply aren't editable.
@@ -1320,6 +1369,9 @@ export default function DentalLabTracker({ auth }) {
               lab={lab}
               clinicsById={clinicsById}
               cases={labQueue}
+              allCases={cases}
+              rounds={caseRounds}
+              onResolveRound={resolveFollowup}
               meId={profile.id}
               financeOnly={activeWorkspace === "accountant" || !hasAdminRole}
               isAdminPreview={activeWorkspace === "accountant" && hasAdminRole}
@@ -1356,8 +1408,11 @@ export default function DentalLabTracker({ auth }) {
           onResume={() => setShowCaseModal(true)}
           onSave={addCase}
           onSaveEdit={editCase}
+          onSubmitFollowup={addCaseFollowup}
           editing={editingCase}
           labs={registeredLabs}
+          cases={cases}
+          authorName={currentUser}
           userId={auth.session?.user?.id}
           clinics={myClinics.filter((c) => c.status === "active")}
           defaultClinicId={clinic?.id}
@@ -1501,6 +1556,8 @@ export default function DentalLabTracker({ auth }) {
         onSetCasePrice={!isDentist ? setCasePrice : undefined}
         onResetCasePrice={!isDentist ? resetCasePrice : undefined}
         onSetLabShade={!isDentist ? setLabShade : undefined}
+        rounds={drawerCase ? caseRounds.filter((r) => r.parentCaseId === drawerCase.id) : []}
+        onResolveRound={!isDentist ? resolveFollowup : undefined}
       />
 
       {/* ------------------- Phase 4 overlays ------------------- */}

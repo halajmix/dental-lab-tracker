@@ -132,3 +132,32 @@ export default class ErrorBoundary extends React.Component {
     );
   }
 }
+
+// A scoped boundary for one section/panel: if that subtree crashes, only it is
+// replaced by a small inline notice (and the error is reported) — the rest of
+// the page keeps working. Used to isolate the follow-up / remake surfaces.
+export class SectionBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    reportError(error?.message || error, `${error?.stack ?? ""}\n--- component stack ---${info?.componentStack ?? ""}`);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="flex items-center gap-1.5 font-semibold">
+            <AlertTriangle size={15} /> {this.props.label || "This section couldn't load"}
+          </p>
+          <p className="mt-1 text-xs text-amber-700">The rest of the page is unaffected. Try closing and reopening it.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}

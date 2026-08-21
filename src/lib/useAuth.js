@@ -34,7 +34,7 @@ export function useAuth() {
   // consumed after the profile loads so the audit row carries name + org.
   const pendingLoginLogRef = useRef(false);
 
-  const loadProfile = useCallback(async (userId) => {
+  const loadProfile = useCallback(async (userId, email = "") => {
     const seq = ++loadSeqRef.current;
     const fresh = () => seq === loadSeqRef.current;
 
@@ -81,6 +81,7 @@ export function useAuth() {
     setActivityContext({
       userId,
       name: prof?.name ?? "",
+      email,
       role: prof?.role ?? "",
       orgName: clinicRow?.name || labRowName || "",
     });
@@ -101,6 +102,7 @@ export function useAuth() {
       logLoginEvent({
         userId,
         name: prof?.name ?? "",
+        email,
         role: prof?.role ?? "no profile yet",
         orgName,
       });
@@ -114,7 +116,7 @@ export function useAuth() {
       if (cancelled) return;
       setSession(data.session ?? null);
       if (data.session?.user) {
-        loadProfile(data.session.user.id).finally(() => !cancelled && setLoading(false));
+        loadProfile(data.session.user.id, data.session.user.email).finally(() => !cancelled && setLoading(false));
       } else {
         setLoading(false);
       }
@@ -134,10 +136,10 @@ export function useAuth() {
         // full-screen spinner on every refocus. A genuinely different user
         // (sign-in, impersonation swap) still gets the loading gate.
         if (next.user.id === loadedUserRef.current) {
-          loadProfile(next.user.id);
+          loadProfile(next.user.id, next.user.email);
         } else {
           setLoading(true);
-          loadProfile(next.user.id).finally(() => !cancelled && setLoading(false));
+          loadProfile(next.user.id, next.user.email).finally(() => !cancelled && setLoading(false));
         }
       } else {
         loadedUserRef.current = null;
@@ -156,7 +158,7 @@ export function useAuth() {
   }, [loadProfile]);
 
   const refreshProfile = useCallback(() => {
-    if (session?.user) return loadProfile(session.user.id);
+    if (session?.user) return loadProfile(session.user.id, session.user.email);
   }, [session, loadProfile]);
 
   const signOut = () => supabase.auth.signOut();

@@ -667,7 +667,7 @@ export async function adminSetLabStatus(labId, status) {
 // All fire-and-forget: an audit hiccup must never affect the app.
 let activityCtx = null;
 export function setActivityContext(ctx) {
-  activityCtx = ctx; // { userId, name, role, orgName }
+  activityCtx = ctx; // { userId, name, email, role, orgName }
 }
 
 export async function logActivity(action, detail = "") {
@@ -677,6 +677,7 @@ export async function logActivity(action, detail = "") {
     await supabase.from("login_events").insert({
       user_id: ctx.userId,
       name: ctx.name ?? "",
+      email: ctx.email ?? "",
       role: ctx.role ?? "",
       org_name: ctx.orgName ?? "",
       action,
@@ -687,12 +688,13 @@ export async function logActivity(action, detail = "") {
   }
 }
 
-export async function logLoginEvent({ userId, name, role, orgName }) {
-  setActivityContext({ userId, name, role, orgName });
+export async function logLoginEvent({ userId, name, email, role, orgName }) {
+  setActivityContext({ userId, name, email, role, orgName });
   try {
     await supabase.from("login_events").insert({
       user_id: userId,
       name: name ?? "",
+      email: email ?? "",
       role: role ?? "",
       org_name: orgName ?? "",
       action: "sign-in",
@@ -713,12 +715,23 @@ export async function fetchLoginEvents(limit = 500) {
     id: r.id,
     userId: r.user_id,
     name: r.name,
+    email: r.email ?? "",
     role: r.role,
     orgName: r.org_name,
     action: r.action ?? "sign-in",
     detail: r.detail ?? "",
     at: r.created_at,
   }));
+}
+
+// A log row's human identity. Some accounts carry the generic "Lab Tech"/
+// "Lab" display-name placeholder from onboarding, which is useless in an
+// audit trail — fall back to the email so a real person is always named.
+const GENERIC_NAMES = new Set(["lab tech", "lab", "dentist", "no profile yet", ""]);
+export function logDisplayName(row) {
+  const name = (row?.name ?? "").trim();
+  if (name && !GENERIC_NAMES.has(name.toLowerCase())) return name;
+  return (row?.email ?? "").trim() || name || "Unknown user";
 }
 
 export async function adminSetClinicStatus(clinicId, status) {
@@ -778,6 +791,135 @@ export async function insertCaseNote(caseId, authorRole, authorName, body) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Follow-up / iterative rounds + returned-work remakes (Phase 41).    */
+/*  A round is a child of a parent case: an extra clinical stage of a    */
+/*  multi-visit case, or a post-delivery return (remake/adjustment/      */
+/*  refit). The parent case is never mutated. Rounds are free; the       */
+/*  lab-internal cost estimate + fault live in a separate finance-only   */
+/*  table (case_round_costs) that technicians can't read.                */
+/* ------------------------------------------------------------------ */
+
+export const ROUND_KINDS = ["stage", "remake", "adjustment", "refit"];
+export const ROUND_KIND_LABELS = {
+  stage: "Next stage",
+  remake: "Remake",
+  adjustment: "Adjustment",
+  refit: "Refit",
+};
+
+const caseRoundFromRow = (r) => ({
+  id: r.id,
+  parentCaseId: r.parent_case_id,
+  kind: r.kind,
+  instructions: r.instructions ?? "",
+  attachments: Array.isArray(r.attachments) ? r.attachments : [],
+  pickupRequested: !!r.pickup_requested,
+  status: r.status,
+  createdBy: r.created_by,
+  createdByRole: r.created_by_role,
+  createdByName: r.created_by_name ?? "",
+  createdAt: r.created_at,
+  resolvedAt: r.resolved_at,
+});
+
+// All rounds visible to the caller (RLS scopes to their clinic/lab). Callers
+// group by parentCaseId in memory; a lab-wide fetch is one round trip.
+export async function fetchCaseRounds() {
+  const rows = await fetchAllPages(() =>
+    supabase.from("case_rounds").select("*").order("created_at", { ascending: false })
+  );
+  return rows.map(caseRoundFromRow);
+}
+
+export async function insertCaseRound(round) {
+  // kind is constrained both here and by a DB CHECK; never trust a free value.
+  if (!ROUND_KINDS.includes(round.kind)) throw new Error("Invalid follow-up kind");
+  const { data, error } = await supabase
+    .from("case_rounds")
+    .insert({
+      parent_case_id: round.parentCaseId,
+      kind: round.kind,
+      instructions: (round.instructions ?? "").slice(0, 4000),
+      attachments: (round.attachments ?? []).filter((a) => a && a.url),
+      pickup_requested: !!round.pickupRequested,
+      created_by_role: round.createdByRole,
+      created_by_name: round.createdByName ?? "",
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return caseRoundFromRow(data);
+}
+
+export async function resolveCaseRound(id, resolvedBy) {
+  const { data, error } = await supabase
+    .from("case_rounds")
+    .update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: resolvedBy ?? null })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return caseRoundFromRow(data);
+}
+
+export async function reopenCaseRound(id) {
+  const { data, error } = await supabase
+    .from("case_rounds")
+    .update({ status: "open", resolved_at: null, resolved_by: null })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return caseRoundFromRow(data);
+}
+
+// Lab-internal cost estimate + fault. Reads/writes only succeed for finance
+// roles (admin/accountant) via RLS — techs get an empty result, never an error.
+export const ROUND_FAULTS = ["unclassified", "lab", "clinic", "shared"];
+export const ROUND_FAULT_LABELS = {
+  unclassified: "Unclassified",
+  lab: "Lab fault",
+  clinic: "Clinic fault",
+  shared: "Shared",
+};
+
+const roundCostFromRow = (r) => ({
+  roundId: r.round_id,
+  labId: r.lab_id,
+  fault: r.fault,
+  costEstimate: r.cost_estimate == null ? null : Number(r.cost_estimate),
+  note: r.note ?? "",
+  updatedAt: r.updated_at,
+});
+
+export async function fetchRoundCosts(labId) {
+  const { data, error } = await supabase.from("case_round_costs").select("*").eq("lab_id", labId);
+  if (error) throw error;
+  return data.map(roundCostFromRow);
+}
+
+export async function upsertRoundCost({ roundId, labId, fault, costEstimate, note }) {
+  if (fault != null && !ROUND_FAULTS.includes(fault)) throw new Error("Invalid fault value");
+  const { data, error } = await supabase
+    .from("case_round_costs")
+    .upsert(
+      {
+        round_id: roundId,
+        lab_id: labId,
+        fault: fault ?? "unclassified",
+        cost_estimate: costEstimate === "" || costEstimate == null ? null : Number(costEstimate),
+        note: (note ?? "").slice(0, 500),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "round_id" }
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return roundCostFromRow(data);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Realtime — keeps dentist + lab views in sync without a refresh      */
 /* ------------------------------------------------------------------ */
 
@@ -786,6 +928,17 @@ export function subscribeCases({ clinicId, labId }, onChange) {
   const channel = supabase
     .channel(`cases-${clinicId ?? labId}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "cases", filter }, onChange)
+    .subscribe();
+  return () => supabase.removeChannel(channel);
+}
+
+// Follow-up rounds. No row filter: RLS already scopes what each subscriber
+// receives to rounds on their own clinic's or lab's cases, so a bare listener
+// only ever hears about rounds it's allowed to see.
+export function subscribeCaseRounds(onChange) {
+  const channel = supabase
+    .channel("case_rounds")
+    .on("postgres_changes", { event: "*", schema: "public", table: "case_rounds" }, onChange)
     .subscribe();
   return () => supabase.removeChannel(channel);
 }

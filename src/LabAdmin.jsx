@@ -23,6 +23,9 @@ import {
   Search,
   ChevronRight,
   History,
+  RotateCcw,
+  Truck,
+  Check,
 } from "lucide-react";
 import { CATEGORY_NAMES } from "./PrescriptionForm.jsx";
 import { BASE_PRICE, caseFee } from "./Analytics.jsx";
@@ -54,6 +57,12 @@ import {
   removeMemberRole,
   removeLabMember,
   logActivity,
+  logDisplayName,
+  fetchRoundCosts,
+  upsertRoundCost,
+  ROUND_KIND_LABELS,
+  ROUND_FAULTS,
+  ROUND_FAULT_LABELS,
 } from "./lib/data.js";
 
 /* ================================================================== */
@@ -2077,6 +2086,252 @@ export function StaffPanel({ lab, meId }) {
   );
 }
 
+/* ================================================================== */
+/*  Remakes / returns tab (Phase 41) — lab admin + accountant only.     */
+/*  Rounds are the shared, free follow-up records; the cost estimate +   */
+/*  fault classification here are LAB-INTERNAL (case_round_costs), RLS-   */
+/*  gated to finance roles, so technicians never see them.               */
+/* ================================================================== */
+
+const KIND_STYLE = {
+  stage: "bg-sky-100 text-sky-700",
+  remake: "bg-rose-100 text-rose-700",
+  adjustment: "bg-amber-100 text-amber-700",
+  refit: "bg-violet-100 text-violet-700",
+};
+
+function RemakeRow({ round, parent, clinicName, cost, onSaveCost, onResolve, saving }) {
+  const [fault, setFault] = useState(cost?.fault ?? "unclassified");
+  const [estimate, setEstimate] = useState(cost?.costEstimate == null ? "" : String(cost.costEstimate));
+  const [dirty, setDirty] = useState(false);
+
+  // Re-sync local editor when the stored cost changes (e.g. realtime refetch),
+  // but never stomp an in-progress edit.
+  useEffect(() => {
+    if (dirty) return;
+    setFault(cost?.fault ?? "unclassified");
+    setEstimate(cost?.costEstimate == null ? "" : String(cost.costEstimate));
+  }, [cost, dirty]);
+
+  const save = async () => {
+    await onSaveCost(round.id, { fault, costEstimate: estimate === "" ? null : Number(estimate) });
+    setDirty(false);
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 ${round.status === "open" ? "border-amber-200 bg-amber-50/40" : "border-slate-200 bg-white"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${KIND_STYLE[round.kind] ?? "bg-slate-100 text-slate-600"}`}>
+              {ROUND_KIND_LABELS[round.kind] ?? round.kind}
+            </span>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${round.status === "open" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+              {round.status === "open" ? "Open" : "Resolved"}
+            </span>
+            {round.pickupRequested && (
+              <span className="flex items-center gap-1 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700"><Truck size={11} /> Pick-up</span>
+            )}
+          </div>
+          <p className="mt-1 truncate text-sm font-bold text-slate-800">
+            {parent?.patientName ?? "Unknown patient"} <span className="font-mono text-[11px] font-medium text-slate-400">· {round.parentCaseId}</span>
+          </p>
+          <p className="truncate text-xs text-slate-500">{clinicName || "—"}{round.createdByName ? ` · from ${round.createdByName}` : ""}</p>
+        </div>
+        <span className="shrink-0 text-[11px] text-slate-400">{round.createdAt ? new Date(round.createdAt).toLocaleDateString() : ""}</span>
+      </div>
+
+      {round.instructions && <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-slate-600">{round.instructions}</p>}
+      {Array.isArray(round.attachments) && round.attachments.length > 0 && (
+        <p className="mt-1 text-[11px] text-slate-400">{round.attachments.length} attachment{round.attachments.length === 1 ? "" : "s"}</p>
+      )}
+
+      {/* Lab-internal: cost estimate + fault. Not a charge to the clinic. */}
+      <div className="mt-3 grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[1fr_1fr_auto]">
+        <label className="text-xs">
+          <span className="mb-1 block font-semibold text-slate-500">Fault (internal)</span>
+          <select
+            value={fault}
+            onChange={(e) => { setFault(e.target.value); setDirty(true); }}
+            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            {ROUND_FAULTS.map((f) => (
+              <option key={f} value={f}>{ROUND_FAULT_LABELS[f]}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs">
+          <span className="mb-1 block font-semibold text-slate-500">Est. cost (OMR, internal)</span>
+          <input
+            type="number"
+            min="0"
+            step="0.001"
+            inputMode="decimal"
+            value={estimate}
+            onChange={(e) => { setEstimate(e.target.value); setDirty(true); }}
+            placeholder="—"
+            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm tabular-nums"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={save}
+          disabled={!dirty || saving}
+          className={`self-end rounded-lg px-3 py-1.5 text-sm font-semibold text-white ${dirty && !saving ? "bg-blue-600 hover:bg-blue-700" : "cursor-not-allowed bg-slate-300"}`}
+        >
+          Save
+        </button>
+      </div>
+
+      {round.status === "open" && onResolve && (
+        <button
+          type="button"
+          onClick={() => onResolve(round.id)}
+          className="mt-2 flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+        >
+          <Check size={13} /> Mark resolved
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function RemakesPanel({ lab, rounds = [], cases = [], clinicsById = {}, onResolve }) {
+  const [costs, setCosts] = useState({});
+  const [costError, setCostError] = useState("");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [savingId, setSavingId] = useState(null);
+
+  const caseById = useMemo(() => Object.fromEntries((cases ?? []).map((c) => [c.id, c])), [cases]);
+
+  const load = () => {
+    if (!lab?.id) return;
+    setCostError("");
+    fetchRoundCosts(lab.id)
+      .then((rows) => setCosts(Object.fromEntries(rows.map((r) => [r.roundId, r]))))
+      .catch((e) => setCostError(e.message));
+  };
+  useEffect(load, [lab?.id, rounds.length]);
+
+  // This lab's rounds only. `rounds` is RLS-scoped already; requiring the
+  // parent case to be in the lab's own set is belt-and-suspenders isolation.
+  const labRounds = useMemo(() => rounds.filter((r) => caseById[r.parentCaseId]), [rounds, caseById]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return labRounds
+      .filter((r) => statusFilter === "all" || r.status === statusFilter)
+      .filter((r) => {
+        if (!q) return true;
+        const c = caseById[r.parentCaseId];
+        const clinic = clinicsById[c?.clinicId]?.name ?? "";
+        return [c?.patientName, c?.id, clinic, ROUND_KIND_LABELS[r.kind]].some((v) => String(v ?? "").toLowerCase().includes(q));
+      })
+      .sort((a, b) => (a.status === b.status ? new Date(b.createdAt) - new Date(a.createdAt) : a.status === "open" ? -1 : 1));
+  }, [labRounds, statusFilter, query, caseById, clinicsById]);
+
+  const openCount = labRounds.filter((r) => r.status === "open").length;
+  const totalEstimate = labRounds.reduce((s, r) => s + (costs[r.id]?.costEstimate ?? 0), 0);
+  const faultTally = useMemo(() => {
+    const t = { lab: 0, clinic: 0, shared: 0, unclassified: 0 };
+    for (const r of labRounds) t[costs[r.id]?.fault ?? "unclassified"]++;
+    return t;
+  }, [labRounds, costs]);
+
+  const saveCost = async (roundId, { fault, costEstimate }) => {
+    setSavingId(roundId);
+    try {
+      const saved = await upsertRoundCost({ roundId, labId: lab.id, fault, costEstimate });
+      setCosts((p) => ({ ...p, [roundId]: saved }));
+      const parent = caseById[rounds.find((r) => r.id === roundId)?.parentCaseId];
+      logActivity("set remake cost", `${parent?.patientName ?? ""} · ${costEstimate == null ? "—" : costEstimate + " OMR"} · ${ROUND_FAULT_LABELS[fault]}`);
+    } catch (e) {
+      alert("Couldn't save the cost estimate — " + e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* summary */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Open returns</p>
+          <p className="mt-1 text-2xl font-black text-amber-600">{openCount}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">All follow-ups</p>
+          <p className="mt-1 text-2xl font-black text-slate-800">{labRounds.length}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Est. remake cost</p>
+          <p className="mt-1 text-2xl font-black text-slate-800">{fmtOMR(totalEstimate)}</p>
+          <p className="text-[10px] text-slate-400">internal estimate, not billed</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Fault split</p>
+          <p className="mt-1 text-xs font-semibold text-slate-600">
+            Lab {faultTally.lab} · Clinic {faultTally.clinic}
+          </p>
+          <p className="text-[10px] text-slate-400">Shared {faultTally.shared} · Unclassified {faultTally.unclassified}</p>
+        </div>
+      </div>
+
+      {/* controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search patient, case #, clinic, type"
+            className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm"
+          />
+        </div>
+        {["all", "open", "resolved"].map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`rounded-lg px-3 py-2 text-xs font-semibold capitalize ${statusFilter === s ? "bg-blue-600 text-white" : "bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50"}`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
+      {costError && (
+        <p className="rounded-lg bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">Cost estimates unavailable: {costError}</p>
+      )}
+
+      {filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-12 text-center">
+          <RotateCcw size={22} className="mx-auto text-slate-300" />
+          <p className="mt-2 text-sm text-slate-400">
+            {labRounds.length === 0 ? "No follow-ups or returns yet." : "No follow-ups match this filter."}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {filtered.map((r) => (
+            <RemakeRow
+              key={r.id}
+              round={r}
+              parent={caseById[r.parentCaseId]}
+              clinicName={clinicsById[caseById[r.parentCaseId]?.clinicId]?.name}
+              cost={costs[r.id]}
+              onSaveCost={saveCost}
+              onResolve={onResolve}
+              saving={savingId === r.id}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* Lab-side staff sign-in log (Phase 37b) — RLS scopes the rows to this
    lab's own members; clinics and other labs never appear here. */
 export function LabStaffLogsPanel() {
@@ -2128,7 +2383,10 @@ export function LabStaffLogsPanel() {
                   <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-slate-600">
                     {new Date(e.at).toLocaleString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </td>
-                  <td className="px-4 py-2.5 font-semibold text-slate-800">{e.name || "—"}</td>
+                  <td className="px-4 py-2.5 font-semibold text-slate-800">
+                    {logDisplayName(e)}
+                    {e.email && e.email !== logDisplayName(e) && <span className="block text-[11px] font-normal text-slate-400">{e.email}</span>}
+                  </td>
                   <td className="whitespace-nowrap px-4 py-2.5">
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${e.action === "sign-in" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"}`}>
                       {e.action}

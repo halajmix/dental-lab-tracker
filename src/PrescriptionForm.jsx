@@ -30,6 +30,7 @@ import {
   Search,
 } from "lucide-react";
 import { uploadCasePhoto, estimateCasePrice } from "./lib/data.js";
+import { SectionBoundary } from "./ErrorBoundary.jsx";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -981,10 +982,359 @@ const emptyDraft = () => ({
 });
 
 /* ================================================================== */
+/*  New Case  vs  Follow-up existing case  — mode toggle              */
+/* ================================================================== */
+
+// Shown at the top of both the Rx form and the follow-up form. A follow-up
+// is a NEXT STAGE of a multi-visit case, or a RETURN (remake/adjustment/
+// refit) on already-delivered work — no tooth chart, just instructions and
+// troubleshooting files aimed at the same lab that made the original.
+function ModeToggle({ value, onChange }) {
+  return (
+    <div className="mx-3 mt-3 grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 sm:mx-5">
+      {[
+        { id: "new", label: "New Case", icon: FileText },
+        { id: "followup", label: "Follow-up existing case", icon: RotateCcw },
+      ].map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onChange(id)}
+          className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+            value === id ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <Icon size={14} /> {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const FOLLOWUP_KINDS = [
+  { id: "stage", label: "Next stage", hint: "The next lab stage of a multi-visit case (e.g. denture try-in)." },
+  { id: "remake", label: "Remake", hint: "Redo the work — a fit failure or clinically unacceptable result." },
+  { id: "adjustment", label: "Adjustment", hint: "A minor correction to delivered work." },
+  { id: "refit", label: "Refit", hint: "Re-seat / re-fit delivered work that didn't seat." },
+];
+
+function caseWorkSummary(c) {
+  const rx = c?.prescription ?? {};
+  if (Array.isArray(rx.restorations) && rx.restorations.length) {
+    const cats = [...new Set(rx.restorations.map((r) => r?.category).filter(Boolean))];
+    return cats.join(", ") || `${rx.restorations.length} restoration(s)`;
+  }
+  return rx.category || toothSummary(rx) || "—";
+}
+
+/* ================================================================== */
+/*  Follow-up / Return form (isolated from the Rx form's hooks)        */
+/* ================================================================== */
+
+function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", defaultClinicId = null, onSubmit, onClose, onSwitchToNew }) {
+  const [query, setQuery] = useState("");
+  const [parentId, setParentId] = useState(null);
+  const [kind, setKind] = useState("remake");
+  const [instructions, setInstructions] = useState("");
+  const [pickupRequested, setPickupRequested] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [scans, setScans] = useState([]);
+  const [groupId, setGroupId] = useState(() => crypto.randomUUID());
+  const [touched, setTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  const labById = useMemo(() => Object.fromEntries((labs ?? []).map((l) => [l.id, l])), [labs]);
+
+  // Reset whenever the modal (re)opens so a prior follow-up never leaks in.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setQuery(""); setParentId(null); setKind("remake"); setInstructions("");
+      setPickupRequested(false); setPhotos([]); setScans([]);
+      setGroupId(crypto.randomUUID()); setTouched(false); setSaving(false); setSubmitError("");
+    }
+    wasOpen.current = open;
+  }, [open]);
+
+  const parent = useMemo(() => cases.find((c) => c.id === parentId) || null, [cases, parentId]);
+
+  // Search across ALL of the clinic's cases — active AND completed — so a
+  // finished denture can be pulled up for a remake. `cases` is already the
+  // caller's own set (RLS-scoped); we just filter it here.
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return cases.slice(0, 8);
+    return cases
+      .filter((c) => {
+        const lab = labById[c.labId]?.name ?? "";
+        return [c.id, c.patientName, c.patientId, lab, caseWorkSummary(c)]
+          .some((v) => String(v ?? "").toLowerCase().includes(q));
+      })
+      .slice(0, 20);
+  }, [query, cases, labById]);
+
+  const uploadOnePhoto = async (entryId, file) => {
+    try {
+      const url = await uploadCasePhoto(userId, groupId, file);
+      setPhotos((p) => p.map((ph) => (ph.id === entryId ? { ...ph, url, uploading: false, error: null } : ph)));
+    } catch (err) {
+      setPhotos((p) => p.map((ph) => (ph.id === entryId ? { ...ph, uploading: false, error: err.message || "Upload failed" } : ph)));
+    }
+  };
+  const addPhotos = (fileList) => {
+    const entries = Array.from(fileList).map((file) => ({
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      file, name: file.name, size: file.size,
+      previewUrl: URL.createObjectURL(file), url: null, uploading: true, error: null,
+    }));
+    setPhotos((p) => [...p, ...entries]);
+    entries.forEach((e) => uploadOnePhoto(e.id, e.file));
+  };
+  const removePhoto = (id) =>
+    setPhotos((p) => {
+      const t = p.find((ph) => ph.id === id);
+      if (t?.previewUrl) URL.revokeObjectURL(t.previewUrl);
+      return p.filter((ph) => ph.id !== id);
+    });
+  const addScans = (fileList) =>
+    setScans((prev) => [...prev, ...Array.from(fileList).map((f) => ({ name: f.name, size: f.size }))]);
+
+  const photosUploading = photos.some((p) => p.uploading);
+  const canSubmit = !!parent && !photosUploading && !saving && (instructions.trim() || photos.length || scans.length);
+
+  const submit = async () => {
+    setTouched(true);
+    setSubmitError("");
+    if (!parent) return;
+    if (!instructions.trim() && !photos.length && !scans.length) return;
+    if (photosUploading) return;
+    setSaving(true);
+    try {
+      await onSubmit({
+        parentCaseId: parent.id,
+        kind,
+        instructions: instructions.trim(),
+        attachments: [
+          ...photos.filter((p) => p.url).map((p) => ({ name: p.name, size: p.size, url: p.url, kind: "photo" })),
+          ...scans.map((s) => ({ name: s.name, size: s.size, kind: "scan" })),
+        ],
+        pickupRequested,
+        createdByRole: "dentist",
+        createdByName: authorName,
+      });
+      onClose();
+    } catch (err) {
+      setSubmitError(err?.message || "Couldn't submit the follow-up. Please try again.");
+      setSaving(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 flex w-full max-w-3xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92vh] sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white">
+              <RotateCcw size={18} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-800">Follow-up / Return to lab</h3>
+              <p className="text-[11px] text-slate-500">A next stage or a remake/adjustment on an existing case</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+            <X size={18} />
+          </button>
+        </div>
+
+        <ModeToggle value="followup" onChange={(v) => v === "new" && onSwitchToNew()} />
+
+        <div className="flex-1 space-y-4 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">
+          {/* 1 · Pick the existing case (active or completed) */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="mb-2 text-sm font-bold text-slate-800">1 · Which case is this about?</p>
+            {parent ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-800">{parent.patientName} <span className="font-mono text-xs font-medium text-slate-500">· {parent.id}</span></p>
+                    <p className="mt-0.5 truncate text-xs text-slate-600">
+                      {caseWorkSummary(parent)} · Lab: {labById[parent.labId]?.name ?? "—"}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      Patient ID {parent.patientId || "—"} · {(parent.stageIndex ?? 0) >= 3 ? "Work complete" : "In progress"}
+                      {parent.createdAt ? ` · sent ${new Date(parent.createdAt).toLocaleDateString()}` : ""}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setParentId(null)} className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                    Change
+                  </button>
+                </div>
+                <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400">
+                  <Info size={12} /> Patient, lab and original work are locked — you're adding a follow-up, not editing the case.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="relative">
+                  <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    autoFocus
+                    className={`${inputCls} pl-9`}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search all cases — patient, ID, case #, lab (incl. completed)"
+                  />
+                </div>
+                {touched && !parent && <p className="mt-1.5 text-xs font-semibold text-rose-600">Select the case this follow-up is for.</p>}
+                <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+                  {results.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-slate-400">No matching cases.</p>
+                  ) : (
+                    results.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => { setParentId(c.id); setQuery(""); }}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left hover:border-blue-300 hover:bg-blue-50/40"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-slate-800">{c.patientName} <span className="font-mono text-[11px] font-medium text-slate-400">· {c.id}</span></span>
+                          <span className="block truncate text-xs text-slate-500">{caseWorkSummary(c)} · {labById[c.labId]?.name ?? "—"}</span>
+                        </span>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${(c.stageIndex ?? 0) >= 3 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                          {(c.stageIndex ?? 0) >= 3 ? "Complete" : "Active"}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 2 · What kind of follow-up */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="mb-2 text-sm font-bold text-slate-800">2 · What kind of follow-up?</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {FOLLOWUP_KINDS.map((k) => (
+                <button
+                  key={k.id}
+                  type="button"
+                  onClick={() => setKind(k.id)}
+                  className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                    kind === k.id ? "border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  {k.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 flex items-start gap-1 text-[11px] text-slate-500">
+              <Info size={12} className="mt-0.5 shrink-0" /> {FOLLOWUP_KINDS.find((k) => k.id === kind)?.hint}
+            </p>
+          </div>
+
+          {/* 3 · Instructions for the lab */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="mb-2 text-sm font-bold text-slate-800">3 · Instructions for the lab technician</p>
+            <textarea
+              className={`${inputCls} min-h-[90px] resize-y`}
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="Describe the issue or the next-stage instructions — e.g. 'High on the palatal of 26, please adjust the occlusion and re-polish.'"
+              maxLength={4000}
+            />
+          </div>
+
+          {/* 4 · Attachments — always unlocked (troubleshooting photos + STL) */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="mb-1 text-sm font-bold text-slate-800">4 · Attachments</p>
+            <p className="mb-3 text-[11px] text-slate-500">Clinical photos of the problem and/or new STL scans — always available for a follow-up.</p>
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                <ImageIcon size={14} /> + Add photos
+                <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                <ScanLine size={14} /> + Add STL scans
+                <input type="file" accept=".stl,.ply,.obj" multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
+              </label>
+            </div>
+            {photos.length > 0 && (
+              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {photos.map((p) => (
+                  <div key={p.id} className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                    <img src={p.previewUrl || p.url} alt={p.name} className="h-20 w-full object-cover" />
+                    {p.uploading && <div className="absolute inset-0 flex items-center justify-center bg-white/60"><Loader2 size={16} className="animate-spin text-blue-600" /></div>}
+                    {p.error && <div className="absolute inset-0 flex items-center justify-center bg-rose-50/80 px-1 text-center text-[9px] font-semibold text-rose-700">{p.error}</div>}
+                    <button type="button" onClick={() => removePhoto(p.id)} className="absolute right-1 top-1 rounded-full bg-slate-900/60 p-0.5 text-white hover:bg-rose-600">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {scans.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {scans.map((s, i) => (
+                  <li key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+                    <span className="flex items-center gap-1.5"><ScanLine size={13} className="text-slate-400" /> {s.name}</span>
+                    <button type="button" onClick={() => setScans((prev) => prev.filter((_, j) => j !== i))} className="text-slate-400 hover:text-rose-600"><Trash2 size={13} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 5 · Logistics — manual pickup only, never auto-triggered */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="mb-2 text-sm font-bold text-slate-800">5 · Logistics</p>
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input type="checkbox" checked={pickupRequested} onChange={(e) => setPickupRequested(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600" />
+              <span>
+                <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-700"><Truck size={14} className="text-slate-400" /> Request a lab pick-up</span>
+                <span className="block text-[11px] text-slate-500">Tick only if a courier needs to collect this from the clinic — nothing is dispatched automatically.</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white px-4 py-3 sm:px-6">
+          {submitError ? (
+            <span className="flex items-start gap-1.5 text-xs font-semibold text-rose-700"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> {submitError}</span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[11px] text-slate-500"><Info size={13} /> {photosUploading ? "Waiting for photos to finish uploading…" : "The lab is notified in-app; no charge is created."}</span>
+          )}
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!canSubmit}
+              className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:py-2 ${canSubmit ? "bg-blue-600 hover:bg-blue-700" : "cursor-not-allowed bg-slate-300"}`}
+            >
+              {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Send to lab
+            </button>
+            <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, editing = null, userId, clinics = [], defaultClinicId = null }) {
+export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId, authorName = "", cases = [], clinics = [], defaultClinicId = null }) {
+  const [formKind, setFormKind] = useState("new"); // "new" | "followup" — MUST stay above the !open early return
   const [notation, setNotation] = useState("FDI");
   const [mode, setMode] = useState("unit");
   const [selection, setSelection] = useState({}); // { universal: 'unit'|'pontic' }
@@ -1160,6 +1510,12 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // A fresh open always lands on "New Case"; the toggle then lets the user
+  // switch to a follow-up. Editing is always a new-case edit, never a follow-up.
+  useEffect(() => {
+    if (open && !editing) setFormKind("new");
+  }, [open, editing]);
+
   const reset = () => {
     setNotation("FDI"); setMode("unit"); setSelection({});
     setPatientName(""); setPatientId(""); setPatientPhone(""); setShowPatientExtras(false);
@@ -1231,6 +1587,27 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           </button>
         )}
       </div>
+    );
+  }
+
+  // Follow-up mode renders a wholly separate, isolated modal (no tooth chart /
+  // pricing) — all hooks above this point run unconditionally, so this early
+  // return is safe (verified: no hooks below here).
+  if (formKind === "followup" && !isEditing) {
+    return (
+      <SectionBoundary label="The follow-up form hit a problem">
+        <FollowupModal
+          open
+          cases={cases}
+          labs={labs}
+          userId={userId}
+          authorName={authorName}
+          defaultClinicId={defaultClinicId}
+          onSubmit={onSubmitFollowup}
+          onClose={onClose}
+          onSwitchToNew={() => setFormKind("new")}
+        />
+      </SectionBoundary>
     );
   }
 
@@ -1639,6 +2016,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             <X size={18} />
           </button>
         </div>
+
+        {/* New Case vs Follow-up — hidden while editing an existing case. */}
+        {!isEditing && <ModeToggle value={formKind} onChange={setFormKind} />}
 
         {/* Scroll body */}
         <div className="flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">

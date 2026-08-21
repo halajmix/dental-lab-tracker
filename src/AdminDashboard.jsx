@@ -35,6 +35,7 @@ import {
   adminSetClinicStatus,
   adminSetLabRoles,
   fetchLoginEvents,
+  logDisplayName,
   adminTransferLabOwnership,
   adminFetchPriceSchedules,
   fetchLabRoster,
@@ -132,7 +133,7 @@ function StaffLogsPanel() {
   const visible = (events ?? []).filter((e) => {
     const s = q.trim().toLowerCase();
     if (!s) return true;
-    return [e.name, e.role, e.orgName, e.action, e.detail].join(" ").toLowerCase().includes(s);
+    return [e.name, e.email, e.role, e.orgName, e.action, e.detail].join(" ").toLowerCase().includes(s);
   });
 
   return (
@@ -176,7 +177,10 @@ function StaffLogsPanel() {
                   <td className="whitespace-nowrap px-5 py-2.5 tabular-nums text-slate-600">
                     {new Date(e.at).toLocaleString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </td>
-                  <td className="px-5 py-2.5 font-semibold text-slate-800">{e.name || "—"}</td>
+                  <td className="px-5 py-2.5 font-semibold text-slate-800">
+                    {logDisplayName(e)}
+                    {e.email && e.email !== logDisplayName(e) && <span className="block text-[11px] font-normal text-slate-400">{e.email}</span>}
+                  </td>
                   <td className="px-5 py-2.5">
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-slate-500">{e.role || "?"}</span>
                   </td>

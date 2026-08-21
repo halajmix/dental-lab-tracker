@@ -2880,3 +2880,159 @@ drop trigger if exists profiles_guard_privilege on profiles;
 create trigger profiles_guard_privilege
   before insert or update on profiles
   for each row execute function guard_profile_privilege();
+
+/* --------------------------------------------------------------------- */
+/*  Phase 41 — follow-up / iterative rounds + returned-work remakes       */
+/*                                                                       */
+/*  A parent case can gather many follow-up ROUNDS: an extra clinical     */
+/*  visit/stage of a multi-visit case (denture try-in sequence, RPD,      */
+/*  full-arch implant), or a post-delivery return (remake / adjustment /  */
+/*  refit) on already-completed work. The parent case row is NEVER        */
+/*  mutated — its clinical + financial record stays intact and immutable  */
+/*  — each round is its own open->resolved unit of work with its own      */
+/*  instructions, attachments (troubleshooting photos / STL) and pickup.  */
+/*                                                                       */
+/*  Rounds are FREE (no charge to the clinic, no statement/pricing        */
+/*  touch). The lab's private cost estimate + fault classification live   */
+/*  in a SEPARATE, finance-only table (41c) so lab technicians never see  */
+/*  them — row-level RLS can hide a whole table from techs, but not a     */
+/*  single column of case_rounds, which every lab member can read.        */
+/* --------------------------------------------------------------------- */
+
+-- 41a. Logs identify the actual person, not the generic "Lab Tech" display-
+-- name placeholder some accounts carry from onboarding. Email is the stable
+-- fallback identity shown in every staff/activity log view.
+alter table login_events add column if not exists email text not null default '';
+
+-- 41b. The shared follow-up round (visible to both parties of the parent case).
+create table if not exists case_rounds (
+  id uuid primary key default gen_random_uuid(),
+  parent_case_id text not null references cases(id) on delete cascade,
+  kind text not null check (kind in ('stage', 'remake', 'adjustment', 'refit')),
+  instructions text not null default '',
+  attachments jsonb not null default '[]'::jsonb,   -- [{name,size,url,kind:'photo'|'scan'}]
+  pickup_requested boolean not null default false,
+  status text not null check (status in ('open', 'resolved')) default 'open',
+  created_by uuid default auth.uid(),
+  created_by_role text not null check (created_by_role in ('dentist', 'lab')),
+  created_by_name text not null default '',
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  resolved_by uuid
+);
+create index if not exists case_rounds_parent_idx on case_rounds (parent_case_id);
+alter table case_rounds enable row level security;
+
+-- Same tenant rule as case_notes, multi-clinic aware (Phase 13/15): either
+-- party of the PARENT case. A dentist may only attach a round to a case their
+-- clinic owns; a lab only to a case assigned to it. Clinic/lab identity comes
+-- from the caller's JWT via the security-definer helpers, never the client.
+drop policy if exists "case_rounds_select" on case_rounds;
+create policy "case_rounds_select" on case_rounds for select
+  using (exists (
+    select 1 from cases c where c.id = case_rounds.parent_case_id
+      and (c.clinic_id = my_clinic_id() or c.clinic_id in (select my_owned_clinic_ids()) or c.lab_id = my_lab_id())
+  ));
+
+drop policy if exists "case_rounds_insert" on case_rounds;
+create policy "case_rounds_insert" on case_rounds for insert
+  with check (exists (
+    select 1 from cases c where c.id = case_rounds.parent_case_id
+      and (c.clinic_id = my_clinic_id() or c.clinic_id in (select my_owned_clinic_ids()) or c.lab_id = my_lab_id())
+  ));
+
+drop policy if exists "case_rounds_update" on case_rounds;
+create policy "case_rounds_update" on case_rounds for update
+  using (exists (
+    select 1 from cases c where c.id = case_rounds.parent_case_id
+      and (c.clinic_id = my_clinic_id() or c.clinic_id in (select my_owned_clinic_ids()) or c.lab_id = my_lab_id())
+  ));
+
+-- Server-side hardening: clip instruction length even if a client bypasses the
+-- app, and freeze parentage/author on update so a round can never be re-parented
+-- onto another tenant's case (which would smuggle attachments across clinics).
+create or replace function guard_case_round()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if current_setting('role', true) = 'service_role' then
+    return new;
+  end if;
+  new.instructions := left(coalesce(new.instructions, ''), 4000);
+  if tg_op = 'UPDATE' then
+    if new.parent_case_id is distinct from old.parent_case_id
+       or new.created_by is distinct from old.created_by
+       or new.created_by_role is distinct from old.created_by_role
+       or new.created_at is distinct from old.created_at then
+      raise exception 'a follow-up round''s parent case and author are immutable';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists case_rounds_guard on case_rounds;
+create trigger case_rounds_guard
+  before insert or update on case_rounds
+  for each row execute function guard_case_round();
+
+-- 41c. LAB-INTERNAL cost estimate + fault. NEVER visible to the clinic, and
+-- NEVER to lab technicians — only finance roles (admin + accountant), gated by
+-- the same is_lab_finance() that guards every money table in this schema. No
+-- money moves: cost_estimate is an internal estimate, not a charge. Kept in its
+-- own table precisely so techs (who read case_rounds) can't see these fields.
+create table if not exists case_round_costs (
+  round_id uuid primary key references case_rounds(id) on delete cascade,
+  lab_id uuid not null references labs(id) on delete cascade,
+  fault text not null check (fault in ('lab', 'clinic', 'shared', 'unclassified')) default 'unclassified',
+  cost_estimate numeric(12, 3),
+  note text not null default '',
+  updated_by uuid default auth.uid(),
+  updated_at timestamptz not null default now()
+);
+alter table case_round_costs enable row level security;
+
+-- Finance-only (admin or accountant) of the OWNING lab, and the labelled lab_id
+-- must actually match the round's parent-case lab (no mislabelling another lab's
+-- round as your own). Techs are excluded by construction: is_lab_finance() is
+-- false for them, so they get zero rows and never learn a cost exists.
+drop policy if exists "round_costs_select" on case_round_costs;
+create policy "round_costs_select" on case_round_costs for select
+  using (lab_id = my_lab_id() and is_lab_finance());
+
+drop policy if exists "round_costs_insert" on case_round_costs;
+create policy "round_costs_insert" on case_round_costs for insert
+  with check (
+    lab_id = my_lab_id() and is_lab_finance()
+    and exists (
+      select 1 from case_rounds r join cases c on c.id = r.parent_case_id
+      where r.id = round_id and c.lab_id = case_round_costs.lab_id
+    )
+  );
+
+drop policy if exists "round_costs_update" on case_round_costs;
+create policy "round_costs_update" on case_round_costs for update
+  using (lab_id = my_lab_id() and is_lab_finance())
+  with check (lab_id = my_lab_id() and is_lab_finance());
+
+drop policy if exists "round_costs_delete" on case_round_costs;
+create policy "round_costs_delete" on case_round_costs for delete
+  using (lab_id = my_lab_id() and is_lab_finance());
+
+-- Live sync: both parties see new rounds / status flips without a refresh, and
+-- the finance Remakes tab sees cost/fault edits live. Guarded add (no IF NOT
+-- EXISTS form for alter publication — an unguarded re-run rolls back the file).
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'case_rounds') then
+    alter publication supabase_realtime add table case_rounds;
+  end if;
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'case_round_costs') then
+    alter publication supabase_realtime add table case_round_costs;
+  end if;
+end $$;

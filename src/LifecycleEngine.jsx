@@ -23,8 +23,81 @@ import {
   Send,
   MessageSquare,
 } from "lucide-react";
-import { fetchCaseNotes, insertCaseNote } from "./lib/data.js";
+import { fetchCaseNotes, insertCaseNote, ROUND_KIND_LABELS } from "./lib/data.js";
 import { SHADE_BY_LAB } from "./PrescriptionForm.jsx";
+
+/* ================================================================== */
+/*  Follow-up rounds panel — shown in the case drawer to both parties.  */
+/*  A round is a next stage, or a returned-work remake/adjustment/refit. */
+/*  The lab-internal cost + fault live in the Remakes tab, never here.   */
+/* ================================================================== */
+
+const ROUND_KIND_STYLE = {
+  stage: "bg-sky-100 text-sky-700",
+  remake: "bg-rose-100 text-rose-700",
+  adjustment: "bg-amber-100 text-amber-700",
+  refit: "bg-violet-100 text-violet-700",
+};
+
+export function CaseRoundsPanel({ rounds = [], role, onResolve }) {
+  if (!rounds.length) return null;
+  const ordered = [...rounds].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return (
+    <section>
+      <h4 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <RotateCcw size={13} /> Follow-ups &amp; returns ({rounds.length})
+      </h4>
+      <div className="space-y-3">
+        {ordered.map((r) => (
+          <div key={r.id} className={`rounded-xl border p-3 ${r.status === "open" ? "border-amber-200 bg-amber-50/50" : "border-slate-200 bg-slate-50"}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${ROUND_KIND_STYLE[r.kind] ?? "bg-slate-100 text-slate-600"}`}>
+                  {ROUND_KIND_LABELS[r.kind] ?? r.kind}
+                </span>
+                {r.status === "resolved" ? (
+                  <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600"><CheckCircle2 size={12} /> Resolved</span>
+                ) : (
+                  <span className="text-[11px] font-semibold text-amber-700">Open</span>
+                )}
+                {r.pickupRequested && (
+                  <span className="flex items-center gap-1 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700"><Truck size={11} /> Pick-up</span>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400">{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : ""}</span>
+            </div>
+            {r.instructions && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{r.instructions}</p>}
+            {Array.isArray(r.attachments) && r.attachments.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {r.attachments.map((a, i) =>
+                  a.kind === "photo" && a.url ? (
+                    <img key={i} src={a.url} alt={a.name || "photo"} className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
+                  ) : (
+                    <span key={i} className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200">
+                      <FilePlus2 size={12} /> {a.name || "file"}
+                    </span>
+                  )
+                )}
+              </div>
+            )}
+            <p className="mt-2 text-[10px] text-slate-400">
+              By {r.createdByName || (r.createdByRole === "lab" ? "the lab" : "the clinic")}
+            </p>
+            {role === "lab" && r.status === "open" && onResolve && (
+              <button
+                type="button"
+                onClick={() => onResolve(r.id)}
+                className="mt-2 flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+              >
+                <Check size={13} /> Mark resolved
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 /* ================================================================== */
 /*  Lifecycle model — THE single source of truth for case progress    */
@@ -604,7 +677,7 @@ const ACTION_META = {
   remake: { icon: RefreshCcw, tint: "text-rose-600 bg-rose-100" },
 };
 
-export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onSetCasePrice, onResetCasePrice, onSetLabShade }) {
+export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onSetCasePrice, onResetCasePrice, onSetLabShade, rounds = [], onResolveRound }) {
   return (
     <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
       <div className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -640,6 +713,9 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                   {rxDetails}
                 </section>
               )}
+
+              {/* follow-up rounds / returned-work remakes on this case */}
+              <CaseRoundsPanel rounds={rounds} role={role} onResolve={onResolveRound} />
 
               {/* lab-determined shade for "Shade by Lab" prescriptions */}
               {(needsLabShade(caseObj) || caseObj.labShade) && (
