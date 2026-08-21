@@ -1,28 +1,33 @@
 import React, { useEffect, useState } from "react";
 import { CloudOff, RefreshCcw, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { subscribe, pendingCount, failedCount, retryFailed, discardFailed } from "./lib/outbox.js";
+import { subscribeBlobs } from "./lib/blobstore.js";
 
-// A trust indicator for the offline write queue: how many changes are waiting
-// to reach the server, whether we're syncing, and any that failed. Without it,
-// a technician can't tell a queued-and-safe change from a lost one.
+// A trust indicator for the offline write queue: how many changes (case edits
+// AND photos) are waiting to reach the server, whether we're syncing, and any
+// that failed. Without it, a technician can't tell a queued-and-safe change
+// from a lost one.
 export default function SyncStatus({ onRetry, syncing }) {
   const [counts, setCounts] = useState({ pending: 0, failed: 0 });
+  const [blobs, setBlobs] = useState(0);
   const [online, setOnline] = useState(() => navigator.onLine !== false);
 
   useEffect(() => {
     const unsub = subscribe(() => setCounts({ pending: pendingCount(), failed: failedCount() }));
+    const unsubBlobs = subscribeBlobs((n) => setBlobs(n));
     const on = () => setOnline(true);
     const off = () => setOnline(false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => {
       unsub();
+      unsubBlobs();
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
     };
   }, []);
 
-  const waiting = counts.pending; // pending (not-failed) ops
+  const waiting = counts.pending + blobs; // pending case edits + queued photos
   if (waiting === 0 && counts.failed === 0) return null;
 
   return (

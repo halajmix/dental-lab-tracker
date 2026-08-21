@@ -91,6 +91,9 @@ import {
   ROUND_KIND_LABELS,
   applyStage,
   fetchCase,
+  buildLocalCase,
+  newCaseId,
+  flushBlobUploads,
 } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 import { SectionBoundary } from "./ErrorBoundary.jsx";
@@ -987,22 +990,28 @@ export default function DentalLabTracker({ auth }) {
     if (op.kind === "stage") {
       return applyStage(op.caseId, { target: op.target, direction: op.direction, entry: op.entry, history: op.history, clearHandover: op.clearHandover });
     }
+    if (op.kind === "insert") {
+      return insertCase(op.clinicId, op.data, op.caseId);
+    }
     return updateCase(op.caseId, op.patch);
   }, []);
 
-  // Replay the offline queue and reconcile the returned rows into state.
+  // Replay the offline queue (mutations first, then the photo-blob queue) and
+  // reconcile the returned rows into state.
   const flushQueue = useCallback(async () => {
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
     setSyncing(true);
     try {
       const { synced, failed } = await flush(applyOp);
       if (synced.length) {
-        setCases((prev) => prev.map((c) => {
-          const hit = synced.find((s) => s.row && s.row.id === c.id);
-          return hit ? hit.row : c;
-        }));
+        setCases((prev) => {
+          const map = new Map(prev.map((c) => [c.id, c]));
+          for (const { row } of synced) if (row) map.set(row.id, row);
+          return [...map.values()];
+        });
       }
       if (failed.length) setRxToast(`${failed.length} change${failed.length === 1 ? "" : "s"} couldn't be saved — see the sync bar.`);
+      await flushBlobUploads().catch(() => {});
     } finally {
       setSyncing(false);
     }
@@ -1163,6 +1172,7 @@ export default function DentalLabTracker({ auth }) {
     // the dentist owns more than one) passes clinicId explicitly; falls
     // back to the profile's default clinic for everyone else.
     const { clinicId, ...caseFields } = data;
+    const targetClinic = clinicId || clinic.id;
     const newCaseData = {
       ...caseFields,
       createdDate: new Date().toISOString().slice(0, 10),
@@ -1171,18 +1181,28 @@ export default function DentalLabTracker({ auth }) {
       remake: null,
       history: [logEntry("created", STAGE_INDEX.STILL_AT_CLINIC, currentUser, "dentist")],
     };
+    // Client-generated id so an offline case has a stable identity shared by
+    // its optimistic row and its queued insert. Any attached photos were
+    // already uploaded-or-queued by the form and carry their final URLs.
+    const id = newCaseId();
+    setCases((p) => [buildLocalCase(id, targetClinic, newCaseData), ...p]);
+    if (opts.share) {
+      setAutoShare(true);
+      setPrintCaseId(id);
+    }
     try {
-      const saved = await insertCase(clinicId || clinic.id, newCaseData);
-      setCases((p) => [saved, ...p]);
+      const saved = await insertCase(targetClinic, newCaseData, id);
+      setCases((p) => p.map((c) => (c.id === id ? saved : c)));
       setRxToast("Prescription submitted — you can edit it for the next 30 minutes.");
-      // "Submit & Share" → jump straight into the share flow for the new case.
-      if (opts.share) {
-        setAutoShare(true);
-        setPrintCaseId(saved.id);
-      }
     } catch (err) {
-      console.error(err);
-      alert("Couldn't save the case — " + err.message);
+      if (isNetworkError(err)) {
+        enqueue({ kind: "insert", caseId: id, clinicId: targetClinic, data: newCaseData, label: `New case ${id}` });
+        setRxToast("No connection — the case is saved on this device and will send automatically.");
+      } else {
+        console.error(err);
+        alert("Couldn't save the case — " + err.message);
+        setCases((p) => p.filter((c) => c.id !== id)); // roll back the optimistic row
+      }
     }
   };
 

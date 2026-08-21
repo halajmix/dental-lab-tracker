@@ -1,4 +1,6 @@
 import { supabase } from "./supabaseClient.js";
+import { isNetworkError } from "./outbox.js";
+import { putBlob, allBlobs, deleteBlob } from "./blobstore.js";
 
 /* ------------------------------------------------------------------ */
 /*  Row <-> app-object mapping                                         */
@@ -221,14 +223,42 @@ export async function fetchCase(id) {
   return data ? caseFromRow(data) : null;
 }
 
-export async function insertCase(clinicId, data) {
-  const id = genCaseId();
+// Generate the case id up front so an offline-created case has a stable id
+// shared by its optimistic UI row and its queued insert op.
+export function newCaseId() {
+  return genCaseId();
+}
+
+// Build the app-shaped case object locally (no server), for the optimistic UI
+// of an offline-created case — round-trips through the exact row mapping so it
+// looks identical to a fetched case.
+export function buildLocalCase(id, clinicId, data) {
+  const nowIso = new Date().toISOString();
+  return caseFromRow({
+    id,
+    clinic_id: clinicId,
+    created_at: nowIso,
+    updated_at: nowIso,
+    created_date: nowIso.slice(0, 10),
+    ...caseToRow(data),
+  });
+}
+
+export async function insertCase(clinicId, data, id = genCaseId()) {
   const { data: row, error } = await supabase
     .from("cases")
     .insert({ id, clinic_id: clinicId, ...caseToRow(data) })
     .select()
     .single();
-  if (error) throw error;
+  // A duplicate replay of a queued insert (same client id) is a success — the
+  // case already landed; return the existing row rather than erroring.
+  if (error) {
+    if (error.code === "23505" || /duplicate key/i.test(error.message || "")) {
+      const existing = await fetchCase(id);
+      if (existing) return existing;
+    }
+    throw error;
+  }
   return caseFromRow(row);
 }
 
@@ -651,10 +681,46 @@ export async function uploadCasePhoto(userId, groupId, file) {
   const stamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 6);
   const path = `${userId}/${groupId}/${stamp}-${rand}.${ext}`;
-  const { error: uploadError } = await supabase.storage.from("case-photos").upload(path, file);
-  if (uploadError) throw uploadError;
-  const { data } = supabase.storage.from("case-photos").getPublicUrl(path);
-  return data.publicUrl;
+  // The public URL is derived from the path alone, so we know it before the
+  // bytes are uploaded — the case can carry the final URL even offline.
+  const publicUrl = supabase.storage.from("case-photos").getPublicUrl(path).data.publicUrl;
+  try {
+    const { error: uploadError } = await supabase.storage.from("case-photos").upload(path, file);
+    if (uploadError) throw uploadError;
+    return publicUrl;
+  } catch (err) {
+    if (isNetworkError(err)) {
+      // Offline: stash the blob to upload later; the case already has the URL.
+      await putBlob({ path, bucket: "case-photos", blob: file, contentType: file.type || "image/jpeg" });
+      return publicUrl;
+    }
+    throw err; // a real rejection (size/mime/RLS) — let the form show it
+  }
+}
+
+// Drain the offline photo queue: upload each stashed blob to its path. A
+// network failure keeps it for the next flush; a success (or an "already
+// exists" from a duplicate replay) removes it. Returns how many uploaded.
+export async function flushBlobUploads() {
+  let uploaded = 0;
+  const pending = await allBlobs().catch(() => []);
+  for (const rec of pending) {
+    try {
+      const { error } = await supabase.storage.from(rec.bucket).upload(rec.path, rec.blob, {
+        contentType: rec.contentType,
+        upsert: true, // idempotent: a duplicate replay just overwrites the same bytes
+      });
+      if (error) throw error;
+      await deleteBlob(rec.path);
+      uploaded++;
+    } catch (err) {
+      if (isNetworkError(err)) break; // still offline — stop, keep the rest
+      // A persistent server rejection: drop it so it can't wedge the queue
+      // forever (the thumbnail will 404, but the case itself is unaffected).
+      await deleteBlob(rec.path);
+    }
+  }
+  return uploaded;
 }
 
 /* ------------------------------------------------------------------ */
