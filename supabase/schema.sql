@@ -2832,3 +2832,51 @@ begin
   );
 end;
 $$ language plpgsql;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 40 — profiles.role privilege guard (security audit fix)        */
+/*                                                                       */
+/*  CRITICAL fix: profiles_insert_own / profiles_update_own gate only on */
+/*  id = auth.uid(); neither constrained the role column, and no trigger */
+/*  guarded it. Any authenticated user could set their own role='admin'  */
+/*  (is_admin() -> true), gaining cross-tenant read of every clinic/case */
+/*  /profile plus the full admin-actions surface (list users, delete any */
+/*  account/org/case, impersonate anyone). The app never writes role     */
+/*  after onboarding (updateProfile touches name/phone/avatar only), so  */
+/*  freezing it for app writers breaks nothing.                          */
+/*                                                                       */
+/*  Self-signup may only create dentist|lab; nobody may change role      */
+/*  through the app. Real admins are minted only via service_role, e.g.  */
+/*  in the SQL editor:                                                   */
+/*    begin; set local role service_role;                               */
+/*    update profiles set role='admin' where id='<uuid>'; commit;       */
+/* --------------------------------------------------------------------- */
+
+create or replace function guard_profile_privilege()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Trusted backend writes bypass (service_role: SQL editor / admin-actions).
+  if current_setting('role', true) = 'service_role' then
+    return new;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.role not in ('dentist', 'lab') then
+      raise exception 'self-signup role must be dentist or lab';
+    end if;
+  elsif tg_op = 'UPDATE' then
+    if new.role is distinct from old.role then
+      raise exception 'role cannot be changed through the app';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_guard_privilege on profiles;
+create trigger profiles_guard_privilege
+  before insert or update on profiles
+  for each row execute function guard_profile_privilege();
