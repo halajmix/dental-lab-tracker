@@ -3465,3 +3465,22 @@ exception when others then
   return null;
 end;
 $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 46 — accountant window: strict rolling 2 months                 */
+/*                                                                       */
+/*  The original cutoff was month-start minus 2 months, which on the     */
+/*  21st exposes almost 3 months of history. User rule (2026-08-21):     */
+/*  the accountant sees the PAST 2 MONTHS only — anything older is       */
+/*  hidden UNLESS it is still unpaid/partial (the existing exception in  */
+/*  the statement policy, kept so collections work never disappears).    */
+/*  Every accountant policy (statements / payments / expenses) calls     */
+/*  this function, so re-emitting it fixes all three at once.            */
+/* --------------------------------------------------------------------- */
+
+create or replace function accountant_cutoff()
+returns date
+language sql stable
+as $$
+  select (now() - interval '2 months')::date;
+$$;
