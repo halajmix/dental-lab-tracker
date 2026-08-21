@@ -233,7 +233,7 @@ function ItemRow({ item, busy, onSave, onDelete }) {
   const perTooth = item.category === PER_TOOTH_CATEGORY;
   const archPriced = ARCH_CATEGORIES.includes(item.category);
   const hint = perTooth
-    ? "single-arch base + both-arches base · + fee × each marked tooth (blanks = flat)"
+    ? "base covers the FIRST tooth · + fee × each additional tooth (e.g. 15 + 2: 1 tooth = 15, 6 teeth = 25)"
     : archPriced
       ? "price for a single arch + price for both arches (leave 'both' empty to charge one price)"
       : null;

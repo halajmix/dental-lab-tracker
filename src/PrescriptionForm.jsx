@@ -107,14 +107,18 @@ const CATEGORIES = {
   "Removable denture": {
     materials: [
       "Cobalt-Chrome RPD Framework",
-      "Acrylic Complete Denture",
       "Removable Partial Denture - Acrylic (with clasps)",
       "Removable Partial Denture - Acrylic (no clasps)",
-      "Acrylic Overdenture",
       "Flexible Partial (Nylon / Valplast)",
       "Cast Metal Partial",
       "Immediate Denture",
     ],
+  },
+  // Split from Removable denture (2026-08-22): partials are priced per tooth
+  // (first tooth in the base, + fee per additional), complete dentures per
+  // ARCH (single vs both) — two different price models need two categories.
+  "Complete denture": {
+    materials: ["Acrylic Complete Denture", "Acrylic Overdenture", "Immediate Denture", "Flexible (Nylon / Valplast)"],
   },
   "Orthodontics splint": { materials: [] },
   "Single layer splint - soft": { materials: [] },
@@ -136,6 +140,7 @@ const CATEGORIES = {
 // Removable denture included — a complete denture is upper, lower, or both.
 export const ARCH_CATEGORIES = [
   "Removable denture",
+  "Complete denture",
   "Clear retainer",
   "Night guard",
   "Fixed retainer",
@@ -1911,9 +1916,13 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     restorations: caseMode === "restorations" && restorations.length === 0,
     unsavedRestoration: draftDirty,
     // Arch-based appliances don't require marked teeth — the arch choice IS
-    // the extent (a complete denture or night guard has no per-tooth marks;
-    // partial dentures still mark teeth for the per-tooth pricing).
-    teeth: caseMode === "appliance" && !ARCH_CATEGORIES.includes(category) && selectedTeeth.length === 0,
+    // the extent (a complete denture or night guard has no per-tooth marks).
+    // EXCEPT the partial denture: its price is per marked tooth, so at least
+    // one tooth is required.
+    teeth:
+      caseMode === "appliance" &&
+      (!ARCH_CATEGORIES.includes(category) || category === "Removable denture") &&
+      selectedTeeth.length === 0,
     material: caseMode === "appliance" && !isSplint && !material,
     implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
     abutmentType: caseMode === "appliance" && isImplant && !abutmentType,
@@ -2392,7 +2401,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <Field label="Appliance Type" required>
                     <select className={inputCls} value={category} onChange={(e) => onCategoryChange(e.target.value)}>
                       {APPLIANCE_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c}>{c === "Removable denture" ? "Removable denture (partial)" : c}</option>
                       ))}
                     </select>
                   </Field>
