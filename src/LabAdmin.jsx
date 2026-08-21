@@ -1300,6 +1300,7 @@ function revenueByCategory(cases) {
 const TOP_PERIODS = [
   { id: "1m", label: "1 Month", days: 30 },
   { id: "6m", label: "6 Months", days: 180 },
+  { id: "7m", label: "7 Months", days: 210 },
   { id: "1y", label: "1 Year", days: 365 },
   { id: "2y", label: "2 Years", days: 730 },
 ];
