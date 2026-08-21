@@ -22,15 +22,15 @@ const get = async (p) => {
 };
 const say = (level, label, extra = "") => console.log(`${level.padEnd(5)} ${label}${extra ? " — " + extra : ""}`);
 
-// Must mirror price_case()'s appliance list (Phase 34).
-const APPLIANCE = new Set(["Removable denture","Michigan splint","Orthodontics splint","Single layer splint - soft","Double layer splint - soft","Double layer splint - outer hard, inner soft","Others - refer to notes"]);
+// Must mirror price_case()'s appliance list (Phase 34, extended Phase 45).
+const APPLIANCE = new Set(["Removable denture","Michigan splint","Orthodontics splint","Single layer splint - soft","Double layer splint - soft","Double layer splint - outer hard, inner soft","Clear retainer","Night guard","Fixed retainer","Study model","Special tray","Others - refer to notes"]);
 
 const [labs, clinics, cases, schedules, items, rules, statements, payments, expenses, profiles, members, logins] = await Promise.all([
   get("labs?select=id,name,status,owner_id"),
   get("clinics?select=id,name,status,owner_id"),
   get("cases?select=id,clinic_id,lab_id,prescription,invoice_status,statement_id,total_price,price_overridden,cancel_status,cancellation_fee,remake,stage_index,created_at,lab_shade"),
   get("price_schedules?select=id,lab_id,name,is_default"),
-  get("price_schedule_items?select=schedule_id,category,base_price"),
+  get("price_schedule_items?select=schedule_id,category,base_price,per_tooth_fee,price_both_arches"),
   get("clinic_price_rules?select=lab_id,clinic_id,price_schedule_id,discount_pct"),
   get("clinic_statements?select=id,lab_id,clinic_id,clinic_name,month,total,status"),
   get("lab_payments?select=id,lab_id,statement_id,amount,method,cleared,received_date"),
@@ -45,7 +45,7 @@ console.log(`Loaded: ${labs.length} labs, ${clinics.length} clinics, ${cases.len
 const itemsBySched = new Map();
 for (const it of items) {
   if (!itemsBySched.has(it.schedule_id)) itemsBySched.set(it.schedule_id, new Map());
-  itemsBySched.get(it.schedule_id).set(it.category, Number(it.base_price));
+  itemsBySched.get(it.schedule_id).set(it.category, { base: Number(it.base_price), ptf: it.per_tooth_fee == null ? null : Number(it.per_tooth_fee), pba: it.price_both_arches == null ? null : Number(it.price_both_arches) });
 }
 const defaultSched = new Map(schedules.filter((s) => s.is_default).map((s) => [s.lab_id, s.id]));
 const ruleFor = new Map(rules.map((r) => [`${r.lab_id}:${r.clinic_id}`, r]));
@@ -62,10 +62,19 @@ for (const c of cases) {
   const rest = c.prescription?.restorations?.length ? c.prescription.restorations : [c.prescription];
   let base = 0, priced = false;
   for (const r of rest) {
-    const p = sched.get(r?.category);
-    if (p == null) continue;
-    const units = APPLIANCE.has(r.category) ? 1 : Math.max(r?.teeth?.length ?? 0, 1);
-    base += p * units;
+    const it = sched.get(r?.category);
+    if (it == null) continue;
+    const teeth = r?.teeth?.length ?? 0;
+    // Mirror price_case(): arch appliances use the both-arches price when
+    // chosen+set; the denture adds per-tooth fee x marked teeth (Phases 44/45).
+    const ARCH = new Set(["Removable denture","Clear retainer","Night guard","Fixed retainer","Study model","Special tray"]);
+    const lineBase = ARCH.has(r.category) && r?.arches === "both" && it.pba != null ? it.pba : it.base;
+    if (r.category === "Removable denture" && it.ptf != null) {
+      base += lineBase + it.ptf * teeth;
+    } else {
+      const units = APPLIANCE.has(r.category) ? 1 : Math.max(teeth, 1);
+      base += lineBase * units;
+    }
     priced = true;
   }
   if (!priced) { unpriceable++; continue; }

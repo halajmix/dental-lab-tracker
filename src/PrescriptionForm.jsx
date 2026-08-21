@@ -121,8 +121,28 @@ const CATEGORIES = {
   "Double layer splint - soft": { materials: [] },
   "Double layer splint - outer hard, inner soft": { materials: [] },
   "Michigan splint": { materials: [] },
+  // Arch-based appliances (2026-08-21): ordered per arch — upper, lower, or
+  // both — with per-arch pricing on the lab side. No material/shade fields.
+  "Clear retainer": { materials: [] },
+  "Night guard": { materials: [] },
+  "Fixed retainer": { materials: [] },
+  "Study model": { materials: [] },
+  "Special tray": { materials: [] },
   "Others - refer to notes": { materials: ["Refer to notes"] },
 };
+
+// Appliances made per dental arch: the dentist picks Upper / Lower / Both and
+// the lab prices a single arch vs both arches separately (schema Phase 45).
+// Removable denture included — a complete denture is upper, lower, or both.
+export const ARCH_CATEGORIES = [
+  "Removable denture",
+  "Clear retainer",
+  "Night guard",
+  "Fixed retainer",
+  "Study model",
+  "Special tray",
+];
+export const ARCH_LABELS = { upper: "Upper arch", lower: "Lower arch", both: "Both arches" };
 
 // Bridges always carry a pontic, so pontic design is always shown for these.
 const BRIDGE_CATEGORIES = [
@@ -138,13 +158,20 @@ const HAS_STUMP = [
   "Bridge - tooth (Resin Bonded)",
   "Veneer",
 ];
-// Splints are clear/acrylic appliances → no tooth shade or shade guide.
+// Clear/acrylic appliances → no material menu, no tooth shade or shade guide.
+// The arch-based appliances behave the same way in the form (the denture is
+// the exception: it keeps its material menu, so it's not in this list).
 const SPLINT_CATEGORIES = [
   "Orthodontics splint",
   "Single layer splint - soft",
   "Double layer splint - soft",
   "Double layer splint - outer hard, inner soft",
   "Michigan splint",
+  "Clear retainer",
+  "Night guard",
+  "Fixed retainer",
+  "Study model",
+  "Special tray",
 ];
 // Exported: the lab-side Settings uses this same list so per-procedure
 // turnaround times always stay in sync with the Rx form's categories.
@@ -1364,6 +1391,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   const [shadeGuide, setShadeGuide] = useState("Vita Classical");
   const [vitaShade, setVitaShade] = useState("A2");
   const [stumpShade, setStumpShade] = useState("N/A");
+  // Arch choice for arch-based appliances (denture, retainers, night guard,
+  // study model, special tray): upper | lower | both. Above the !open early
+  // return like every hook in this file.
+  const [arches, setArches] = useState("upper");
 
   // Restoration cart — a case is EITHER several independent fixed
   // restorations (crowns/bridges/veneers/implants, each own spec) OR one
@@ -1434,7 +1465,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     const rx =
       caseMode === "restorations"
         ? { restorations: restorations.map((r) => ({ category: r.category, teeth: r.teeth })) }
-        : { category, teeth: Object.keys(selection) };
+        : { category, teeth: Object.keys(selection), ...(ARCH_CATEGORIES.includes(category) ? { arches } : {}) };
     const seq = ++estimateSeq.current;
     const t = setTimeout(async () => {
       const n = await estimateCasePrice(labId, clinicId, rx);
@@ -1442,7 +1473,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, labId, selectedClinicId, defaultClinicId, caseMode, restorations, category, selection]);
+  }, [open, labId, selectedClinicId, defaultClinicId, caseMode, restorations, category, selection, arches]);
 
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
 
@@ -1487,6 +1518,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       setShadeGuide(p.shadeGuide ?? "Vita Classical");
       setVitaShade(p.vitaShade ?? "A2");
       setStumpShade(p.stumpShade ?? "N/A");
+      setArches(p.arches ?? "upper");
       setImplantSystem(p.implantSystem ?? "");
       setAbutmentType(p.abutmentType ?? "");
       setAbutmentColor(p.abutmentColor ?? "");
@@ -1522,7 +1554,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setSelectedClinicId(defaultClinicId);
     setIncluded([]); setIncludedOther("");
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
-    setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A");
+    setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A"); setArches("upper");
     setCaseMode("restorations"); setRestorations([]); setDraftOpen(false); setDraftTouched(false); setDraft(emptyDraft());
     setLabId(""); setInsertionDate(""); setDeliveryTime(DELIVERY_TIMES[0]); setPickupRequested(false);
     setImplantSystem(""); setAbutmentType(""); setAbutmentColor("");
@@ -1878,7 +1910,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     labId: !labId,
     restorations: caseMode === "restorations" && restorations.length === 0,
     unsavedRestoration: draftDirty,
-    teeth: caseMode === "appliance" && selectedTeeth.length === 0,
+    // Arch-based appliances don't require marked teeth — the arch choice IS
+    // the extent (a complete denture or night guard has no per-tooth marks;
+    // partial dentures still mark teeth for the per-tooth pricing).
+    teeth: caseMode === "appliance" && !ARCH_CATEGORIES.includes(category) && selectedTeeth.length === 0,
     material: caseMode === "appliance" && !isSplint && !material,
     implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
     abutmentType: caseMode === "appliance" && isImplant && !abutmentType,
@@ -1940,6 +1975,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             shadeGuide,
             vitaShade,
             stumpShade,
+            ...(ARCH_CATEGORIES.includes(category) ? { arches } : {}),
             implantSystem: isImplant ? implantSystem : null,
             abutmentType: isImplant ? abutmentType : null,
             abutmentColor: isImplant ? abutmentColor.trim() : null,
@@ -2360,6 +2396,24 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                       ))}
                     </select>
                   </Field>
+                  {ARCH_CATEGORIES.includes(category) && (
+                    <Field label="Arch" required hint="Which jaw is this appliance for?">
+                      <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
+                        {[["upper", "Upper"], ["lower", "Lower"], ["both", "Both"]].map(([id, label]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setArches(id)}
+                            className={`rounded-lg px-2 py-2 text-sm font-semibold transition ${
+                              arches === id ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </Field>
+                  )}
                   {!isSplint && (
                     <Field label="Material" required>
                       {isRefer ? (

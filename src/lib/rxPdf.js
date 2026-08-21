@@ -326,6 +326,7 @@ async function vectorPdf(caseObj, clinic, lab, photos) {
   for (const block of specBlocks) {
     const { r } = block;
     const rows = [
+      ["Arch", r.arches ? { upper: "Upper arch", lower: "Lower arch", both: "Both arches" }[r.arches] ?? r.arches : null],
       ["Material", r.material && r.material !== "Refer to notes" ? r.material : null],
       ["Shade", shadeLine(r.shadeGuide, r.vitaShade)],
       ["Stump shade", r.stumpShade && r.stumpShade !== "N/A" && r.stumpShade !== "Refer to notes" ? r.stumpShade : null],

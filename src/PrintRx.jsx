@@ -48,7 +48,7 @@ function buildRxMessage(caseObj, clinic, lab) {
     });
     if (rx.notes) lines.push(`Notes: ${rx.notes}`);
   } else if (rx) {
-    lines.push(`Restoration: ${rx.category}${rx.material ? ` — ${rx.material}` : ""}`);
+    lines.push(`Restoration: ${rx.category}${rx.arches ? ` (${{ upper: "Upper", lower: "Lower", both: "Both arches" }[rx.arches] ?? rx.arches})` : ""}${rx.material ? ` — ${rx.material}` : ""}`);
     if (toothSummary(rx)) lines.push(`Teeth: ${toothSummary(rx)}`);
     const shade = shadeText(rx.shadeGuide, rx.vitaShade);
     if (shade) lines.push(`Shade: ${shade}`);
@@ -424,6 +424,7 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
             <div>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Material &amp; Appliance</p>
               <Spec label="Restoration" value={rx?.category} />
+              <Spec label="Arch" value={rx?.arches ? { upper: "Upper arch", lower: "Lower arch", both: "Both arches" }[rx.arches] ?? rx.arches : null} />
               <Spec label="Material" value={rx?.material} />
               {rx?.shadeGuide === SHADE_BY_LAB ? (
                 <Spec label="Shade" value="Determined by lab" />

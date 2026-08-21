@@ -47,7 +47,7 @@ import {
   Tags,
   UserPlus,
 } from "lucide-react";
-import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
+import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES, SHADE_BY_LAB, ARCH_LABELS } from "./PrescriptionForm.jsx";
 import DeviceManagement from "./DeviceManagement.jsx";
 import {
   STAGES,
@@ -398,6 +398,7 @@ function CaseRxDetails({ c }) {
     return (
       <div className="divide-y divide-slate-100">
         {row("Procedure", r.category)}
+        {row("Arch", r.arches ? ARCH_LABELS[r.arches] ?? r.arches : null)}
         {row("Material", r.material !== "Refer to notes" ? r.material : null)}
         {row("Teeth", teethLabel)}
         {row("Shade", shade)}

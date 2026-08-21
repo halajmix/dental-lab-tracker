@@ -27,7 +27,7 @@ import {
   Truck,
   Check,
 } from "lucide-react";
-import { CATEGORY_NAMES } from "./PrescriptionForm.jsx";
+import { CATEGORY_NAMES, ARCH_CATEGORIES } from "./PrescriptionForm.jsx";
 import { BASE_PRICE, caseFee } from "./Analytics.jsx";
 import { STAGE_INDEX } from "./LifecycleEngine.jsx";
 import {
@@ -114,9 +114,9 @@ const fmtMoney = (n) =>
 const csvEscape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
 
 function scheduleToCsv(schedule) {
-  const lines = ["category,code,price,per_tooth_fee"];
+  const lines = ["category,code,price,per_tooth_fee,price_both_arches"];
   for (const it of schedule.items) {
-    lines.push([csvEscape(it.category), csvEscape(it.code), it.basePrice, it.perToothFee ?? ""].join(","));
+    lines.push([csvEscape(it.category), csvEscape(it.code), it.basePrice, it.perToothFee ?? "", it.priceBothArches ?? ""].join(","));
   }
   return lines.join("\n");
 }
@@ -155,15 +155,18 @@ function parsePriceCsv(text) {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
-    const [category, code, price, fee] = splitCsvLine(line);
+    const [category, code, price, fee, both] = splitCsvLine(line);
     if (!category || category.toLowerCase() === "category") continue; // header
     const basePrice = Number.parseFloat(price);
     if (!Number.isFinite(basePrice) || basePrice < 0) continue;
-    // Optional 4th column (Phase 44): denture per-tooth fee. Absent/blank in
-    // old 3-column files -> null, which keeps/clears nothing on import below.
+    // Optional 4th/5th columns (Phases 44/45): denture per-tooth fee and the
+    // both-arches price. Absent/blank in older files -> null, which keeps/
+    // clears nothing on import below.
     const feeNum = Number.parseFloat(fee);
     const perToothFee = Number.isFinite(feeNum) && feeNum >= 0 ? feeNum : null;
-    rows.push({ category, code: code ?? "", basePrice, perToothFee });
+    const bothNum = Number.parseFloat(both);
+    const priceBothArches = Number.isFinite(bothNum) && bothNum >= 0 ? bothNum : null;
+    rows.push({ category, code: code ?? "", basePrice, perToothFee, priceBothArches });
   }
   return rows;
 }
@@ -174,72 +177,104 @@ function parsePriceCsv(text) {
 // splints and everything else stay flat.
 const PER_TOOTH_CATEGORY = "Removable denture";
 
+// Small numeric field for ItemRow: commits on blur, blank commits `clear`
+// (when allowed), invalid input reverts to the saved value.
+function PriceCell({ value, placeholder, title, busy, allowBlank = false, onCommit, wide = false }) {
+  return (
+    <input
+      type="number"
+      min="0"
+      step="any"
+      inputMode="decimal"
+      defaultValue={value ?? ""}
+      placeholder={placeholder}
+      disabled={busy}
+      title={title}
+      onBlur={(e) => {
+        const raw = e.target.value.trim();
+        if (raw === "") {
+          if (allowBlank) onCommit("");
+          else e.target.value = value ?? "";
+          return;
+        }
+        const v = Number.parseFloat(raw);
+        if (!Number.isFinite(v) || v < 0) {
+          e.target.value = value ?? ""; // revert bad input
+          return;
+        }
+        onCommit(v);
+      }}
+      className={`${wide ? "w-24" : "w-20"} rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-sm outline-none transition focus:border-blue-400 focus:bg-white`}
+    />
+  );
+}
+
 function ItemRow({ item, busy, onSave, onDelete }) {
   // `code` survives in the row object and CSV round-trip even though the
   // column was removed from the UI (2026-08-17, user request) — commit()
   // passes it through untouched so imports/legacy data are never wiped.
   const commit = (patch) => {
-    const next = { code: item.code, basePrice: item.basePrice, perToothFee: item.perToothFee, ...patch };
-    if (next.code === item.code && next.basePrice === item.basePrice && next.perToothFee === item.perToothFee) return;
+    const next = {
+      code: item.code,
+      basePrice: item.basePrice,
+      perToothFee: item.perToothFee,
+      priceBothArches: item.priceBothArches,
+      ...patch,
+    };
+    if (
+      next.code === item.code &&
+      next.basePrice === item.basePrice &&
+      next.perToothFee === item.perToothFee &&
+      next.priceBothArches === item.priceBothArches
+    )
+      return;
     onSave(item.id, next);
   };
   const perTooth = item.category === PER_TOOTH_CATEGORY;
+  const archPriced = ARCH_CATEGORIES.includes(item.category);
+  const hint = perTooth
+    ? "single-arch base + both-arches base · + fee × each marked tooth (blanks = flat)"
+    : archPriced
+      ? "price for a single arch + price for both arches (leave 'both' empty to charge one price)"
+      : null;
   return (
     <tr className="border-t border-slate-100">
       <td className="min-w-0 px-3 py-2 text-sm text-slate-700">
         {item.category}
-        {perTooth && (
-          <span className="mt-0.5 block text-[10px] leading-tight text-slate-400">
-            base price + fee × each marked tooth (leave fee empty for a flat price)
-          </span>
-        )}
+        {hint && <span className="mt-0.5 block text-[10px] leading-tight text-slate-400">{hint}</span>}
       </td>
       <td className="px-2 py-1.5">
-        <span className="flex items-center justify-end gap-1">
-          <input
-            type="number"
-            min="0"
-            step="any"
-            inputMode="decimal"
-            defaultValue={item.basePrice}
-            disabled={busy}
-            title={perTooth ? "Base price (the denture itself)" : undefined}
-            onBlur={(e) => {
-              const v = Number.parseFloat(e.target.value);
-              if (!Number.isFinite(v) || v < 0) {
-                e.target.value = item.basePrice; // revert bad input
-                return;
-              }
-              commit({ basePrice: v });
-            }}
-            className="w-24 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-sm outline-none transition focus:border-blue-400 focus:bg-white"
+        <span className="flex flex-wrap items-center justify-end gap-1">
+          <PriceCell
+            value={item.basePrice}
+            title={archPriced ? "Single-arch price" : undefined}
+            busy={busy}
+            wide
+            onCommit={(v) => commit({ basePrice: v })}
           />
+          {archPriced && (
+            <>
+              <span className="text-[10px] text-slate-400">both</span>
+              <PriceCell
+                value={item.priceBothArches}
+                placeholder="both"
+                title="Price when the appliance is for both arches (empty = same as single)"
+                busy={busy}
+                allowBlank
+                onCommit={(v) => commit({ priceBothArches: v })}
+              />
+            </>
+          )}
           {perTooth && (
             <>
               <span className="text-xs text-slate-400">+</span>
-              <input
-                type="number"
-                min="0"
-                step="any"
-                inputMode="decimal"
-                defaultValue={item.perToothFee ?? ""}
+              <PriceCell
+                value={item.perToothFee}
                 placeholder="/tooth"
-                disabled={busy}
                 title="Fee added for each marked tooth"
-                onBlur={(e) => {
-                  const raw = e.target.value.trim();
-                  if (raw === "") {
-                    commit({ perToothFee: "" }); // clear -> flat pricing
-                    return;
-                  }
-                  const v = Number.parseFloat(raw);
-                  if (!Number.isFinite(v) || v < 0) {
-                    e.target.value = item.perToothFee ?? "";
-                    return;
-                  }
-                  commit({ perToothFee: v });
-                }}
-                className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-sm outline-none transition focus:border-blue-400 focus:bg-white"
+                busy={busy}
+                allowBlank
+                onCommit={(v) => commit({ perToothFee: v })}
               />
             </>
           )}
@@ -287,16 +322,20 @@ function ScheduleCard({ schedule, busy, onMutate, onMakeDefault, onDelete, onRep
       const byCategory = Object.fromEntries(schedule.items.map((it) => [it.category, it]));
       for (const row of rows) {
         const existing = byCategory[row.category];
-        // A legacy 3-column file has no fee column (null): leave any existing
-        // per-tooth fee untouched rather than wiping it.
-        const feePatch = row.perToothFee == null ? {} : { perToothFee: row.perToothFee };
+        // Legacy files lack the fee/both columns (null): leave any existing
+        // values untouched rather than wiping them.
+        const extras = {
+          ...(row.perToothFee == null ? {} : { perToothFee: row.perToothFee }),
+          ...(row.priceBothArches == null ? {} : { priceBothArches: row.priceBothArches }),
+        };
         if (existing) {
           const feeChanged = row.perToothFee != null && existing.perToothFee !== row.perToothFee;
-          if (existing.basePrice !== row.basePrice || existing.code !== row.code || feeChanged) {
-            await updatePriceItem(existing.id, { code: row.code, basePrice: row.basePrice, ...feePatch });
+          const bothChanged = row.priceBothArches != null && existing.priceBothArches !== row.priceBothArches;
+          if (existing.basePrice !== row.basePrice || existing.code !== row.code || feeChanged || bothChanged) {
+            await updatePriceItem(existing.id, { code: row.code, basePrice: row.basePrice, ...extras });
           }
         } else {
-          await addPriceItem(schedule.id, { category: row.category, code: row.code, basePrice: row.basePrice, ...feePatch });
+          await addPriceItem(schedule.id, { category: row.category, code: row.code, basePrice: row.basePrice, ...extras });
         }
       }
     });

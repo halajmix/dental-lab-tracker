@@ -491,6 +491,9 @@ const priceItemFromRow = (r) => ({
   basePrice: Number(r.base_price),
   // Phase 44: denture base + per-tooth fee. null = flat price (old behavior).
   perToothFee: r.per_tooth_fee == null ? null : Number(r.per_tooth_fee),
+  // Phase 45: arch appliances — base_price is the SINGLE-arch price and this
+  // is the both-arches price. null = one price regardless of arch (old way).
+  priceBothArches: r.price_both_arches == null ? null : Number(r.price_both_arches),
 });
 
 const priceScheduleFromRow = (r) => ({
@@ -542,21 +545,23 @@ export async function createPriceSchedule(labId, name, { isDefault = false, item
   return sched.id;
 }
 
-export async function addPriceItem(scheduleId, { category, code = "", basePrice, perToothFee }) {
+export async function addPriceItem(scheduleId, { category, code = "", basePrice, perToothFee, priceBothArches }) {
   const row = { schedule_id: scheduleId, category, code, base_price: basePrice };
-  // Key omitted when unset so inserts still work before the Phase 44 SQL runs.
+  // Keys omitted when unset so inserts still work before the phase SQL runs.
   if (perToothFee !== undefined && perToothFee !== null && perToothFee !== "") row.per_tooth_fee = perToothFee;
+  if (priceBothArches !== undefined && priceBothArches !== null && priceBothArches !== "") row.price_both_arches = priceBothArches;
   const { data, error } = await supabase.from("price_schedule_items").insert(row).select().single();
   if (error) throw error;
   return priceItemFromRow(data);
 }
 
-export async function updatePriceItem(id, { code, basePrice, perToothFee }) {
+export async function updatePriceItem(id, { code, basePrice, perToothFee, priceBothArches }) {
   const patch = {};
   if (code !== undefined) patch.code = code;
   if (basePrice !== undefined) patch.base_price = basePrice;
-  // null clears the fee (back to flat); undefined leaves it untouched.
+  // null/"" clears back to the flat behavior; undefined leaves it untouched.
   if (perToothFee !== undefined) patch.per_tooth_fee = perToothFee === "" ? null : perToothFee;
+  if (priceBothArches !== undefined) patch.price_both_arches = priceBothArches === "" ? null : priceBothArches;
   const { error } = await supabase.from("price_schedule_items").update(patch).eq("id", id);
   if (error) throw error;
 }
