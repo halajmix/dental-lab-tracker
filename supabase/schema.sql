@@ -3036,3 +3036,56 @@ begin
     alter publication supabase_realtime add table case_round_costs;
   end if;
 end $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 42 — atomic stage merge (offline write queue conflict rule)     */
+/*                                                                       */
+/*  A technician on a bad/absent connection taps "mark stage complete";  */
+/*  the change is queued locally and replayed when the signal returns.   */
+/*  Replaying a plain "set stage = N" would clobber whatever happened     */
+/*  meanwhile (someone else advanced it, a duplicate replay, ...). So a   */
+/*  stage change is a MONOTONIC, IDEMPOTENT intent: "this case has        */
+/*  reached at least stage N". This function applies that atomically —    */
+/*  it locks the row, and only moves the stage if it isn't already at or  */
+/*  past the target in the intended direction; otherwise it's a no-op     */
+/*  success. Concurrent advances, duplicate replays, and stale queued     */
+/*  taps all resolve safely without double-counting or clobbering.        */
+/*                                                                       */
+/*  SECURITY INVOKER (the default): the UPDATE runs under the caller's    */
+/*  RLS, so a tech can only move a case their lab is allowed to write     */
+/*  (cases_update: lab_id = my_lab_id() and lab_write_allowed()). The     */
+/*  online path uses it too, so concurrent on-network advances are also   */
+/*  race-free. The client falls back to a plain update if this function   */
+/*  isn't present yet, so app-before-SQL deploy order stays safe.         */
+/* --------------------------------------------------------------------- */
+
+create or replace function case_apply_stage(
+  p_id text, p_target integer, p_entry jsonb, p_direction text, p_clear_handover boolean default false
+)
+returns setof cases
+language plpgsql
+set search_path = public
+as $$
+declare
+  cur integer;
+begin
+  -- Lock the row so concurrent applies serialize (the merge is read-modify-write).
+  select stage_index into cur from cases where id = p_id for update;
+  if cur is null then
+    return; -- no such case, or not visible to this caller -> empty result
+  end if;
+  -- Intent already satisfied (already at/past the target the intended way): no-op.
+  if (p_direction = 'advance' and cur >= p_target) or (p_direction = 'revert' and cur <= p_target) then
+    return query select * from cases where id = p_id;
+    return;
+  end if;
+  return query
+    update cases
+      set stage_index = p_target,
+          history = coalesce(history, '[]'::jsonb) || coalesce(p_entry, '[]'::jsonb),
+          -- Reverting out of the final stage discards the handover record.
+          handover = case when p_clear_handover then null else handover end
+      where id = p_id
+      returning *;
+end;
+$$;

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Building2,
@@ -89,9 +89,13 @@ import {
   resolveCaseRound,
   subscribeCaseRounds,
   ROUND_KIND_LABELS,
+  applyStage,
+  fetchCase,
 } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 import { SectionBoundary } from "./ErrorBoundary.jsx";
+import SyncStatus from "./SyncStatus.jsx";
+import { enqueue, flush, isNetworkError } from "./lib/outbox.js";
 
 /* ------------------------------------------------------------------ */
 /*  Small shared UI pieces                                             */
@@ -973,13 +977,74 @@ export default function DentalLabTracker({ auth }) {
     role,
   });
 
-  const persist = async (caseId, patch) => {
-    setCases((prev) => prev.map((c) => (c.id === caseId ? { ...c, ...patch } : c)));
+  const [syncing, setSyncing] = useState(false);
+
+  // The single write path — used by persist() for the live write AND by the
+  // outbox flush for replay, so both go through the identical conflict-
+  // resolving code. Stage moves use the atomic monotonic-merge RPC; field
+  // edits are a last-writer-wins patch.
+  const applyOp = useCallback(async (op) => {
+    if (op.kind === "stage") {
+      return applyStage(op.caseId, { target: op.target, direction: op.direction, entry: op.entry, history: op.history, clearHandover: op.clearHandover });
+    }
+    return updateCase(op.caseId, op.patch);
+  }, []);
+
+  // Replay the offline queue and reconcile the returned rows into state.
+  const flushQueue = useCallback(async () => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    setSyncing(true);
     try {
-      await updateCase(caseId, patch);
+      const { synced, failed } = await flush(applyOp);
+      if (synced.length) {
+        setCases((prev) => prev.map((c) => {
+          const hit = synced.find((s) => s.row && s.row.id === c.id);
+          return hit ? hit.row : c;
+        }));
+      }
+      if (failed.length) setRxToast(`${failed.length} change${failed.length === 1 ? "" : "s"} couldn't be saved — see the sync bar.`);
+    } finally {
+      setSyncing(false);
+    }
+  }, [applyOp]);
+
+  // Drain the queue on load and whenever the connection returns. A slow poll
+  // covers flaky links where the "online" event never fires.
+  useEffect(() => {
+    flushQueue();
+    const onOnline = () => flushQueue();
+    window.addEventListener("online", onOnline);
+    const iv = setInterval(() => { if (navigator.onLine !== false) flushQueue(); }, 20000);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      clearInterval(iv);
+    };
+  }, [flushQueue]);
+
+  // Optimistic write with a durable fallback: paint the change immediately;
+  // on a genuine network failure queue it (it syncs later) rather than losing
+  // it; only a server REJECTION (RLS/guard) alerts and reconciles to truth.
+  const persist = async (caseId, patch, stage = null) => {
+    setCases((prev) => prev.map((c) => (c.id === caseId ? { ...c, ...patch } : c)));
+    const op = stage
+      ? { kind: "stage", caseId, target: stage.target, direction: stage.direction, entry: stage.entry, history: patch.history, clearHandover: stage.clearHandover, label: stage.label }
+      : { kind: "patch", caseId, patch, label: "Case update" };
+    try {
+      const row = await applyOp(op);
+      if (row) setCases((prev) => prev.map((c) => (c.id === caseId ? row : c)));
     } catch (err) {
-      console.error("Failed to save case update", err);
-      alert("Couldn't save that change — " + err.message);
+      if (isNetworkError(err)) {
+        enqueue(op); // durable — the optimistic UI already reflects it
+      } else {
+        console.error("Failed to save case update", err);
+        alert("Couldn't save that change — " + err.message);
+        try {
+          const truth = await fetchCase(caseId);
+          if (truth) setCases((prev) => prev.map((c) => (c.id === caseId ? truth : c)));
+        } catch {
+          /* reconcile is best-effort */
+        }
+      }
     }
   };
 
@@ -988,7 +1053,12 @@ export default function DentalLabTracker({ auth }) {
     if (!c) return;
     const next = c.stageIndex + 1;
     if (next > LAST_STAGE) return;
-    persist(caseId, { stageIndex: next, history: [...(c.history ?? []), logEntry("advance", next, by, role)] });
+    const entry = logEntry("advance", next, by, role);
+    persist(
+      caseId,
+      { stageIndex: next, history: [...(c.history ?? []), entry] },
+      { target: next, direction: "advance", entry, clearHandover: false, label: `Advance ${caseId}` }
+    );
   };
 
   const revertStage = (caseId, by, role) => {
@@ -997,8 +1067,13 @@ export default function DentalLabTracker({ auth }) {
     const prevIdx = c.stageIndex - 1;
     if (prevIdx < 0) return;
     // Reverting out of Clinic Received discards any handover record.
-    const clearHandover = c.stageIndex === LAST_STAGE ? { handover: null } : {};
-    persist(caseId, { stageIndex: prevIdx, ...clearHandover, history: [...(c.history ?? []), logEntry("revert", prevIdx, by, role)] });
+    const clearHandover = c.stageIndex === LAST_STAGE;
+    const entry = logEntry("revert", prevIdx, by, role);
+    persist(
+      caseId,
+      { stageIndex: prevIdx, ...(clearHandover ? { handover: null } : {}), history: [...(c.history ?? []), entry] },
+      { target: prevIdx, direction: "revert", entry, clearHandover, label: `Revert ${caseId}` }
+    );
   };
 
   // Lab's own internal billing/job reference for a case — no history entry,
@@ -1259,6 +1334,8 @@ export default function DentalLabTracker({ auth }) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
+        {/* Offline write queue status — pending/failed changes for the tech. */}
+        <SyncStatus onRetry={flushQueue} syncing={syncing} />
         {loadError && (
           <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
             Couldn't load your data: {loadError}

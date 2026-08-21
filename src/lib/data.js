@@ -213,6 +213,14 @@ function genCaseId() {
   return `C-${stamp}${rand}`;
 }
 
+// Re-read one case to reconcile local state with server truth (used after a
+// write the server rejected, so the optimistic UI doesn't stay wrong).
+export async function fetchCase(id) {
+  const { data, error } = await supabase.from("cases").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data ? caseFromRow(data) : null;
+}
+
 export async function insertCase(clinicId, data) {
   const id = genCaseId();
   const { data: row, error } = await supabase
@@ -259,6 +267,42 @@ export async function updateCase(id, patch) {
   const { data, error } = await supabase.from("cases").update(dbPatch).eq("id", id).select().single();
   if (error) throw error;
   return caseFromRow(data);
+}
+
+// A missing RPC (function not yet created in the DB) so the caller can fall
+// back — keeps the app working if it deploys before the Phase 42 SQL is run.
+function isMissingFunction(err) {
+  const code = err?.code;
+  const msg = String(err?.message || "").toLowerCase();
+  return code === "PGRST202" || msg.includes("could not find the function") || (msg.includes("function") && msg.includes("does not exist"));
+}
+
+// Apply a stage change through the atomic monotonic-merge RPC (Phase 42): the
+// case moves to `target` only if it isn't already at/past it in `direction`
+// ("advance" | "revert"); otherwise it's a no-op. This is THE conflict rule —
+// it makes a replayed offline tap, a duplicate, and a concurrent online
+// advance all safe. `entry` is the single history record to append; `history`
+// is the full precomputed array used only by the pre-Phase-42 fallback.
+export async function applyStage(caseId, { target, direction, entry, history, clearHandover = false }) {
+  try {
+    const { data, error } = await supabase.rpc("case_apply_stage", {
+      p_id: caseId,
+      p_target: target,
+      p_entry: entry ?? null,
+      p_direction: direction,
+      p_clear_handover: clearHandover,
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error("Case not found or you can't modify it");
+    return caseFromRow(row);
+  } catch (err) {
+    if (isMissingFunction(err)) {
+      // RPC not present yet — plain (non-atomic) update, current behaviour.
+      return updateCase(caseId, { stageIndex: target, history, ...(clearHandover ? { handover: null } : {}) });
+    }
+    throw err;
+  }
 }
 
 /* ------------------------------------------------------------------ */
