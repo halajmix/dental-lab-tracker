@@ -3917,3 +3917,209 @@ exception when others then
   return null;
 end;
 $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 49 — pricing NULL-discount fix (every ruleless clinic = 0 OMR)  */
+/*                                                                       */
+/*  With no clinic_price_rules row, SELECT INTO set disc to NULL (not    */
+/*  0), NULL propagated through the total and greatest(0, NULL) = 0 --   */
+/*  latent since Phase 17, exposed when master-for-all deleted every     */
+/*  rule. One coalesce in each function fixes it.                        */
+/* --------------------------------------------------------------------- */
+
+create or replace function price_case()
+returns trigger
+security definer
+set search_path = public
+as $$
+declare
+  sched uuid;
+  disc numeric := 0;
+  base numeric := 0;
+  priced boolean := false;
+  r record;
+  p numeric;
+  ptf numeric;
+  pba numeric;
+  line_base numeric;
+  adj jsonb := '[]'::jsonb;
+  credit numeric := 0;
+begin
+  if tg_op = 'UPDATE' and old.invoice_status in ('issued', 'paid') then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and new.price_overridden then
+    return new;
+  end if;
+  if new.lab_id is null then
+    return new;
+  end if;
+
+  select cpr.price_schedule_id, coalesce(cpr.discount_pct, 0)
+    into sched, disc
+    from clinic_price_rules cpr
+   where cpr.lab_id = new.lab_id and cpr.clinic_id = new.clinic_id;
+  -- No rule row: SELECT INTO nulls BOTH targets, and a NULL discount
+  -- poisons the arithmetic (base - base*NULL/100 = NULL; greatest(0,
+  -- NULL) = 0) -> every ruleless clinic priced to ZERO. Same plpgsql
+  -- NULL-trap class as the cancellation-guard bug (2026-08-19).
+  disc := coalesce(disc, 0);
+  if sched is null then
+    select ps.id into sched from price_schedules ps
+     where ps.lab_id = new.lab_id and ps.is_default
+     limit 1;
+  end if;
+  if sched is null then
+    return new;
+  end if;
+
+  for r in
+    select x->>'category' as category,
+           x->>'arches' as arches,
+           coalesce(jsonb_array_length(x->'teeth'), 0) as teeth,
+           case
+             when x->>'category' in ('Removable partial denture', 'Michigan splint', 'Orthodontics splint',
+                                     'Single layer splint - soft', 'Double layer splint - soft',
+                                     'Double layer splint - outer hard, inner soft',
+                                     'Clear retainer', 'Night guard', 'Fixed retainer',
+                                     'Study model', 'Special tray', 'Complete denture', 'Others - refer to notes')
+               then 1
+             else greatest(coalesce(jsonb_array_length(x->'teeth'), 0), 1)
+           end as units
+      from jsonb_array_elements(
+             coalesce(new.prescription->'restorations',
+                      jsonb_build_array(new.prescription))) as x
+  loop
+    select psi.base_price, psi.per_tooth_fee, psi.price_both_arches into p, ptf, pba
+      from price_schedule_items psi
+     where psi.schedule_id = sched and psi.category = r.category;
+    if p is not null then
+      -- Arch appliances: both-arches price when chosen and configured,
+      -- else the single-arch base (also the pre-Phase-45 behavior).
+      if r.category in ('Removable partial denture', 'Complete denture', 'Clear retainer', 'Night guard',
+                        'Fixed retainer', 'Study model', 'Special tray')
+         and r.arches = 'both' and pba is not null then
+        line_base := pba;
+      else
+        line_base := p;
+      end if;
+      if r.category = 'Removable partial denture' and ptf is not null then
+        -- first tooth is included in the base; only extras add the fee
+        base := base + line_base + ptf * greatest(r.teeth - 1, 0);
+      else
+        base := base + line_base * r.units;
+      end if;
+      priced := true;
+    end if;
+  end loop;
+
+  if not priced then
+    return new;
+  end if;
+
+  if disc <> 0 then
+    adj := adj || jsonb_build_array(jsonb_build_object(
+      'label', 'Clinic rate ' || (case when disc > 0 then '−' else '+' end) || abs(disc)::text || '%',
+      'amount', round(-(base * disc / 100.0), 3)));
+  end if;
+  if new.remake is not null and coalesce((new.remake->>'cost')::numeric, 0) > 0 then
+    credit := (new.remake->>'cost')::numeric;
+    adj := adj || jsonb_build_array(jsonb_build_object('label', 'Remake credit', 'amount', -credit));
+  end if;
+
+  new.base_fee := round(base, 3);
+  new.adjustments := adj;
+  new.total_price := greatest(0, round(base - (base * disc / 100.0) - credit, 3));
+  return new;
+exception when others then
+  return new;
+end;
+$$ language plpgsql;
+
+create or replace function estimate_case_price(p_lab uuid, p_clinic uuid, p_prescription jsonb)
+returns numeric
+language plpgsql security definer stable
+set search_path = public
+as $$
+declare
+  sched uuid;
+  disc numeric := 0;
+  base numeric := 0;
+  priced boolean := false;
+  r record;
+  p numeric;
+  ptf numeric;
+  pba numeric;
+  line_base numeric;
+begin
+  if p_lab is null or p_clinic is null or p_prescription is null then
+    return null;
+  end if;
+  if not (p_clinic in (select my_owned_clinic_ids()) or p_clinic = my_clinic_id()) then
+    return null;
+  end if;
+
+  select cpr.price_schedule_id, coalesce(cpr.discount_pct, 0)
+    into sched, disc
+    from clinic_price_rules cpr
+   where cpr.lab_id = p_lab and cpr.clinic_id = p_clinic;
+  -- No rule row: SELECT INTO nulls BOTH targets, and a NULL discount
+  -- poisons the arithmetic (base - base*NULL/100 = NULL; greatest(0,
+  -- NULL) = 0) -> every ruleless clinic priced to ZERO. Same plpgsql
+  -- NULL-trap class as the cancellation-guard bug (2026-08-19).
+  disc := coalesce(disc, 0);
+  if sched is null then
+    select ps.id into sched from price_schedules ps
+     where ps.lab_id = p_lab and ps.is_default
+     limit 1;
+  end if;
+  if sched is null then
+    return null;
+  end if;
+
+  for r in
+    select x->>'category' as category,
+           x->>'arches' as arches,
+           coalesce(jsonb_array_length(x->'teeth'), 0) as teeth,
+           case
+             when x->>'category' in ('Removable partial denture', 'Michigan splint', 'Orthodontics splint',
+                                     'Single layer splint - soft', 'Double layer splint - soft',
+                                     'Double layer splint - outer hard, inner soft',
+                                     'Clear retainer', 'Night guard', 'Fixed retainer',
+                                     'Study model', 'Special tray', 'Complete denture', 'Others - refer to notes')
+               then 1
+             else greatest(coalesce(jsonb_array_length(x->'teeth'), 0), 1)
+           end as units
+      from jsonb_array_elements(
+             coalesce(p_prescription->'restorations',
+                      jsonb_build_array(p_prescription))) as x
+  loop
+    select psi.base_price, psi.per_tooth_fee, psi.price_both_arches into p, ptf, pba
+      from price_schedule_items psi
+     where psi.schedule_id = sched and psi.category = r.category;
+    if p is not null then
+      if r.category in ('Removable partial denture', 'Complete denture', 'Clear retainer', 'Night guard',
+                        'Fixed retainer', 'Study model', 'Special tray')
+         and r.arches = 'both' and pba is not null then
+        line_base := pba;
+      else
+        line_base := p;
+      end if;
+      if r.category = 'Removable partial denture' and ptf is not null then
+        -- first tooth is included in the base; only extras add the fee
+        base := base + line_base + ptf * greatest(r.teeth - 1, 0);
+      else
+        base := base + line_base * r.units;
+      end if;
+      priced := true;
+    end if;
+  end loop;
+
+  if not priced then
+    return null;
+  end if;
+  return greatest(0, round(base - (base * disc / 100.0), 3));
+exception when others then
+  return null;
+end;
+$$;

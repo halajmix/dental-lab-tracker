@@ -48,6 +48,23 @@ for (const it of items) {
   itemsBySched.get(it.schedule_id).set(it.category, { base: Number(it.base_price), ptf: it.per_tooth_fee == null ? null : Number(it.per_tooth_fee), pba: it.price_both_arches == null ? null : Number(it.price_both_arches) });
 }
 const defaultSched = new Map(schedules.filter((s) => s.is_default).map((s) => [s.lab_id, s.id]));
+// A lab must have exactly ONE default: price_case() resolves `is_default
+// limit 1` with no order, so a duplicate default makes pricing pick an
+// arbitrary (possibly empty) list while this audit's map picks the last.
+{
+  const perLab = new Map();
+  for (const s of schedules.filter((x) => x.is_default)) {
+    if (!perLab.has(s.lab_id)) perLab.set(s.lab_id, []);
+    perLab.get(s.lab_id).push(s);
+  }
+  for (const [labId, defs] of perLab) {
+    if (defs.length > 1) {
+      const lab = labs.find((l) => l.id === labId);
+      say("FAIL", `lab "${lab?.name ?? labId}" has ${defs.length} DEFAULT price lists — pricing picks one at random:`);
+      for (const d of defs) say("FAIL", `    "${d.name}" (${[...(items ?? [])].filter((i) => i.schedule_id === d.id).length} items)`);
+    }
+  }
+}
 const ruleFor = new Map(rules.map((r) => [`${r.lab_id}:${r.clinic_id}`, r]));
 
 let priceOk = 0, priceMismatch = [], unpriceable = 0, overridden = 0, frozen = 0;
