@@ -1279,6 +1279,192 @@ function revenueByCategory(cases) {
   return map;
 }
 
+/* ================================================================== */
+/*  Top performers — top 10 clinics and dentists by billed value.       */
+/*  Two revenue sources, merged (they never overlap):                   */
+/*    1. imported statement line_items (each row carries its own date,  */
+/*       dentist name and amount — this is what makes 6mo/1y/2y        */
+/*       rankings possible over the pre-platform history), and          */
+/*    2. platform cases completed in the window (caseFee), attributed   */
+/*       to the clinic and its ordering dentist. Platform-generated     */
+/*       statements link cases instead of carrying line_items, so a     */
+/*       case is never counted twice.                                   */
+/*  Cancelled cases are excluded (net revenue). The widest window (2y)  */
+/*  is fetched ONCE; the dropdown filters client-side, so switching     */
+/*  periods is instant with zero extra queries. No new indexes needed:  */
+/*  the statements unique index (lab_id, clinic_id, month) already      */
+/*  serves the eq(lab_id)+gte(month) fetch, and cases_lab_id_idx        */
+/*  covers the cases the dashboard already loads.                       */
+/* ================================================================== */
+
+const TOP_PERIODS = [
+  { id: "1m", label: "1 Month", days: 30 },
+  { id: "6m", label: "6 Months", days: 180 },
+  { id: "1y", label: "1 Year", days: 365 },
+  { id: "2y", label: "2 Years", days: 730 },
+];
+
+// A line item's own date beats its statement's month (month is the billing
+// cycle; the work date is what a 30-day window should judge). Local-noon
+// parsing sidesteps the UTC+4 off-by-one-day trap documented in the import.
+function lineItemDate(li, month) {
+  const raw = (li?.date || "").trim();
+  if (raw) {
+    const d = raw.includes("T") ? new Date(raw) : new Date(raw + "T12:00:00");
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  const m = month ? new Date(String(month).slice(0, 10) + "T12:00:00") : null;
+  return m && !Number.isNaN(m.getTime()) ? m : null;
+}
+
+function TopTable({ title, icon: Icon, rows, unitLabel }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-1.5 border-b border-slate-100 px-4 py-3">
+        <Icon size={15} className="text-blue-500" />
+        <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-10 text-center text-sm text-slate-400">No data available for this period.</p>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="w-10 px-3 py-2 text-center">#</th>
+              <th className="px-2 py-2">Name</th>
+              <th className="px-2 py-2 text-right">{unitLabel}</th>
+              <th className="px-3 py-2 text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r, i) => (
+              <tr key={r.key}>
+                <td className="px-3 py-2 text-center">
+                  <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                    i === 0 ? "bg-amber-100 text-amber-700" : i < 3 ? "bg-slate-200 text-slate-600" : "text-slate-400"
+                  }`}>
+                    {i + 1}
+                  </span>
+                </td>
+                <td className="max-w-0 truncate px-2 py-2 font-semibold text-slate-700" title={r.name}>{r.name}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-slate-500">{r.count}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums text-slate-800">{fmtOMR(r.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+export function TopPerformers({ lab, cases, clinicsById = {} }) {
+  const [period, setPeriod] = useState("1m");
+  const [stmtRows, setStmtRows] = useState(null); // null = loading
+  const [error, setError] = useState("");
+
+  // One fetch for the WIDEST window; the dropdown never refetches. The since
+  // month is built from local date parts (never toISOString — the UTC+4
+  // month-rollback trap) and padded one month so a mid-month cutoff can't
+  // clip a statement whose line items straddle it.
+  const load = () => {
+    if (!lab?.id) return;
+    setError("");
+    const d = new Date(Date.now() - 730 * 86_400_000);
+    const since = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+    fetchChargedLineItems(lab.id, since)
+      .then(setStmtRows)
+      .catch((e) => {
+        setStmtRows([]);
+        setError(e.message);
+      });
+  };
+  useEffect(load, [lab?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { clinics, dentists } = useMemo(() => {
+    const days = TOP_PERIODS.find((p) => p.id === period)?.days ?? 30;
+    const cutoff = new Date(Date.now() - days * 86_400_000);
+    const now = new Date();
+    const clinicMap = new Map();
+    const dentistMap = new Map();
+    const bump = (map, key, name, amount) => {
+      if (!key) return;
+      const g = map.get(key) ?? { key, name, total: 0, count: 0 };
+      g.total += amount;
+      g.count += 1;
+      if (name && (!g.name || g.name === "Unknown")) g.name = name;
+      map.set(g.key, g);
+    };
+
+    // 1. historical / imported billing, one line item at a time
+    for (const st of stmtRows ?? []) {
+      const clinicKey = st.clinicId ?? `n:${st.clinicName.trim().toLowerCase()}`;
+      const clinicName = clinicsById[st.clinicId]?.name ?? st.clinicName ?? "Unknown";
+      for (const li of st.lineItems) {
+        const d = lineItemDate(li, st.month);
+        if (!d || d < cutoff || d > now) continue;
+        const amount = Number(li.amount) || (Number(li.price) || 0) * (Number(li.units) || 1);
+        bump(clinicMap, clinicKey, clinicName, amount);
+        const dentist = String(li.dentist ?? "").trim();
+        if (dentist && dentist !== "-") bump(dentistMap, dentist.toLowerCase(), dentist, amount);
+      }
+    }
+
+    // 2. platform cases completed in the window (cancelled excluded = net)
+    for (const c of cases) {
+      if (c.cancelStatus === "cancelled") continue;
+      const fin = completedAt(c);
+      if (!fin || fin < cutoff || fin > now) continue;
+      const fee = caseFee(c).total;
+      const clinic = clinicsById[c.clinicId];
+      bump(clinicMap, c.clinicId ?? "unknown", clinic?.name ?? "Unknown clinic", fee);
+      const dentist = String(clinic?.dentist ?? "").trim();
+      if (dentist) bump(dentistMap, dentist.toLowerCase(), dentist, fee);
+    }
+
+    const top = (map) => [...map.values()].sort((a, b) => b.total - a.total || b.count - a.count).slice(0, 10);
+    return { clinics: top(clinicMap), dentists: top(dentistMap) };
+  }, [stmtRows, cases, clinicsById, period]);
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-slate-800">Top performers</h3>
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+          Period
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
+          >
+            {TOP_PERIODS.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {error && (
+        <p className="mb-2 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+          Historical billing couldn't load ({error}) — showing platform cases only.
+          <button onClick={load} className="rounded bg-white px-2 py-0.5 ring-1 ring-amber-200 hover:bg-amber-100">Retry</button>
+        </p>
+      )}
+      {stmtRows === null ? (
+        <p className="rounded-2xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400">Loading top performers…</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <TopTable title="Top 10 Clinics" icon={Building2} rows={clinics} unitLabel="Cases" />
+          <TopTable title="Top 10 Dentists" icon={UserCheck} rows={dentists} unitLabel="Cases" />
+        </div>
+      )}
+      <p className="mt-1.5 text-[11px] text-slate-400">
+        Billed value per clinic/dentist in the period — imported billing history plus completed platform cases;
+        cancelled cases excluded.
+      </p>
+    </div>
+  );
+}
+
 export function OverviewDashboard({ cases, clinicsById = {}, lab }) {
   const [preset, setPreset] = useState("month");
   const [custom, setCustom] = useState({ from: "", to: "" });
@@ -1485,6 +1671,8 @@ export function OverviewDashboard({ cases, clinicsById = {}, lab }) {
           </div>
         </div>
       )}
+
+      <TopPerformers lab={lab} cases={cases} clinicsById={clinicsById} />
 
       {stats.hasEstimates && (
         <p className="text-[11px] text-slate-400">
