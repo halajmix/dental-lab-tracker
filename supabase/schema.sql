@@ -4123,3 +4123,81 @@ exception when others then
   return null;
 end;
 $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 50 — case-photos becomes a PRIVATE bucket (signed URLs only)    */
+/*                                                                       */
+/*  Patient clinical photos are PHI. They were public-read: knowing the  */
+/*  URL was enough, so a link leaked through a shared PDF, a referrer,   */
+/*  a proxy log or browser history exposed the image with no second      */
+/*  check. Now the bucket is private and every view goes through a       */
+/*  short-lived signed URL, which Storage only issues to a caller who    */
+/*  passes the SELECT policy below.                                      */
+/*                                                                       */
+/*  Who may read an object:                                              */
+/*    - the uploader (their own <uid>/... folder) — also what lets the   */
+/*      Rx form show its own thumbnails before the case row exists; and  */
+/*    - any member of the clinic that owns, or the lab assigned to, a    */
+/*      case (or follow-up round) whose attachments reference the file.  */
+/*  Stored URLs are unchanged: the object path is embedded in them, and  */
+/*  the client signs from that — no data migration.                      */
+/*                                                                       */
+/*  DEPLOY ORDER (opposite of the usual): ship the APP FIRST, then run   */
+/*  this. Signing works against a public bucket too, so the new client   */
+/*  is safe either way; flipping the bucket before the new client is     */
+/*  live would break thumbnails for anyone on the old bundle.            */
+/* --------------------------------------------------------------------- */
+
+update storage.buckets set public = false where id = 'case-photos';
+
+-- Also close the Aug-21 audit's "no upload limits" finding while we're here:
+-- 10 MB and image types only, enforced by Storage itself rather than by the
+-- form's accept attribute (which a crafted client simply ignores).
+update storage.buckets
+   set file_size_limit = 10485760,
+       allowed_mime_types = array['image/jpeg','image/png','image/webp','image/heic','image/heif']
+ where id = 'case-photos';
+
+-- Security definer: the policy must look inside cases/case_rounds, which the
+-- caller cannot read directly for other tenants. Mirrors the case visibility
+-- rule used everywhere else (own clinic, owned clinics, assigned lab).
+create or replace function can_read_case_photo(object_name text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1
+      from cases c,
+           lateral jsonb_array_elements(coalesce(c.prescription->'files', '[]'::jsonb)) f
+     where (c.clinic_id = my_clinic_id()
+            or c.clinic_id in (select my_owned_clinic_ids())
+            or c.lab_id = my_lab_id())
+       and f->>'url' like '%' || object_name
+  )
+  or exists (
+    select 1
+      from case_rounds r
+      join cases c on c.id = r.parent_case_id,
+           lateral jsonb_array_elements(coalesce(r.attachments, '[]'::jsonb)) a
+     where (c.clinic_id = my_clinic_id()
+            or c.clinic_id in (select my_owned_clinic_ids())
+            or c.lab_id = my_lab_id())
+       and a->>'url' like '%' || object_name
+  );
+$$;
+
+-- Replace public read with membership-scoped read. Writes/deletes stay
+-- owner-scoped exactly as before.
+drop policy if exists "case_photos_public_read" on storage.objects;
+drop policy if exists "case_photos_read" on storage.objects;
+create policy "case_photos_read" on storage.objects for select
+  using (
+    bucket_id = 'case-photos'
+    and (
+      (storage.foldername(name))[1] = auth.uid()::text
+      or can_read_case_photo(name)
+    )
+  );

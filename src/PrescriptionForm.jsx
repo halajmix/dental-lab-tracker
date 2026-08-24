@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { uploadCasePhoto, estimateCasePrice } from "./lib/data.js";
 import { SectionBoundary } from "./ErrorBoundary.jsx";
+import { SignedImage } from "./lib/storageUrl.jsx";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -1301,7 +1302,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
               <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {photos.map((p) => (
                   <div key={p.id} className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                    <img src={p.previewUrl || p.url} alt={p.name} className="h-20 w-full object-cover" />
+                    <SignedImage url={p.previewUrl || p.url} alt={p.name} className="h-20 w-full object-cover" />
                     {p.uploading && <div className="absolute inset-0 flex items-center justify-center bg-white/60"><Loader2 size={16} className="animate-spin text-blue-600" /></div>}
                     {p.error && <div className="absolute inset-0 flex items-center justify-center bg-rose-50/80 px-1 text-center text-[9px] font-semibold text-rose-700">{p.error}</div>}
                     <button type="button" onClick={() => removePhoto(p.id)} className="absolute right-1 top-1 rounded-full bg-slate-900/60 p-0.5 text-white hover:bg-rose-600">
@@ -2606,7 +2607,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <div className="mt-3 grid grid-cols-3 gap-2">
                     {photos.map((f) => (
                       <div key={f.id} className="group relative aspect-square overflow-hidden rounded-lg bg-slate-200 ring-1 ring-slate-200">
-                        <img src={f.url || f.previewUrl} alt={f.name} className="h-full w-full object-cover" />
+                        <SignedImage url={f.url || f.previewUrl} alt={f.name} className="h-full w-full object-cover" />
                         {f.uploading && (
                           <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50">
                             <Loader2 size={18} className="animate-spin text-white" />

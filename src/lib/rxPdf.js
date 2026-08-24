@@ -1,4 +1,5 @@
 import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, SHADE_BY_LAB } from "../PrescriptionForm.jsx";
+import { signStoredUrl } from "./storageUrl.jsx";
 
 /* ------------------------------------------------------------------ */
 /*  Rx PDF builder.                                                    */
@@ -54,7 +55,10 @@ function vectorSafe(caseObj, clinic, lab) {
 // Fetch → data URL first so a CORS-restricted source can never taint a
 // canvas; the fetch itself still needs CORS, same as the on-screen thumbs.
 async function fetchImageAsDataUrl(url) {
-  const res = await fetch(url, { mode: "cors" });
+  // The bucket is private (Phase 50), so a stored URL has to be signed before
+  // its bytes can be read; signStoredUrl passes through anything else.
+  const signed = await signStoredUrl(url);
+  const res = await fetch(signed, { mode: "cors" });
   if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
   const blob = await res.blob();
   return new Promise((resolve, reject) => {

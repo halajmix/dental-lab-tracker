@@ -4,6 +4,7 @@ import { X, Printer, FileText, Paperclip, MessageCircle, Loader2, Check, Downloa
 import { UNIVERSAL_TO_FDI, UPPER_ROW, LOWER_ROW, toothSummary, includedSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 import { buildRxPdf } from "./lib/rxPdf.js";
 import { waLink } from "./lib/whatsapp.js";
+import { SignedImage } from "./lib/storageUrl.jsx";
 
 function downloadFile(file) {
   const url = URL.createObjectURL(file);
@@ -468,9 +469,9 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
               {rx.files
                 .filter((f) => f.kind === "photo" && f.url)
                 .map((f, i) => (
-                  <img
+                  <SignedImage
                     key={i}
-                    src={f.url}
+                    url={f.url}
                     crossOrigin="anonymous"
                     alt={f.name}
                     className="aspect-square w-full rounded-lg border border-slate-200 object-cover"
@@ -505,8 +506,8 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
                 Photo {i + 1} of {all.length}
                 {f.name ? ` — ${f.name}` : ""}
               </p>
-              <img
-                src={f.url}
+              <SignedImage
+                url={f.url}
                 crossOrigin="anonymous"
                 alt={f.name}
                 className="mx-auto block"

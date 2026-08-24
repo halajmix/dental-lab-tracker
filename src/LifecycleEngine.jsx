@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { fetchCaseNotes, insertCaseNote, ROUND_KIND_LABELS } from "./lib/data.js";
 import { SHADE_BY_LAB } from "./PrescriptionForm.jsx";
+import { SignedImage } from "./lib/storageUrl.jsx";
 
 /* ================================================================== */
 /*  Follow-up rounds panel — shown in the case drawer to both parties.  */
@@ -71,7 +72,7 @@ export function CaseRoundsPanel({ rounds = [], role, onResolve }) {
               <div className="mt-2 flex flex-wrap gap-2">
                 {r.attachments.map((a, i) =>
                   a.kind === "photo" && a.url ? (
-                    <img key={i} src={a.url} alt={a.name || "photo"} className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
+                    <SignedImage key={i} url={a.url} alt={a.name || "photo"} className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
                   ) : (
                     <span key={i} className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-medium text-slate-500 ring-1 ring-slate-200">
                       <FilePlus2 size={12} /> {a.name || "file"}

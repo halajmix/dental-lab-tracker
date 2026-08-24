@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
 import { clinicFromRow, labFromRow, fetchMyLabMemberships, logLoginEvent, setActivityContext } from "./data.js";
+import { clearSignedUrlCache } from "./storageUrl.jsx";
 
 /**
  * Session + profile/org loader. `profile` carries the role; `clinic`/`lab`
@@ -161,7 +162,12 @@ export function useAuth() {
     if (session?.user) return loadProfile(session.user.id, session.user.email);
   }, [session, loadProfile]);
 
-  const signOut = () => supabase.auth.signOut();
+  const signOut = () => {
+    // Signed photo links outlive the session otherwise — on a shared lab
+    // bench that would leave the next user holding working PHI URLs.
+    clearSignedUrlCache();
+    return supabase.auth.signOut();
+  };
 
   // Called once the user has set a new password, to leave recovery mode and
   // drop into the normal signed-in app (or Onboarding, if profile is null).

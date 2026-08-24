@@ -97,6 +97,7 @@ import {
 } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 import { SectionBoundary } from "./ErrorBoundary.jsx";
+import { SignedImage, SignedDownloadLink } from "./lib/storageUrl.jsx";
 import SyncStatus from "./SyncStatus.jsx";
 import { enqueue, flush, isNetworkError } from "./lib/outbox.js";
 
@@ -474,7 +475,7 @@ function CaseRxPhotos({ files }) {
             className="aspect-square overflow-hidden rounded-lg bg-slate-100 ring-1 ring-inset ring-slate-200 transition hover:ring-2 hover:ring-blue-300"
             title={f.name}
           >
-            <img src={f.url} alt={f.name} className="h-full w-full object-cover" />
+            <SignedImage url={f.url} alt={f.name} className="h-full w-full object-cover" />
           </button>
         ))}
       </div>
@@ -484,7 +485,12 @@ function CaseRxPhotos({ files }) {
             className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 p-6"
             onClick={() => setLightbox(null)}
           >
-            <img src={lightbox.url} alt={lightbox.name} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
+            <SignedImage
+              url={lightbox.url}
+              alt={lightbox.name}
+              className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
             <button
               type="button"
               onClick={() => setLightbox(null)}
@@ -493,14 +499,14 @@ function CaseRxPhotos({ files }) {
             >
               <X size={22} />
             </button>
-            <a
-              href={lightbox.url}
-              download={lightbox.name}
+            <SignedDownloadLink
+              url={lightbox.url}
+              name={lightbox.name}
               onClick={(e) => e.stopPropagation()}
               className="absolute bottom-4 right-4 flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
             >
               <Download size={15} /> Download
-            </a>
+            </SignedDownloadLink>
           </div>,
           document.body
         )}
