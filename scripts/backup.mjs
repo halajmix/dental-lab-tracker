@@ -1,29 +1,31 @@
 /**
- * Full data backup: every table + both storage buckets (avatars,
- * case-photos) → ~/Documents/DrCrown-Backups/backup-YYYY-MM-DD-HHMM/.
+ * Full data backup: every exposed table + both storage buckets (avatars,
+ * case-photos) → ~/DrCrown-Backups/backup-YYYY-MM-DD-HHMM/.
  * Keeps the newest 8 backups, deletes older ones.
+ *
+ * The backup root deliberately lives in the home folder, NOT ~/Documents:
+ * macOS TCC blocks launchd background jobs from ~/Documents (EPERM) unless
+ * node is granted Full Disk Access, which we don't want to require.
+ *
+ * Tables are discovered from PostgREST's OpenAPI root at run time, so new
+ * schema phases are picked up automatically — no list to keep in sync.
  *
  * Credentials: reads the service-role key from ~/.drcrown-backup-env
  * (a file OUTSIDE the repo so it can never be committed). Format:
  *   SERVICE_ROLE_KEY=eyJ...
  *
  * Run manually:  node scripts/backup.mjs
- * Runs weekly via the com.drcrown.backup LaunchAgent (Sunday 20:00,
- * or on next wake if the laptop was asleep).
+ * Runs weekly via the com.drcrown.backup LaunchAgent (Sunday 20:00, or on
+ * next wake if the laptop was asleep — it waits up to 10 min for network).
  *
  * This is the free safety layer, not a substitute for Supabase Pro's
  * point-in-time recovery — JSON dumps restore data, not exact state.
  */
 import { readFileSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 const SUPABASE_URL = "https://mtxkushcxczjwypwoxdh.supabase.co";
-const TABLES = [
-  "clinics", "labs", "profiles", "cases", "case_notes", "lab_members",
-  "lab_device_sessions", "lab_trusted_ips", "device_otp_challenges",
-  "price_schedules", "price_schedule_items", "clinic_price_rules",
-];
 const BUCKETS = ["avatars", "case-photos"];
 const KEEP = 8;
 
@@ -39,8 +41,40 @@ if (!key) {
 }
 const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
-const root = join(homedir(), "Documents", "DrCrown-Backups");
-const stamp = new Date().toISOString().slice(0, 16).replace("T", "-").replace(":", "");
+const errText = (err) => err.cause ? `${err.message} (${err.cause.code ?? err.cause.message ?? err.cause})` : err.message;
+
+// ---- wait for network: launchd fires this on wake, often before Wi-Fi is up ----
+let spec = null;
+for (let attempt = 1; ; attempt++) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/`, { headers });
+    if (!res.ok) throw new Error(`OpenAPI root: HTTP ${res.status}`);
+    spec = await res.json();
+    break;
+  } catch (err) {
+    if (attempt >= 20) {
+      console.error(`No network after ${attempt} attempts (~10 min) — giving up this run. Last error: ${errText(err)}`);
+      process.exit(1);
+    }
+    console.log(`network not ready (attempt ${attempt}/20): ${errText(err)} — retrying in 30s`);
+    await new Promise((r) => setTimeout(r, 30_000));
+  }
+}
+
+// ---- table discovery: every table/view PostgREST exposes in the public schema ----
+const TABLES = Object.keys(spec.definitions ?? {}).sort();
+if (!TABLES.length) {
+  console.error("PostgREST OpenAPI root listed no tables — aborting rather than writing an empty backup.");
+  process.exit(1);
+}
+console.log(`Discovered ${TABLES.length} tables: ${TABLES.join(", ")}`);
+
+const root = join(homedir(), "DrCrown-Backups");
+const now = new Date();
+const p2 = (n) => String(n).padStart(2, "0");
+// Local time parts, not toISOString(): in Oman (UTC+4) the UTC stamp names an
+// evening backup with the wrong hour and can even land on the previous day.
+const stamp = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}`;
 const dir = join(root, `backup-${stamp}`);
 mkdirSync(join(dir, "tables"), { recursive: true });
 
@@ -63,7 +97,7 @@ for (const table of TABLES) {
     console.log(`✓ ${table}: ${rows.length} rows`);
   } catch (err) {
     failures++;
-    console.error(`✗ ${table}:`, err.message);
+    console.error(`✗ ${table}:`, errText(err));
   }
 }
 
@@ -98,14 +132,14 @@ for (const bucket of BUCKETS) {
         continue;
       }
       const out = join(dir, "storage", bucket, path);
-      mkdirSync(join(out, ".."), { recursive: true });
+      mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, Buffer.from(await res.arrayBuffer()));
       saved++;
     }
     console.log(`✓ bucket ${bucket}: ${saved}/${files.length} files`);
   } catch (err) {
     failures++;
-    console.error(`✗ bucket ${bucket}:`, err.message);
+    console.error(`✗ bucket ${bucket}:`, errText(err));
   }
 }
 
