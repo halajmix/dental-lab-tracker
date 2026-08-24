@@ -64,10 +64,32 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
   }
 }
 
+/**
+ * Escape a value interpolated into email HTML. Patient names, clinic/lab
+ * names and roles are free text typed by users; unescaped they can inject
+ * markup into mail we send on the platform's behalf (a fake "Pay here" link
+ * in a bill, or layout-breaking tags). Leaf values only — never wrap HTML
+ * we composed ourselves.
+ */
+function esc(v: unknown): string {
+  return String(v ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
+  );
+}
+
+/**
+ * Subject lines are plain text, not HTML — escaping would literally print
+ * "&amp;". They only need CR/LF stripped (so no user value can forge extra
+ * mail headers) and a sane length cap.
+ */
+function subj(v: string): string {
+  return v.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
+}
+
 function emailShell(title: string, bodyHtml: string): string {
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px">
-      <h2 style="margin:0 0 12px">${title}</h2>
+      <h2 style="margin:0 0 12px">${esc(title)}</h2>
       ${bodyHtml}
       <p style="margin:20px 0 0">
         <a href="${APP_URL}" style="color:#2563eb;text-decoration:none;font-weight:600">Open Dr-Crown &rarr;</a>
@@ -78,7 +100,7 @@ function emailShell(title: string, bodyHtml: string): string {
 function caseSummaryRows(record: Record<string, unknown>): string {
   const rx = (record.prescription ?? {}) as Record<string, unknown>;
   const row = (label: string, value: unknown) =>
-    value ? `<tr><td style="padding:2px 12px 2px 0;color:#94a3b8">${label}</td><td style="color:#1e293b;font-weight:600">${value}</td></tr>` : "";
+    value ? `<tr><td style="padding:2px 12px 2px 0;color:#94a3b8">${label}</td><td style="color:#1e293b;font-weight:600">${esc(value)}</td></tr>` : "";
   return `
     <table style="font-size:13px;border-collapse:collapse;margin:12px 0">
       ${row("Patient", record.patient_name)}
@@ -197,13 +219,13 @@ Deno.serve(async (req) => {
 
       const emailed = await sendEmail(
         String(record.email),
-        `You're invited to join ${labName} on Dr-Crown`,
+        subj(`You're invited to join ${labName} on Dr-Crown`),
         emailShell(
           `Join ${labName} on Dr-Crown`,
-          `<p style="color:#475569">You've been invited to join <b>${labName}</b> as <b>${roles}</b>.</p>
+          `<p style="color:#475569">You've been invited to join <b>${esc(labName)}</b> as <b>${esc(roles)}</b>.</p>
            <p style="color:#475569">Create your account with <b>this email address</b> and choose a password &mdash;
            the invitation is linked to it, so after confirming your email you'll be offered to join
-           ${labName} automatically.</p>
+           ${esc(labName)} automatically.</p>
            <p style="margin:16px 0">
              <a href="${link}" style="background:#2563eb;color:#ffffff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Create your account</a>
            </p>`,
@@ -234,10 +256,10 @@ Deno.serve(async (req) => {
 
       const emailed = await sendEmail(
         recipient,
-        `New case from ${clinic?.name ?? "a clinic"}: ${record.patient_name}${rxData.pickupRequested ? " (pick-up requested)" : ""}`,
+        subj(`New case from ${clinic?.name ?? "a clinic"}: ${record.patient_name}${rxData.pickupRequested ? " (pick-up requested)" : ""}`),
         emailShell(
           `New case sent to ${lab.name}`,
-          `<p style="color:#475569">${clinic?.name ?? "A clinic"} just sent you a new case, case ID <b>${record.id}</b>.</p>${pickupLine}${caseSummaryRows(record)}`,
+          `<p style="color:#475569">${esc(clinic?.name ?? "A clinic")} just sent you a new case, case ID <b>${esc(record.id)}</b>.</p>${pickupLine}${caseSummaryRows(record)}`,
         ),
       );
       return json({ ok: true, emailed });
@@ -257,10 +279,10 @@ Deno.serve(async (req) => {
 
       const emailed = await sendEmail(
         clinic.email,
-        `${lab?.name ?? "Your lab"} marked ${record.patient_name}'s case complete`,
+        subj(`${lab?.name ?? "Your lab"} marked ${record.patient_name}'s case complete`),
         emailShell(
           "Case complete: ready for pickup",
-          `<p style="color:#475569">${lab?.name ?? "Your lab"} finished case <b>${record.id}</b> and it's ready to collect.</p>${caseSummaryRows(record)}`,
+          `<p style="color:#475569">${esc(lab?.name ?? "Your lab")} finished case <b>${esc(record.id)}</b> and it's ready to collect.</p>${caseSummaryRows(record)}`,
         ),
       );
       return json({ ok: true, emailed });

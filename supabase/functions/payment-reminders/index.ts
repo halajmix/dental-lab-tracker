@@ -24,6 +24,28 @@ const json = (body: unknown, status = 200) =>
 
 const APP_URL = "https://dr-crown.com";
 
+/**
+ * Escape a value interpolated into email HTML. Patient names, clinic/lab
+ * names and roles are free text typed by users; unescaped they can inject
+ * markup into mail we send on the platform's behalf (a fake "Pay here" link
+ * in a bill, or layout-breaking tags). Leaf values only — never wrap HTML
+ * we composed ourselves.
+ */
+function esc(v: unknown): string {
+  return String(v ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
+  );
+}
+
+/**
+ * Subject lines are plain text, not HTML — escaping would literally print
+ * "&amp;". They only need CR/LF stripped (so no user value can forge extra
+ * mail headers) and a sane length cap.
+ */
+function subj(v: string): string {
+  return v.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
+}
+
 const fmtOMR = (n: number) =>
   `${n.toLocaleString("en", { minimumFractionDigits: 0, maximumFractionDigits: 3 })} OMR`;
 
@@ -71,8 +93,8 @@ function invoiceTable(rows: CaseRow[]): { html: string; total: number } {
       const amount = typeof c.total_price === "number" ? c.total_price : null;
       if (amount !== null) total += amount;
       return `<tr>
-        <td style="padding:4px 12px 4px 0;color:#1e293b;font-weight:600">${c.invoice_number || c.id}</td>
-        <td style="padding:4px 12px 4px 0;color:#475569">${c.patient_name ?? ""}</td>
+        <td style="padding:4px 12px 4px 0;color:#1e293b;font-weight:600">${esc(c.invoice_number || c.id)}</td>
+        <td style="padding:4px 12px 4px 0;color:#475569">${esc(c.patient_name ?? "")}</td>
         <td style="padding:4px 0;color:#1e293b;text-align:right">${amount !== null ? fmtOMR(amount) : "&mdash;"}</td>
       </tr>`;
     })
@@ -159,7 +181,6 @@ Deno.serve(async (req) => {
     if (error) throw error;
     if (!errors?.length) return json({ ok: true, errors: 0 });
 
-    const esc = (s: unknown) => String(s ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const items = errors
       .slice(0, 5)
       .map(
@@ -171,7 +192,7 @@ Deno.serve(async (req) => {
     const emailed = await sendEmail(
       "alajmix@gmail.com",
       undefined,
-      `Dr-Crown: ${errors.length} client error${errors.length === 1 ? "" : "s"} in the last hour`,
+      subj(`Dr-Crown: ${errors.length} client error${errors.length === 1 ? "" : "s"} in the last hour`),
       `<div style="font-family:system-ui,sans-serif;max-width:560px">
         <h2 style="margin:0 0 10px">${errors.length} new client error${errors.length === 1 ? "" : "s"}</h2>
         <ul style="padding-left:18px">${items}</ul>
@@ -223,11 +244,11 @@ Deno.serve(async (req) => {
       const ok = await sendEmail(
         clinic.email,
         lab?.email || undefined,
-        `Payment reminder &mdash; ${rows.length} outstanding invoice${rows.length === 1 ? "" : "s"} with ${lab?.name ?? "your lab"} (${fmtOMR(total)})`,
+        subj(`Payment reminder: ${rows.length} outstanding invoice${rows.length === 1 ? "" : "s"} with ${lab?.name ?? "your lab"} (${fmtOMR(total)})`),
         `<div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px">
-          <h2 style="margin:0 0 12px">Outstanding invoices with ${lab?.name ?? "your dental lab"}</h2>
-          <p style="color:#475569">Dear ${clinic.name ?? "clinic"}, the following invoices are still unpaid.
-          If you've already settled them, please ask ${lab?.name ?? "the lab"} to mark them paid &mdash; replying
+          <h2 style="margin:0 0 12px">Outstanding invoices with ${esc(lab?.name ?? "your dental lab")}</h2>
+          <p style="color:#475569">Dear ${esc(clinic.name ?? "clinic")}, the following invoices are still unpaid.
+          If you've already settled them, please ask ${esc(lab?.name ?? "the lab")} to mark them paid &mdash; replying
           to this email reaches them directly.</p>
           ${html}
           <p style="margin:20px 0 0">

@@ -128,6 +128,14 @@ async function geoLookup(ip: string): Promise<string> {
   }
 }
 
+/** HTML-escape leaf values interpolated into email bodies (device names are
+ *  user-settable, so they must not be able to inject markup). */
+function esc(v: unknown): string {
+  return String(v ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
+  );
+}
+
 async function sendOtpEmail(
   to: string,
   code: string,
@@ -157,10 +165,10 @@ async function sendOtpEmail(
             <p style="font-size:30px;font-weight:800;letter-spacing:5px;margin:16px 0">${code}</p>
             <p style="color:#64748b;font-size:13px;margin:0 0 16px">Expires in 10 minutes.</p>
             <table style="font-size:13px;color:#334155;border-collapse:collapse">
-              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">Device</td><td>${meta.sessionName} — ${meta.device}</td></tr>
-              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">IP</td><td>${meta.ip}</td></tr>
-              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">Location</td><td>${meta.location}</td></tr>
-              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">Time</td><td>${meta.when}</td></tr>
+              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">Device</td><td>${esc(meta.sessionName)} &mdash; ${esc(meta.device)}</td></tr>
+              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">IP</td><td>${esc(meta.ip)}</td></tr>
+              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">Location</td><td>${esc(meta.location)}</td></tr>
+              <tr><td style="padding:2px 12px 2px 0;color:#94a3b8">Time</td><td>${esc(meta.when)}</td></tr>
             </table>
           </div>`,
       }),
