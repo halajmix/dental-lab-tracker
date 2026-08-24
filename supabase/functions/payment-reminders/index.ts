@@ -93,16 +93,48 @@ function invoiceTable(rows: CaseRow[]): { html: string; total: number } {
   return { html, total };
 }
 
+/**
+ * Shared-secret gate. FAIL-CLOSED: a missing, blank or mismatched secret
+ * refuses the request. The old logic skipped the check when the function
+ * secret was unset ("so notifications don't stop before setup") — but this
+ * endpoint runs with Verify-JWT OFF, so an unset secret meant the whole
+ * internet could make the platform send mail. A misconfiguration must break
+ * loudly (500) instead of quietly opening the door.
+ *
+ * Comparison is length-checked then constant-time, so a caller can't probe
+ * the secret one character at a time by measuring response latency.
+ */
+function secretGate(req: Request): Response | null {
+  const expected = Deno.env.get("CASE_NOTIFY_SECRET");
+  if (!expected || expected.trim() === "") {
+    console.error("CASE_NOTIFY_SECRET is not set — refusing every request until it is configured.");
+    return json({ error: "Server misconfigured" }, 500);
+  }
+  const provided = req.headers.get("x-webhook-secret");
+  if (!provided || !timingSafeEqual(provided, expected)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  return null; // caller is trusted
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
   // Same public-endpoint reasoning as case-notify: Verify JWT is OFF, so the
   // shared secret is the only gate. Without it, anyone could make the
   // platform dun real clinics on demand.
-  const expected = Deno.env.get("CASE_NOTIFY_SECRET");
-  if (expected && req.headers.get("x-webhook-secret") !== expected) {
-    return json({ error: "Unauthorized" }, 401);
-  }
+  const denied = secretGate(req);
+  if (denied) return denied;
 
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
