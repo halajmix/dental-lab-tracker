@@ -60,6 +60,10 @@ import {
   CasePriceField,
   LabShadeField,
   needsLabShade,
+  dueUrgency,
+  URGENCY_META,
+  fmtDueStamp,
+  fmtRemaining,
 } from "./LifecycleEngine.jsx";
 import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
 import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel, LabStaffLogsPanel, RemakesPanel } from "./LabAdmin.jsx";
@@ -1069,6 +1073,13 @@ export default function DentalLabTracker({ auth }) {
     if (!c) return;
     const next = c.stageIndex + 1;
     if (next > LAST_STAGE) return;
+    // Data integrity: a "Shade by Lab" case cannot enter production until the
+    // technician records the shade — otherwise the work is made to a guess.
+    // Guards every advance path (queue card, drawer's Advance button).
+    if (next === STAGE_INDEX.WORK_IN_PROGRESS && needsLabShade(c) && !c.labShade) {
+      alert(`${c.id} — ${c.patientName}: this case is "Shade by Lab" and no shade has been recorded yet. Set the shade on the case card before starting production.`);
+      return;
+    }
     logActivity("advanced case stage", `${c.id} — ${c.patientName} → ${STAGES[next].label}`);
     const entry = logEntry("advance", next, by, role);
     persist(
@@ -1470,6 +1481,7 @@ export default function DentalLabTracker({ auth }) {
             <LabDashboard
               lab={lab}
               queue={labQueue}
+              rounds={caseRounds}
               clinicsById={clinicsById}
               onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
               onRevert={(id) => revertStage(id, `${lab.name} — ${currentUser}`, "lab")}
@@ -2050,17 +2062,131 @@ function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
 /*  Laboratory Dashboard                                               */
 /* ------------------------------------------------------------------ */
 
-// Soft-tinted active state per tab — "Completed" reads as a calm green,
-// "Incoming" a fresh sky blue, "In Production" mid-blue, so the active tab
-// is unmistakable without relying on color alone (the label is always there).
+// One unified working view ("Active" = Incoming + In Production merged; each
+// card carries its own status label) plus the isolated "Completed" archive.
 const QUEUE_TAB_DEFS = [
-  { key: "incoming", label: "Incoming", activeCls: "bg-sky-100 text-sky-700 ring-sky-200" },
-  { key: "in_production", label: "In Production", activeCls: "bg-blue-100 text-blue-700 ring-blue-200" },
+  { key: "active", label: "Active", activeCls: "bg-blue-100 text-blue-700 ring-blue-200" },
   { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
 ];
 
-function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation, onExportCsv }) {
-  const [queueTab, setQueueTab] = useState("incoming");
+// Follow-up round kinds, in the words a technician would use.
+const ROUND_KIND_LABEL = { stage: "Follow-up", remake: "Remake", adjustment: "Adjustment", refit: "Re-fit" };
+
+/**
+ * Delivery-pressure matrix: every live, unfinished case whose appointment is
+ * within 72h (or already past), most urgent first. Row tint = proximity
+ * bucket; sortable by any column, "Due" ascending (= urgency) by default.
+ */
+function UpcomingDeadlines({ cases, clinicsById, onOpenCase, now }) {
+  const [sort, setSort] = useState({ key: "due", dir: "asc" });
+
+  // dueUrgency() itself excludes cancelled, completed-stage and undated cases.
+  const rows = cases
+    .map((c) => ({ c, u: dueUrgency(c, now) }))
+    .filter((r) => r.u);
+
+  const clinicName = (c) => clinicsById?.[c.clinicId]?.name ?? "—";
+  const SORT_VAL = {
+    due: (r) => r.u.hours,
+    patient: (r) => (r.c.patientName ?? "").toLowerCase(),
+    clinic: (r) => clinicName(r.c).toLowerCase(),
+    stage: (r) => r.c.stageIndex,
+  };
+  const val = SORT_VAL[sort.key] ?? SORT_VAL.due;
+  rows.sort((a, b) => {
+    const x = val(a);
+    const y = val(b);
+    const d = x < y ? -1 : x > y ? 1 : 0;
+    return (sort.dir === "asc" ? d : -d) || a.c.id.localeCompare(b.c.id);
+  });
+
+  const overdueCount = rows.filter((r) => r.u.key === "overdue").length;
+  const flip = (key) => setSort((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }));
+  const SortTh = ({ k, children, className = "" }) => (
+    <th className={`whitespace-nowrap px-3 py-2 ${className}`}>
+      <button onClick={() => flip(k)} className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide hover:text-slate-600">
+        {children}
+        <span className="text-[9px]">{sort.key === k ? (sort.dir === "asc" ? "▲" : "▼") : "△"}</span>
+      </button>
+    </th>
+  );
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-2.5">
+        <AlertTriangle size={14} className={overdueCount ? "text-red-600" : "text-amber-500"} />
+        <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Upcoming appointments</h4>
+        {rows.length > 0 && (
+          <span className="ml-auto flex items-center gap-1.5 text-[11px] font-semibold">
+            {overdueCount > 0 && (
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-red-800">{overdueCount} overdue</span>
+            )}
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{rows.length - overdueCount} due ≤ 3 days</span>
+          </span>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <p className="flex items-center gap-1.5 px-4 py-3 text-xs text-slate-400">
+          <CheckCircle2 size={13} className="text-emerald-500" /> Nothing due within the next 3 days.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-left text-xs">
+            <thead className="text-[10px] text-slate-400">
+              <tr>
+                <th className="whitespace-nowrap px-3 py-2 font-semibold uppercase tracking-wide">Case ID</th>
+                <SortTh k="patient">Patient</SortTh>
+                <SortTh k="clinic">Clinic</SortTh>
+                <SortTh k="due">Due</SortTh>
+                <th className="whitespace-nowrap px-3 py-2 font-semibold uppercase tracking-wide">Remaining</th>
+                <SortTh k="stage">Stage</SortTh>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/60">
+              {rows.map(({ c, u }) => {
+                const meta = URGENCY_META[u.key];
+                return (
+                  <tr
+                    key={c.id}
+                    onClick={() => onOpenCase(c.id)}
+                    className={`cursor-pointer transition hover:brightness-[0.98] ${meta.rowCls}`}
+                    title="Open case details"
+                  >
+                    <td className="whitespace-nowrap px-3 py-2 font-mono text-[11px] text-slate-600">{c.id}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-800">{c.patientName}</td>
+                    <td className="px-3 py-2 text-slate-600">{clinicName(c)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2 font-semibold ${meta.textCls}`}>{fmtDueStamp(c)}</td>
+                    <td className={`whitespace-nowrap px-3 py-2 font-bold ${meta.textCls}`}>{fmtRemaining(u.hours)}</td>
+                    <td className="whitespace-nowrap px-3 py-2"><StatusPill caseObj={c} /></td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenCase(c.id); }}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        <Eye size={12} /> Open
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation, onExportCsv }) {
+  const [queueTab, setQueueTab] = useState("active");
+  // Minute tick so "time remaining" and urgency colors stay honest on a
+  // dashboard that sits open on the bench all day.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   // Brief confirmation after a stage change moves a case out of the tab
   // you're looking at — without this, advancing the only case in "Incoming"
   // just makes the list go blank with no explanation (looked like the case
@@ -2077,12 +2203,19 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
   // Approved cancellations drop out of the working queue — the work has
   // stopped; billing still sees them via the admin tabs.
   const live = (c) => c.cancelStatus !== "cancelled";
-  const inIncoming = (c) => live(c) && c.stageIndex === STAGE_INDEX.STILL_AT_CLINIC;
-  const inProduction = (c) => live(c) && c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex < STAGE_INDEX.WORK_COMPLETE;
-  const inCompleted = (c) => live(c) && c.stageIndex >= STAGE_INDEX.WORK_COMPLETE;
-  const BUCKET = { incoming: inIncoming, in_production: inProduction, completed: inCompleted };
-  const bucketOf = (stageIndex) =>
-    Object.entries(BUCKET).find(([, test]) => test({ stageIndex }))?.[0] ?? "incoming";
+  // A case the dentist sent back (open follow-up round) is working inventory
+  // again: it leaves "Completed" and rejoins the active queue as "Returning"
+  // until the lab marks the round resolved in the case drawer.
+  const openRoundByCase = new Map();
+  for (const r of rounds) {
+    if (r.status === "open" && !openRoundByCase.has(r.parentCaseId)) openRoundByCase.set(r.parentCaseId, r);
+  }
+  const isReturning = (c) => c.stageIndex >= STAGE_INDEX.WORK_COMPLETE && openRoundByCase.has(c.id);
+  const inActive = (c) => live(c) && (c.stageIndex < STAGE_INDEX.WORK_COMPLETE || isReturning(c));
+  const inCompleted = (c) => live(c) && c.stageIndex >= STAGE_INDEX.WORK_COMPLETE && !isReturning(c);
+  const BUCKET = { active: inActive, completed: inCompleted };
+  const bucketOf = (c, stageIndex) =>
+    Object.entries(BUCKET).find(([, test]) => test({ ...c, stageIndex }))?.[0] ?? "active";
 
   const tabs = QUEUE_TAB_DEFS.map((t) => ({ ...t, count: queue.filter(BUCKET[t.key]).length }));
   const visibleQueue = queue.filter(BUCKET[queueTab]);
@@ -2090,8 +2223,8 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
 
   // Wrap advance/revert so the view follows the case to wherever it lands —
   // and says so — instead of silently leaving the current tab empty.
-  const followCase = (caseId, nextStageIndex) => {
-    const nextTab = bucketOf(nextStageIndex);
+  const followCase = (c, nextStageIndex) => {
+    const nextTab = bucketOf(c, nextStageIndex);
     if (nextTab !== queueTab) {
       setQueueTab(nextTab);
       const label = QUEUE_TAB_DEFS.find((t) => t.key === nextTab)?.label ?? nextTab;
@@ -2101,12 +2234,12 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
   const handleAdvance = (caseId) => {
     const c = queue.find((x) => x.id === caseId);
     onAdvance(caseId);
-    if (c) followCase(caseId, c.stageIndex + 1);
+    if (c) followCase(c, c.stageIndex + 1);
   };
   const handleRevert = (caseId) => {
     const c = queue.find((x) => x.id === caseId);
     onRevert(caseId);
-    if (c) followCase(caseId, c.stageIndex - 1);
+    if (c) followCase(c, c.stageIndex - 1);
   };
 
   // This lab's own SLA snapshot.
@@ -2122,6 +2255,10 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
         </h2>
         <p className="text-sm text-slate-500">Production Queue</p>
       </div>
+
+      {/* Delivery pressure first: everything due within 72h (or overdue),
+          most urgent on top, before any cards or lists */}
+      <UpcomingDeadlines cases={queue} clinicsById={clinicsById} onOpenCase={onOpenCase} now={now} />
 
       {/* Queue tabs + Export, in one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2167,6 +2304,7 @@ function LabDashboard({ lab, queue, clinicsById, onAdvance, onRevert, onOpenCase
               onResolveCancellation={onResolveCancellation}
               key={c.id}
               c={c}
+              returningRound={openRoundByCase.get(c.id)}
               onAdvance={handleAdvance}
               onRevert={handleRevert}
               onOpenCase={onOpenCase}
@@ -2422,7 +2560,7 @@ function CancellationRequestBanner({ c, onResolve }) {
   );
 }
 
-function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation }) {
+function LabCaseCard({ c, returningRound, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -2431,8 +2569,42 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
   const waitingOn = next && !canAdvance ? (next.actor === "lab" ? "Lab" : "Clinic") : null;
   const urgent = isUrgent(c);
 
+  // Where this card sits in the unified queue — said out loud on the card
+  // since "Incoming" and "In Production" now share one view.
+  const returning = returningRound && idx >= STAGE_INDEX.WORK_COMPLETE;
+  const status = returning
+    ? { label: `Returning — ${ROUND_KIND_LABEL[returningRound.kind] ?? "Follow-up"}`, cls: "bg-rose-100 text-rose-700 ring-rose-200", Icon: RefreshCcw }
+    : idx === STAGE_INDEX.STILL_AT_CLINIC
+    ? { label: "Incoming", cls: "bg-sky-100 text-sky-700 ring-sky-200", Icon: ClipboardCheck }
+    : idx < STAGE_INDEX.WORK_COMPLETE
+    ? { label: "In Production", cls: "bg-blue-100 text-blue-700 ring-blue-200", Icon: Wrench }
+    : { label: "Completed", cls: "bg-emerald-100 text-emerald-700 ring-emerald-200", Icon: CheckCircle2 };
+
+  // Delivery pressure: left accent matches the urgency window, and the due
+  // stamp sits in the top-right corner of every card (muted when undated).
+  const u = dueUrgency(c);
+  const dueStamp = fmtDueStamp(c);
+  const accent = u ? URGENCY_META[u.key].accentCls : returning ? "border-l-rose-400" : "border-l-slate-200";
+
+  // "Shade by Lab" cases cannot enter production without a recorded shade —
+  // same rule advanceStage enforces; the button says so instead of failing.
+  const shadeBlocked = canAdvance && idx + 1 === STAGE_INDEX.WORK_IN_PROGRESS && needsLabShade(c) && !c.labShade;
+
   return (
-    <div className={`rounded-2xl border bg-white p-4 shadow-sm ${urgent ? "border-rose-300" : "border-slate-200"}`}>
+    <div className={`rounded-2xl border border-l-4 bg-white p-4 shadow-sm ${urgent ? "border-rose-300" : "border-slate-200"} ${accent}`}>
+      {/* Status label + due stamp — always the first line of the card */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ring-inset ${status.cls}`}>
+          <status.Icon size={11} /> {status.label}
+        </span>
+        <span
+          className={`inline-flex items-center gap-1 text-[11px] font-semibold ${u ? URGENCY_META[u.key].textCls : "text-slate-400"}`}
+          title={u ? fmtRemaining(u.hours) : undefined}
+        >
+          <Clock size={11} /> {dueStamp ? `Due ${dueStamp}` : "No due date"}
+        </span>
+      </div>
+
       {/* Identity — the lab's own invoice number, not the system case id
           (still available via View Details for cross-referencing with the clinic) */}
       <div className="mb-2.5 flex items-start justify-between gap-2">
@@ -2465,6 +2637,19 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
 
       {c.cancelStatus === "requested" && onResolveCancellation && (
         <CancellationRequestBanner c={c} onResolve={onResolveCancellation} />
+      )}
+
+      {/* The clinic sent this case back — show why, straight on the card */}
+      {returningRound && (
+        <div className="mb-2.5 rounded-lg bg-rose-50 px-3.5 py-2.5 text-xs text-rose-700 ring-1 ring-inset ring-rose-200">
+          <span className="font-bold">
+            Sent back by the clinic — {(ROUND_KIND_LABEL[returningRound.kind] ?? "Follow-up").toLowerCase()}.
+          </span>{" "}
+          {returningRound.instructions ? `"${returningRound.instructions.slice(0, 160)}${returningRound.instructions.length > 160 ? "…" : ""}" ` : ""}
+          <button onClick={() => onOpenCase(c.id)} className="font-bold underline underline-offset-2 hover:text-rose-900">
+            View details
+          </button>
+        </div>
       )}
 
       {/* Critical info — Material / Teeth / Shade in one subtly shaded row, not a wall of text */}
@@ -2528,7 +2713,19 @@ function LabCaseCard({ c, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInv
 
       {/* ONE primary action — tidy and right-aligned rather than a full-width banner */}
       {next ? (
-        canAdvance ? (
+        shadeBlocked ? (
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-[11px] font-semibold text-amber-600">Shade required before production starts</span>
+            <button
+              disabled
+              className="flex cursor-not-allowed items-center gap-1.5 rounded-lg bg-slate-300 px-4 py-2 text-sm font-bold text-white"
+              title='This is a "Shade by Lab" case — record the shade above before moving to Work in Progress.'
+            >
+              Next
+              <ChevronRight size={15} />
+            </button>
+          </div>
+        ) : canAdvance ? (
           <div className="flex justify-end">
             <button
               onClick={() => onAdvance(c.id)}

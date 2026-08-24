@@ -125,11 +125,29 @@ export const HANDOVER_OPTIONS = [
 
 /* ---------------- appointment-warning logic ---------------- */
 
-export function apptHoursAway(c) {
+// The Rx form's delivery windows are words, not clock times. Each maps to the
+// latest sensible clock time the work can arrive and still make that window;
+// "Anytime" (and legacy cases without a window) means "sometime that day", so
+// the deadline is end-of-day — due-today, but not "overdue" at 00:01.
+const DELIVERY_DEADLINE_TIME = {
+  Morning: "09:00",
+  Afternoon: "13:00",
+  "Before sunset": "17:00",
+  Evening: "19:00",
+};
+
+// Full due timestamp: appointment date + delivery-window deadline, as LOCAL
+// time (never toISOString/UTC — the Oman TZ lesson). Null when no date is set.
+export function caseDueAt(c) {
   if (!c?.appointmentDate || c.appointmentDate === "—") return null;
-  const appt = new Date(c.appointmentDate + "T00:00:00");
-  if (isNaN(appt.getTime())) return null;
-  return (appt.getTime() - Date.now()) / 3_600_000;
+  const t = DELIVERY_DEADLINE_TIME[c.deliveryTime] ?? "23:59";
+  const due = new Date(`${c.appointmentDate}T${t}:00`);
+  return isNaN(due.getTime()) ? null : due;
+}
+
+export function apptHoursAway(c) {
+  const due = caseDueAt(c);
+  return due ? (due.getTime() - Date.now()) / 3_600_000 : null;
 }
 
 // Red-alert when the appointment is ≤48h away (or past) and the case has
@@ -138,6 +156,44 @@ export function isUrgent(c) {
   if (c.stageIndex >= LAST_STAGE) return false;
   const h = apptHoursAway(c);
   return h !== null && h <= 48;
+}
+
+// Production-urgency buckets for the lab queue. Row backgrounds are the exact
+// spec palette (#FEE2E2/#FFEDD5/#FEF3C7/#FEF9C3 = Tailwind red/orange/amber/
+// yellow-100); card accents run Red→Orange→Yellow across the three windows,
+// with a darker red for overdue.
+export const URGENCY_META = {
+  overdue: { label: "Overdue", rowCls: "bg-red-100", accentCls: "border-l-red-700", textCls: "text-red-800" },
+  d1: { label: "< 24h", rowCls: "bg-orange-100", accentCls: "border-l-red-500", textCls: "text-red-700" },
+  d2: { label: "1–2 days", rowCls: "bg-amber-100", accentCls: "border-l-orange-500", textCls: "text-orange-700" },
+  d3: { label: "2–3 days", rowCls: "bg-yellow-100", accentCls: "border-l-yellow-500", textCls: "text-yellow-700" },
+};
+
+// Classify a case's delivery pressure. Only pre-completion work counts:
+// once the lab's job is done (Work Complete or later) or the case is
+// cancelled there is nothing left to hurry. Null = no due date or > 72h out.
+export function dueUrgency(c, now = Date.now()) {
+  if (!c || c.cancelStatus === "cancelled" || c.stageIndex >= STAGE_INDEX.WORK_COMPLETE) return null;
+  const due = caseDueAt(c);
+  if (!due) return null;
+  const hours = (due.getTime() - now) / 3_600_000;
+  if (hours > 72) return null;
+  return { key: hours < 0 ? "overdue" : hours < 24 ? "d1" : hours < 48 ? "d2" : "d3", hours, due };
+}
+
+// "28 Aug · Morning" — the human-readable due stamp for cards and tables.
+export function fmtDueStamp(c) {
+  const due = caseDueAt(c);
+  if (!due) return null;
+  const date = due.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return c.deliveryTime && c.deliveryTime !== "Anytime" ? `${date} · ${c.deliveryTime}` : date;
+}
+
+// "3h left" / "1d 4h left" / "Overdue by 2d 1h"
+export function fmtRemaining(hours) {
+  const h = Math.abs(hours);
+  const str = h < 1 ? `${Math.max(1, Math.round(h * 60))}m` : h < 24 ? `${Math.floor(h)}h` : `${Math.floor(h / 24)}d ${Math.floor(h % 24)}h`;
+  return hours < 0 ? `Overdue by ${str}` : `${str} left`;
 }
 
 /* ---------------- history helpers ---------------- */
