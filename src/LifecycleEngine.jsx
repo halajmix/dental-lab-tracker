@@ -17,6 +17,7 @@ import {
   Undo2,
   Clock,
   Printer,
+  Receipt,
   RefreshCcw,
   Check,
   Wrench,
@@ -734,7 +735,7 @@ const ACTION_META = {
   remake: { icon: RefreshCcw, tint: "text-rose-600 bg-rose-100" },
 };
 
-export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onSetCasePrice, onResetCasePrice, onSetLabShade, rounds = [], onResolveRound }) {
+export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onPrintInvoice, onSetCasePrice, onResetCasePrice, onSetLabShade, rounds = [], onResolveRound }) {
   return (
     <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
       <div className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -884,16 +885,23 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                   </span>
                 </div>
               )}
-              <div className="flex gap-2">
+              {/* min-w on each button so three of them can actually wrap on a
+                  narrow drawer (flex-1 alone never triggers flex-wrap) */}
+              <div className="flex flex-wrap gap-2">
                 {onPrint && (
-                  <button onClick={onPrint} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                  <button onClick={onPrint} className="flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
                     <Printer size={15} /> Print Rx
+                  </button>
+                )}
+                {onPrintInvoice && (
+                  <button onClick={onPrintInvoice} className="flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                    <Receipt size={15} /> View/Print Invoice
                   </button>
                 )}
                 {onLogRemake && (
                   <button
                     onClick={onLogRemake}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold ${
+                    className={`flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold ${
                       caseObj.remake ? "bg-rose-100 text-rose-700 hover:bg-rose-200" : "border border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
                     }`}
                   >

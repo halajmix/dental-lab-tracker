@@ -70,6 +70,7 @@ import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel, Lab
 import { BillingPanel, ExpensesPanel } from "./LabFinance.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
+import PrintInvoice from "./PrintInvoice.jsx";
 import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
 import {
@@ -974,6 +975,7 @@ export default function DentalLabTracker({ auth }) {
   // Phase 4 UI state: remake modal, print view.
   const [remakeCaseId, setRemakeCaseId] = useState(null);
   const [printCaseId, setPrintCaseId] = useState(null);
+  const [invoiceCaseId, setInvoiceCaseId] = useState(null);
   const [autoShare, setAutoShare] = useState(false);
   const [contactCaseId, setContactCaseId] = useState(null);
 
@@ -1134,6 +1136,11 @@ export default function DentalLabTracker({ auth }) {
     logActivity(share ? "shared Rx PDF" : "opened Rx print sheet", c ? `${c.id} — ${c.patientName}` : id);
     if (share) setAutoShare(true);
     setPrintCaseId(id);
+  };
+  const openInvoiceSheet = (id) => {
+    const c = cases.find((x) => x.id === id);
+    logActivity("opened invoice print sheet", c ? `${c.id} — ${c.patientName}` : id);
+    setInvoiceCaseId(id);
   };
   const resetCasePrice = (c) => {
     logActivity("reset case price to automatic", c.id);
@@ -1324,8 +1331,10 @@ export default function DentalLabTracker({ auth }) {
   const drawerCase = cases.find((c) => c.id === drawerCaseId) || null;
   const remakeCase = cases.find((c) => c.id === remakeCaseId) || null;
   const printCase = cases.find((c) => c.id === printCaseId) || null;
+  const invoiceCase = cases.find((c) => c.id === invoiceCaseId) || null;
   const contactCase = cases.find((c) => c.id === contactCaseId) || null;
   const printClinic = printCase ? clinicsById[printCase.clinicId] ?? clinic : null;
+  const invoiceClinic = invoiceCase ? clinicsById[invoiceCase.clinicId] ?? clinic : null;
   const contactClinic = contactCase ? clinicsById[contactCase.clinicId] ?? clinic : null;
 
   /* ================================================================ */
@@ -1685,6 +1694,7 @@ export default function DentalLabTracker({ auth }) {
         onSaveHandover={(data) => drawerCase && saveHandover(drawerCase.id, data, currentUser)}
         onLogRemake={hasTechRole || hasAdminRole || isDentist ? () => drawerCase && setRemakeCaseId(drawerCase.id) : undefined}
         onPrint={() => drawerCase && openRxSheet(drawerCase.id)}
+        onPrintInvoice={() => drawerCase && openInvoiceSheet(drawerCase.id)}
         onSetCasePrice={!isDentist ? setCasePrice : undefined}
         onResetCasePrice={!isDentist ? resetCasePrice : undefined}
         onSetLabShade={!isDentist ? setLabShade : undefined}
@@ -1706,6 +1716,13 @@ export default function DentalLabTracker({ auth }) {
         lab={printCase ? labById[printCase.labId] : null}
         autoShare={autoShare}
         onClose={() => { setPrintCaseId(null); setAutoShare(false); }}
+      />
+      <PrintInvoice
+        open={!!invoiceCase}
+        caseObj={invoiceCase}
+        clinic={invoiceClinic}
+        lab={invoiceCase ? labById[invoiceCase.labId] : null}
+        onClose={() => setInvoiceCaseId(null)}
       />
       {isDentist && (
         <ContactLabModal
