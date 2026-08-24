@@ -164,10 +164,28 @@ export function SignedImage({ url, alt = "", className = "", style, crossOrigin,
   );
 }
 
-/** Anchor that downloads a private photo (signs first, falls back to disabled). */
+/**
+ * Anchor that downloads a private photo, signing first. It must never just
+ * disappear while signing or on failure — a control that vanishes silently
+ * reads as a broken app, so both states stay visible and explain themselves.
+ */
 export function SignedDownloadLink({ url, name, className, children, onClick }) {
-  const { url: src, loading } = useSignedUrl(url);
-  if (loading || !src) return null;
+  const { url: src, loading, error } = useSignedUrl(url);
+  if (loading)
+    return (
+      <span className={`${className} cursor-wait opacity-60`} title="Preparing a secure download link…" aria-busy="true">
+        {children}
+      </span>
+    );
+  if (error || !src)
+    return (
+      <span
+        className={`${className} cursor-not-allowed opacity-50`}
+        title={error ? `Download unavailable — ${error}` : "Download unavailable"}
+      >
+        {children}
+      </span>
+    );
   return (
     <a href={src} download={name} className={className} onClick={onClick}>
       {children}

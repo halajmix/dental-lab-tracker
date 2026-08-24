@@ -140,6 +140,18 @@ const shadeNeeded = cases.filter((c) => {
 });
 say("INFO", `Shade-by-Lab cases missing a lab shade: ${shadeNeeded.length}`, shadeNeeded.map((c) => c.id).join(", ") || "none");
 
+// ---------- 3b. photo attachments (private bucket, Phase 50) ----------
+{
+  const withPhotos = cases.filter((c) =>
+    (c.prescription?.files ?? []).some((f) => f?.kind === "photo" && f?.url)
+  );
+  const total = withPhotos.reduce(
+    (n, c) => n + c.prescription.files.filter((f) => f?.kind === "photo" && f?.url).length, 0
+  );
+  say(withPhotos.length ? "INFO" : "WARN", `cases with clinical photos: ${withPhotos.length} of ${cases.length} (${total} photos)`,
+    withPhotos.map((c) => `${c.id}(${c.prescription.files.filter((f) => f?.kind === "photo" && f?.url).length})`).join(", ") || "none — nothing to display in any view");
+}
+
 // ---------- 4. activity log flowing ----------
 const dayAgo = Date.now() - 86400000;
 const recent = logins.filter((e) => new Date(e.created_at).getTime() > dayAgo);
