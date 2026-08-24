@@ -14,6 +14,11 @@ const seen = new Set();
 
 export function reportError(message, stack) {
   try {
+    // Dev servers report into the same production table (same Supabase
+    // project) — local editing noise then lands in the admin's hourly
+    // digest email. Only the real site reports. (Happened 2026-08-24:
+    // mid-edit HMR states from a localhost harness got digested.)
+    if (/^(localhost|127\.0\.0\.1|\[?::1]?)$/.test(window.location.hostname)) return;
     const msg = String(message ?? "Unknown error");
     if (IGNORE_RE.test(msg)) return;
     // Service-worker registration rejections (in-app browsers, private
