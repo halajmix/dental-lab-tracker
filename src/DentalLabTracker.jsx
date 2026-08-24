@@ -2013,6 +2013,11 @@ const fmtLogDate = (iso) => {
 // to guard).
 const lastActivityAt = (c) => (c.history?.length ? c.history[c.history.length - 1].at : c.createdDate);
 
+// When the work first reached Work Complete — same first-toStage>=3 rule as
+// the DB's case_completed_at() helper; falls back to the latest activity.
+const completedOnAt = (c) =>
+  c.history?.find((e) => e.toStage >= STAGE_INDEX.WORK_COMPLETE)?.at ?? lastActivityAt(c);
+
 function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
   const sorted = [...cases].sort((a, b) => new Date(lastActivityAt(b)) - new Date(lastActivityAt(a)));
   return (
@@ -2061,13 +2066,6 @@ function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
 /* ------------------------------------------------------------------ */
 /*  Laboratory Dashboard                                               */
 /* ------------------------------------------------------------------ */
-
-// One unified working view ("Active" = Incoming + In Production merged; each
-// card carries its own status label) plus the isolated "Completed" archive.
-const QUEUE_TAB_DEFS = [
-  { key: "active", label: "Active", activeCls: "bg-blue-100 text-blue-700 ring-blue-200" },
-  { key: "completed", label: "Completed", activeCls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
-];
 
 // Follow-up round kinds, in the words a technician would use.
 const ROUND_KIND_LABEL = { stage: "Follow-up", remake: "Remake", adjustment: "Adjustment", refit: "Re-fit" };
@@ -2179,7 +2177,6 @@ function UpcomingDeadlines({ cases, clinicsById, onOpenCase, now }) {
 }
 
 function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation, onExportCsv }) {
-  const [queueTab, setQueueTab] = useState("active");
   // Minute tick so "time remaining" and urgency colors stay honest on a
   // dashboard that sits open on the bench all day.
   const [now, setNow] = useState(() => Date.now());
@@ -2187,16 +2184,9 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
     const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
   }, []);
-  // Brief confirmation after a stage change moves a case out of the tab
-  // you're looking at — without this, advancing the only case in "Incoming"
-  // just makes the list go blank with no explanation (looked like the case
-  // vanished; it just moved to the "In Production" tab).
-  const [toast, setToast] = useState(null);
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
+  // Completed rows are capped so an old lab's history doesn't bury the
+  // "All Cases" log below; one click expands the rest.
+  const [showAllDone, setShowAllDone] = useState(false);
 
   if (!lab) return null;
 
@@ -2204,8 +2194,8 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
   // stopped; billing still sees them via the admin tabs.
   const live = (c) => c.cancelStatus !== "cancelled";
   // A case the dentist sent back (open follow-up round) is working inventory
-  // again: it leaves "Completed" and rejoins the active queue as "Returning"
-  // until the lab marks the round resolved in the case drawer.
+  // again: it leaves the completed strip and rejoins the active queue as
+  // "Returning" until the lab marks the round resolved in the case drawer.
   const openRoundByCase = new Map();
   for (const r of rounds) {
     if (r.status === "open" && !openRoundByCase.has(r.parentCaseId)) openRoundByCase.set(r.parentCaseId, r);
@@ -2213,34 +2203,15 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
   const isReturning = (c) => c.stageIndex >= STAGE_INDEX.WORK_COMPLETE && openRoundByCase.has(c.id);
   const inActive = (c) => live(c) && (c.stageIndex < STAGE_INDEX.WORK_COMPLETE || isReturning(c));
   const inCompleted = (c) => live(c) && c.stageIndex >= STAGE_INDEX.WORK_COMPLETE && !isReturning(c);
-  const BUCKET = { active: inActive, completed: inCompleted };
-  const bucketOf = (c, stageIndex) =>
-    Object.entries(BUCKET).find(([, test]) => test({ ...c, stageIndex }))?.[0] ?? "active";
 
-  const tabs = QUEUE_TAB_DEFS.map((t) => ({ ...t, count: queue.filter(BUCKET[t.key]).length }));
-  const visibleQueue = queue.filter(BUCKET[queueTab]);
-  const activeLabel = tabs.find((t) => t.key === queueTab)?.label ?? "";
-
-  // Wrap advance/revert so the view follows the case to wherever it lands —
-  // and says so — instead of silently leaving the current tab empty.
-  const followCase = (c, nextStageIndex) => {
-    const nextTab = bucketOf(c, nextStageIndex);
-    if (nextTab !== queueTab) {
-      setQueueTab(nextTab);
-      const label = QUEUE_TAB_DEFS.find((t) => t.key === nextTab)?.label ?? nextTab;
-      setToast(`Case moved to "${label}" — showing it here now.`);
-    }
-  };
-  const handleAdvance = (caseId) => {
-    const c = queue.find((x) => x.id === caseId);
-    onAdvance(caseId);
-    if (c) followCase(c, c.stageIndex + 1);
-  };
-  const handleRevert = (caseId) => {
-    const c = queue.find((x) => x.id === caseId);
-    onRevert(caseId);
-    if (c) followCase(c, c.stageIndex - 1);
-  };
+  // One page, no tabs: full cards for the work in hand, then a condensed
+  // completed strip below it (advancing a case visibly moves it down).
+  const activeCases = queue.filter(inActive);
+  const completedCases = queue
+    .filter(inCompleted)
+    .sort((a, b) => new Date(completedOnAt(b)) - new Date(completedOnAt(a)));
+  const DONE_PREVIEW = 8;
+  const visibleDone = showAllDone ? completedCases : completedCases.slice(0, DONE_PREVIEW);
 
   // This lab's own SLA snapshot.
   const { perLab } = computeAnalytics(queue, [lab]);
@@ -2260,24 +2231,12 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
           most urgent on top, before any cards or lists */}
       <UpcomingDeadlines cases={queue} clinicsById={clinicsById} onOpenCase={onOpenCase} now={now} />
 
-      {/* Queue tabs + Export, in one row */}
+      {/* Active section header + Export, in one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setQueueTab(t.key)}
-              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold ring-1 ring-inset transition ${
-                queueTab === t.key ? t.activeCls : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              {t.label}
-              <span className={`rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${queueTab === t.key ? "bg-white/60" : "bg-slate-100 text-slate-500"}`}>
-                {t.count}
-              </span>
-            </button>
-          ))}
-        </div>
+        <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+          Active cases
+          <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-blue-700">{activeCases.length}</span>
+        </h4>
         <button
           onClick={onExportCsv}
           className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
@@ -2292,21 +2251,21 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
         <p className="mt-0.5 text-lg font-bold text-slate-800">{sla.actualTat != null ? `${sla.actualTat.toFixed(1)}d` : "—"} <span className="text-xs font-medium text-slate-400">/ {sla.promisedTat}d</span></p>
       </div>
 
-      {/* Case list — compact rows, not cards, so several fit without scrolling */}
-      {visibleQueue.length === 0 ? (
+      {/* Work in hand — full cards */}
+      {activeCases.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm text-slate-400">
-          No {activeLabel.toLowerCase()} cases right now.
+          No active cases right now.
         </div>
       ) : (
         <div className="space-y-2.5">
-          {visibleQueue.map((c) => (
+          {activeCases.map((c) => (
             <LabCaseCard
               onResolveCancellation={onResolveCancellation}
               key={c.id}
               c={c}
               returningRound={openRoundByCase.get(c.id)}
-              onAdvance={handleAdvance}
-              onRevert={handleRevert}
+              onAdvance={onAdvance}
+              onRevert={onRevert}
               onOpenCase={onOpenCase}
               onLogRemake={onLogRemake}
               onSetInvoiceNumber={onSetInvoiceNumber}
@@ -2318,7 +2277,38 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
         </div>
       )}
 
-      {/* Every case this lab has ever had, unfiltered by the tab above —
+      {/* Finished work — same page, below the active cards, condensed to one
+          line each: no prescription detail, no stage dots, no primary action.
+          Invoice # stays editable (it has no other home); everything else is
+          a click away in the drawer. */}
+      {completedCases.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="flex items-center gap-2 pt-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+            Completed
+            <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-emerald-700">{completedCases.length}</span>
+          </h4>
+          {visibleDone.map((c) => (
+            <CompletedCaseRow
+              key={c.id}
+              c={c}
+              onOpenCase={onOpenCase}
+              onRevert={onRevert}
+              onLogRemake={onLogRemake}
+              onSetInvoiceNumber={onSetInvoiceNumber}
+            />
+          ))}
+          {completedCases.length > DONE_PREVIEW && (
+            <button
+              onClick={() => setShowAllDone((v) => !v)}
+              className="w-full rounded-xl border border-slate-200 bg-white py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+            >
+              {showAllDone ? "Show fewer" : `Show all ${completedCases.length} completed`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Every case this lab has ever had, cancelled ones included —
           compact, log-style, click a row for the full case drawer. */}
       <CaseLogTable
         cases={queue}
@@ -2326,15 +2316,54 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
         otherPartyName={(c) => clinicsById?.[c.clinicId]?.name}
         onOpenCase={onOpenCase}
       />
+    </div>
+  );
+}
 
-      {/* Toast: confirms a stage change moved the case to a different tab */}
-      {toast && (
-        <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
-          <div className="flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
-            <CheckCheck size={16} className="text-emerald-400" /> {toast}
-          </div>
-        </div>
+/**
+ * Condensed one-line row for finished work: status pill, invoice # (still
+ * editable — the queue card is its only home), patient, completion date,
+ * price read-out. Row click opens the drawer; the ⋮ menu keeps revert and
+ * remake within reach without the full card's bulk.
+ */
+function CompletedCaseRow({ c, onOpenCase, onRevert, onLogRemake, onSetInvoiceNumber }) {
+  const idx = c.stageIndex;
+  const canRevert = idx > 0 && STAGES[idx].actor === "lab";
+  const doneAt = completedOnAt(c);
+  const doneDate = doneAt
+    ? new Date(doneAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+    : "—";
+  return (
+    <div
+      onClick={() => onOpenCase(c.id)}
+      title="Open case details"
+      className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2 shadow-sm transition hover:bg-slate-50"
+    >
+      <StatusPill caseObj={c} />
+      {/* click-to-edit fields must not bubble into the row's drawer-open */}
+      <span onClick={(e) => e.stopPropagation()}>
+        <InvoiceNumberField value={c.invoiceNumber} onSave={(v) => onSetInvoiceNumber(c.id, v)} />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{c.patientName}</span>
+      {c.remake && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
+          <RefreshCcw size={10} /> Remake
+        </span>
       )}
+      <span className="whitespace-nowrap text-xs text-slate-400">Completed {doneDate}</span>
+      {c.totalPrice != null && (
+        <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-slate-500">{c.totalPrice} OMR</span>
+      )}
+      <span onClick={(e) => e.stopPropagation()}>
+        <CaseCardOptionsMenu
+          c={c}
+          canRevert={canRevert}
+          revertLabel={canRevert ? `Revert to ${STAGES[idx - 1].label}` : ""}
+          onRevert={() => onRevert(c.id)}
+          onLogRemake={onLogRemake}
+          onOpenCase={onOpenCase}
+        />
+      </span>
     </div>
   );
 }
