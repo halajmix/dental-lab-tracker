@@ -118,27 +118,44 @@ function SiteFooter() {
   );
 }
 
+// /mobile-upload/<token> — the page a phone lands on after scanning the Rx
+// form's QR (Phase 51). Deliberately OUTSIDE the AuthGate: the single-use
+// session token is the credential, and the page can only add photos via the
+// token-gated Edge Function, never read anything. Lazy so dentists and labs
+// never pay for its chunk. GitHub Pages serves index.html for this path via
+// the 404.html SPA fallback; the service worker via navigateFallback.
+const mobileUploadToken = window.location.pathname.match(/^\/mobile-upload\/([0-9a-f][0-9a-f-]{20,40})$/i)?.[1];
+const MobileUpload = mobileUploadToken ? lazy(() => import("./MobileUpload.jsx")) : null;
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
       {/* Outside the AuthGate on purpose: connection state and the install
           invite are both relevant on the login screen too, and neither
           should be torn down by an auth state change. */}
-      <ConnectionStatus />
-      <PWAInstallBanner />
-      <ImpersonationBanner />
-      <AuthGate>
-        {(auth) =>
-          auth.profile.role === "admin" ? (
-            <Suspense fallback={<PageLoader />}>
-              <AdminDashboard auth={auth} />
-            </Suspense>
-          ) : (
-            <DentalLabTracker auth={auth} />
-          )
-        }
-      </AuthGate>
-      <SiteFooter />
+      {MobileUpload ? (
+        <Suspense fallback={<PageLoader />}>
+          <MobileUpload token={mobileUploadToken} />
+        </Suspense>
+      ) : (
+        <>
+          <ConnectionStatus />
+          <PWAInstallBanner />
+          <ImpersonationBanner />
+          <AuthGate>
+            {(auth) =>
+              auth.profile.role === "admin" ? (
+                <Suspense fallback={<PageLoader />}>
+                  <AdminDashboard auth={auth} />
+                </Suspense>
+              ) : (
+                <DentalLabTracker auth={auth} />
+              )
+            }
+          </AuthGate>
+          <SiteFooter />
+        </>
+      )}
     </ErrorBoundary>
   </React.StrictMode>
 );

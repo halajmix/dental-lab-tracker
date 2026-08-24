@@ -1086,6 +1086,49 @@ export function subscribeCases({ clinicId, labId }, onChange) {
   return () => supabase.removeChannel(channel);
 }
 
+/* ------------------------------------------------------------------ */
+/*  QR mobile photo upload sessions (Phase 51). The desktop creates a   */
+/*  session (RLS: own rows, <=15 min), shows its id as a QR; the phone  */
+/*  talks to the mobile-upload Edge Function; the desktop watches its   */
+/*  own row for the function's update.                                  */
+/* ------------------------------------------------------------------ */
+
+export async function createMobileUploadSession(groupId) {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData?.user?.id;
+  if (!userId) throw new Error("Not signed in");
+  const { data, error } = await supabase
+    .from("mobile_upload_sessions")
+    .insert({ user_id: userId, group_id: groupId })
+    .select()
+    .single();
+  if (error) throw error;
+  return { id: data.id, expiresAt: data.expires_at };
+}
+
+export async function fetchMobileUploadSession(id) {
+  const { data, error } = await supabase
+    .from("mobile_upload_sessions")
+    .select("id, status, uploaded, expires_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function cancelMobileUploadSession(id) {
+  // Best-effort: an expired/used row simply doesn't match the RLS check.
+  await supabase.from("mobile_upload_sessions").update({ status: "cancelled" }).eq("id", id).eq("status", "pending");
+}
+
+export function subscribeMobileUploadSession(id, onChange) {
+  const channel = supabase
+    .channel(`mob-upload-${id}`)
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "mobile_upload_sessions", filter: `id=eq.${id}` }, onChange)
+    .subscribe();
+  return () => supabase.removeChannel(channel);
+}
+
 // Follow-up rounds. No row filter: RLS already scopes what each subscriber
 // receives to rounds on their own clinic's or lab's cases, so a bare listener
 // only ever hears about rounds it's allowed to see.

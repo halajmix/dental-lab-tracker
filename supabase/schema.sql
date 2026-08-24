@@ -4201,3 +4201,65 @@ create policy "case_photos_read" on storage.objects for select
       or can_read_case_photo(name)
     )
   );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 51 — QR mobile photo upload sessions                            */
+/*                                                                       */
+/*  A dentist on desktop shows a QR; their phone opens                   */
+/*  /mobile-upload/<token> WITHOUT logging in, takes photos, and the     */
+/*  mobile-upload Edge Function (service role, token-gated, fail-closed) */
+/*  puts them in the PRIVATE case-photos bucket under the DESKTOP        */
+/*  user's own folder — so Phase 50 signing and case-visibility rules    */
+/*  apply unchanged and the phone never holds any credential beyond a    */
+/*  single-use, 15-minute token.                                         */
+/*                                                                       */
+/*  The authenticated desktop INSERTs the session row itself (RLS: own   */
+/*  rows only, and it cannot forge user_id or stretch the expiry). Only  */
+/*  the Edge Function (service role) may UPDATE — appending uploaded     */
+/*  file entries and flipping status — which the desktop receives over   */
+/*  Supabase Realtime on its own row.                                    */
+/*                                                                       */
+/*  Manual steps that pair with this block:                              */
+/*    1. run this SQL;                                                   */
+/*    2. create a NEW Edge Function named exactly "mobile-upload",       */
+/*       paste supabase/functions/mobile-upload/index.ts,                */
+/*       and turn "Verify JWT with legacy secret" OFF (the phone is      */
+/*       anonymous; the token is the auth).                              */
+/* --------------------------------------------------------------------- */
+
+create table if not exists mobile_upload_sessions (
+  id uuid primary key default gen_random_uuid(),   -- the QR token itself
+  user_id uuid not null references auth.users(id) on delete cascade,
+  group_id text not null,                          -- the Rx form's photo group
+  status text not null default 'pending' check (status in ('pending', 'used', 'cancelled')),
+  uploaded jsonb not null default '[]'::jsonb,     -- [{name,size,url,kind:'photo'}]
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '15 minutes'
+);
+
+alter table mobile_upload_sessions enable row level security;
+
+drop policy if exists "mobile_upload_select_own" on mobile_upload_sessions;
+create policy "mobile_upload_select_own" on mobile_upload_sessions for select
+  using (user_id = auth.uid());
+
+-- Insert: own rows only, expiry may only be shortened, never stretched.
+drop policy if exists "mobile_upload_insert_own" on mobile_upload_sessions;
+create policy "mobile_upload_insert_own" on mobile_upload_sessions for insert
+  with check (user_id = auth.uid() and expires_at <= now() + interval '15 minutes');
+
+-- The desktop may cancel its own pending session (closing the QR modal);
+-- everything else (uploads, used flag) is service-role-only via the function.
+drop policy if exists "mobile_upload_cancel_own" on mobile_upload_sessions;
+create policy "mobile_upload_cancel_own" on mobile_upload_sessions for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid() and status = 'cancelled');
+
+-- Realtime: the desktop hears the function's update the moment photos land.
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'mobile_upload_sessions') then
+    alter publication supabase_realtime add table mobile_upload_sessions;
+  end if;
+end $$;

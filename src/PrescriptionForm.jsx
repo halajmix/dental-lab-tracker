@@ -28,10 +28,12 @@ import {
   Truck,
   MapPin,
   Search,
+  Smartphone,
 } from "lucide-react";
 import { uploadCasePhoto, estimateCasePrice } from "./lib/data.js";
 import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
+import MobilePhotoQR from "./MobilePhotoQR.jsx";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -1073,6 +1075,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
   const [photos, setPhotos] = useState([]);
   const [scans, setScans] = useState([]);
   const [groupId, setGroupId] = useState(() => crypto.randomUUID());
+  const [qrOpen, setQrOpen] = useState(false);
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -1293,6 +1296,27 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
                 <ImageIcon size={14} /> + Add photos
                 <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
               </label>
+              <button type="button" onClick={() => setQrOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50">
+                <Smartphone size={14} /> From phone (QR)
+              </button>
+              <MobilePhotoQR
+                open={qrOpen ? groupId : false}
+                onClose={() => setQrOpen(false)}
+                onPhotos={(list) =>
+                  setPhotos((p) => [
+                    ...p,
+                    ...list.map((m, i) => ({
+                      id: `mob-${Date.now().toString(36)}-${i}`,
+                      name: m.name || `phone-photo-${i + 1}.jpg`,
+                      size: m.size ?? 0,
+                      previewUrl: null,
+                      url: m.url,
+                      uploading: false,
+                      error: null,
+                    })),
+                  ])
+                }
+              />
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
                 <ScanLine size={14} /> + Add STL scans
                 <input type="file" accept=".stl,.ply,.obj" multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
@@ -1440,6 +1464,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // id per form session (no case row exists yet while the form is open).
   const [photos, setPhotos] = useState([]);
   const [photoGroupId, setPhotoGroupId] = useState(() => crypto.randomUUID());
+  // QR mobile upload modal (Phase 51) — MUST stay above the !open early return.
+  const [qrOpen, setQrOpen] = useState(false);
   const [notes, setNotes] = useState("");
 
   const [touched, setTouched] = useState(false);
@@ -1567,7 +1593,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setScans([]);
     photos.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
     setPhotos([]); setPhotoGroupId(crypto.randomUUID());
-    setNotes(""); setTouched(false); setDiscardConfirm(false);
+    setNotes(""); setTouched(false); setDiscardConfirm(false); setQrOpen(false);
     setStep(1);
   };
 
@@ -1907,6 +1933,23 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   };
 
   const photosUploading = photos.some((p) => p.uploading);
+
+  // Photos that arrived from the phone via the QR session: already uploaded
+  // server-side, so they enter as finished entries (same shape as edit-mode
+  // rehydration) — no spinner, no retry state.
+  const addMobilePhotos = (list) => {
+    setPhotos((p) => [
+      ...p,
+      ...list.map((m, i) => ({
+        id: `mob-${Date.now().toString(36)}-${i}`,
+        name: m.name || `phone-photo-${i + 1}.jpg`,
+        size: m.size ?? 0,
+        url: m.url,
+        uploading: false,
+        error: null,
+      })),
+    ]);
+  };
 
   /* ---------------- validation & submit ---------------- */
   // Appliance-mode error keys only apply outside restorations mode — a case
@@ -2594,13 +2637,19 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-700"><ImageIcon size={16} className="text-violet-600" /> Clinical / Shade Photos</div>
                   {photos.length > 0 && <span className="text-[11px] font-medium text-slate-400">{photos.length} photo{photos.length !== 1 ? "s" : ""}</span>}
                 </div>
-                <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
-                  <Plus size={13} /> Add photos
-                  {/* No `capture` attribute — that forces mobile browsers straight
-                      into the camera, skipping the "Camera or Photo Library"
-                      chooser. Plain accept="image/*" gives the normal picker. */}
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
-                </label>
+                <span className="flex flex-wrap items-center gap-3">
+                  <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
+                    <Plus size={13} /> Add photos
+                    {/* No `capture` attribute — that forces mobile browsers straight
+                        into the camera, skipping the "Camera or Photo Library"
+                        chooser. Plain accept="image/*" gives the normal picker. */}
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
+                  </label>
+                  <button type="button" onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
+                    <Smartphone size={13} /> From phone (QR)
+                  </button>
+                </span>
+                <MobilePhotoQR open={qrOpen ? photoGroupId : false} onClose={() => setQrOpen(false)} onPhotos={addMobilePhotos} />
                 {photos.length === 0 ? (
                   <p className="mt-3 text-[11px] text-slate-400">No photos attached — the lab only sees what's uploaded here.</p>
                 ) : (
