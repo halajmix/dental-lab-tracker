@@ -695,7 +695,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
       ) : activeTab === "technicians" ? (
         <TechniciansPanel lab={lab} cases={cases} />
       ) : activeTab === "billing" ? (
-        <BillingPanel lab={lab} clinicsById={clinicsById} cases={cases} />
+        <BillingPanel lab={lab} clinicsById={clinicsById} cases={cases} accountantView={financeOnly && !isAdminPreview} />
       ) : activeTab === "expenses" ? (
         <ExpensesPanel lab={lab} />
       ) : activeTab === "prices" ? (

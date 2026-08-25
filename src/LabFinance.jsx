@@ -94,7 +94,7 @@ const recentMonths = () => {
   return out.map((m) => `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-01`);
 };
 
-export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
+export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView = false }) {
   const [statements, setStatements] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -733,7 +733,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [] }) {
         )}
       </div>
 
-      <ImportHistoryCard lab={lab} onImported={load} />
+      <ImportHistoryCard lab={lab} onImported={load} accountantView={accountantView} />
 
       <RecordPaymentModal
         open={!!payFor}
@@ -1187,15 +1187,22 @@ function TreasuryCard({ icon: Icon, label, value, sub }) {
 /*  so a lab joining the platform starts with its finance history.      */
 /* ================================================================== */
 
-function ImportHistoryCard({ lab, onImported }) {
+function ImportHistoryCard({ lab, onImported, accountantView = false }) {
   const [category, setCategory] = useState(IMPORT_CATEGORIES[0].id);
   const [fileName, setFileName] = useState("");
+  const [rawRows, setRawRows] = useState(null); // parsed workbook, kept so changing the type remaps without re-picking
   const [mapped, setMapped] = useState(null); // result of mapImportRows
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
   const [error, setError] = useState("");
 
   const cat = IMPORT_CATEGORIES.find((c) => c.id === category);
+  // Reminder for real accountant logins: RLS hides fully-paid statements and
+  // payments/expenses older than 2 months from THEM — the import still lands,
+  // the lab admin sees all of it. Without this note a successful historical
+  // import looks like it "did nothing".
+  const accountantNote =
+    "Heads-up for accountant accounts: imported statements that are fully PAID and older than 2 months (and old payments/expenses) won't show in your view — the lab admin sees the full history. Unpaid statements always show.";
 
   const pickFile = async (e) => {
     const file = e.target.files?.[0];
@@ -1207,13 +1214,26 @@ function ImportHistoryCard({ lab, onImported }) {
     try {
       const rows = await readWorkbookRows(file);
       setFileName(file.name);
+      setRawRows(rows);
       setMapped(mapImportRows(category, rows));
     } catch (err) {
       setMapped(null);
+      setRawRows(null);
       setError("Couldn't read that file — " + err.message);
     } finally {
       setBusy(false);
     }
+  };
+
+  const changeCategory = (id) => {
+    setCategory(id);
+    setDone("");
+    setError("");
+    // A file is already loaded: re-interpret it under the new type instead of
+    // making the user pick it again (the old behaviour cleared everything,
+    // which read as "there is nothing to upload").
+    setMapped(rawRows ? mapImportRows(id, rawRows) : null);
+    if (!rawRows) setFileName("");
   };
 
   const runImport = async () => {
@@ -1223,8 +1243,9 @@ function ImportHistoryCard({ lab, onImported }) {
     try {
       await importFinanceRows(lab.id, mapped);
       logActivity("imported finance history", mapped.summary ?? "");
-      setDone(`Imported: ${mapped.summary}`);
+      setDone(`Imported: ${mapped.summary}` + (accountantView ? ` — ${accountantNote}` : ""));
       setMapped(null);
+      setRawRows(null);
       setFileName("");
       await onImported();
     } catch (err) {
@@ -1234,7 +1255,21 @@ function ImportHistoryCard({ lab, onImported }) {
     }
   };
 
-  const hasRows = mapped && (mapped.statements.length || mapped.payments.length || mapped.expenses.length);
+  const rowCount = mapped ? mapped.statements.length + mapped.payments.length + mapped.expenses.length : 0;
+  const hasRows = rowCount > 0;
+  // Wrong sheet type picked? Try the same rows under every other type and
+  // offer the best match as a one-click switch.
+  const suggestion = (() => {
+    if (!mapped || hasRows || !rawRows?.length) return null;
+    let best = null;
+    for (const c of IMPORT_CATEGORIES) {
+      if (c.id === category) continue;
+      const m = mapImportRows(c.id, rawRows);
+      const n = m.statements.length + m.payments.length + m.expenses.length;
+      if (n > (best?.count ?? 0)) best = { id: c.id, label: c.label, count: n };
+    }
+    return best;
+  })();
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1247,12 +1282,17 @@ function ImportHistoryCard({ lab, onImported }) {
         worksheet is read). Imported bills and payments keep the clinic's name as text; they don't need the
         clinic to be registered.
       </p>
+      {accountantView && (
+        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700 ring-1 ring-inset ring-amber-200">
+          {accountantNote}
+        </p>
+      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">Sheet type</span>
+          <span className="mb-1 block text-xs font-medium text-slate-600">1 · Sheet type</span>
           <select
             value={category}
-            onChange={(e) => { setCategory(e.target.value); setMapped(null); setFileName(""); setDone(""); }}
+            onChange={(e) => changeCategory(e.target.value)}
             className={inputCls}
           >
             {IMPORT_CATEGORIES.map((c) => (
@@ -1261,7 +1301,7 @@ function ImportHistoryCard({ lab, onImported }) {
           </select>
         </label>
         <div className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">Excel file</span>
+          <span className="mb-1 block text-xs font-medium text-slate-600">2 · Excel file</span>
           <label className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-slate-500 transition hover:border-blue-300 hover:text-blue-700">
             <Upload size={14} /> {fileName || "Choose file…"}
             <input type="file" accept=".xlsx,.xls,.csv" onChange={pickFile} className="hidden" />
@@ -1273,28 +1313,53 @@ function ImportHistoryCard({ lab, onImported }) {
       {error && <p className="mt-2 text-xs font-semibold text-rose-600">{error}</p>}
       {done && <p className="mt-2 text-xs font-semibold text-emerald-600">{done}</p>}
 
-      {mapped && (
+      {mapped && hasRows && (
         <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
           <p className="text-xs font-semibold text-slate-700">{mapped.summary}</p>
-          {hasRows ? (
-            <>
-              <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
-                {[...mapped.statements.slice(0, 4).map((x) => `Statement · ${x.clinicName} · ${monthLabel(x.month)} · ${fmtOMR(x.total)}${x.paid ? ` (paid ${fmtOMR(x.paid)})` : ""}`),
-                  ...mapped.payments.slice(0, 4).map((x) => `Payment · ${x.clinicName || "—"} · ${x.receivedDate} · ${fmtOMR(x.amount)} · ${METHOD_LABEL[x.method]}${x.cleared === false ? " (pending)" : ""}`),
-                  ...mapped.expenses.slice(0, 4).map((x) => `Expense · ${x.category} · ${x.expenseDate} · ${fmtOMR(x.amount)}`),
-                ].map((line, i) => (
-                  <p key={i} className="truncate text-[11px] text-slate-500">{line}</p>
-                ))}
-              </div>
-              <button
-                onClick={runImport}
-                disabled={busy}
-                className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-40"
-              >
-                {busy ? "Importing…" : "Import these rows"}
-              </button>
-            </>
-          ) : null}
+          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+            {[...mapped.statements.slice(0, 4).map((x) => `Statement · ${x.clinicName} · ${monthLabel(x.month)} · ${fmtOMR(x.total)}${x.paid ? ` (paid ${fmtOMR(x.paid)})` : ""}`),
+              ...mapped.payments.slice(0, 4).map((x) => `Payment · ${x.clinicName || "—"} · ${x.receivedDate} · ${fmtOMR(x.amount)} · ${METHOD_LABEL[x.method]}${x.cleared === false ? " (pending)" : ""}`),
+              ...mapped.expenses.slice(0, 4).map((x) => `Expense · ${x.category} · ${x.expenseDate} · ${fmtOMR(x.amount)}`),
+            ].map((line, i) => (
+              <p key={i} className="truncate text-[11px] text-slate-500">{line}</p>
+            ))}
+          </div>
+          <button
+            onClick={runImport}
+            disabled={busy}
+            className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-40"
+          >
+            {busy ? "Importing…" : `3 · Import ${rowCount.toLocaleString()} row${rowCount === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      )}
+
+      {/* File loaded but the chosen type recognized nothing — say why and
+          offer the type that DOES fit, instead of a silent dead end. */}
+      {mapped && !hasRows && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-bold text-amber-800">
+            No rows in "{fileName}" match the "{cat.label}" sheet type.
+          </p>
+          {rawRows?.length ? (
+            <p className="mt-1 text-[11px] text-amber-700">
+              Columns found in the file: {Object.keys(rawRows[0]).join(", ")}
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-amber-700">The first worksheet has no data rows.</p>
+          )}
+          {suggestion ? (
+            <button
+              onClick={() => changeCategory(suggestion.id)}
+              className="mt-2 rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700"
+            >
+              This looks like "{suggestion.label}" ({suggestion.count.toLocaleString()} rows) — use that type
+            </button>
+          ) : (
+            <p className="mt-1 text-[11px] text-amber-700">
+              No sheet type recognizes these columns. Expected for "{cat.label}": {cat.hint}
+            </p>
+          )}
         </div>
       )}
     </div>
