@@ -2280,6 +2280,7 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
               onResolveCancellation={onResolveCancellation}
               key={c.id}
               c={c}
+              clinicName={clinicsById?.[c.clinicId]?.name}
               returningRound={openRoundByCase.get(c.id)}
               onAdvance={onAdvance}
               onRevert={onRevert}
@@ -2308,6 +2309,7 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
             <CompletedCaseRow
               key={c.id}
               c={c}
+              clinicName={clinicsById?.[c.clinicId]?.name}
               onOpenCase={onOpenCase}
               onRevert={onRevert}
               onLogRemake={onLogRemake}
@@ -2343,7 +2345,7 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
  * price read-out. Row click opens the drawer; the ⋮ menu keeps revert and
  * remake within reach without the full card's bulk.
  */
-function CompletedCaseRow({ c, onOpenCase, onRevert, onLogRemake, onSetInvoiceNumber }) {
+function CompletedCaseRow({ c, clinicName, onOpenCase, onRevert, onLogRemake, onSetInvoiceNumber }) {
   const idx = c.stageIndex;
   const canRevert = idx > 0 && STAGES[idx].actor === "lab";
   const doneAt = completedOnAt(c);
@@ -2361,7 +2363,10 @@ function CompletedCaseRow({ c, onOpenCase, onRevert, onLogRemake, onSetInvoiceNu
       <span onClick={(e) => e.stopPropagation()}>
         <InvoiceNumberField value={c.invoiceNumber} onSave={(v) => onSetInvoiceNumber(c.id, v)} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{c.patientName}</span>
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">
+        {c.patientName}
+        {clinicName && <span className="font-normal text-slate-400"> · {clinicName}</span>}
+      </span>
       {c.remake && (
         <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
           <RefreshCcw size={10} /> Remake
@@ -2606,7 +2611,7 @@ function CancellationRequestBanner({ c, onResolve }) {
   );
 }
 
-function LabCaseCard({ c, returningRound, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation }) {
+function LabCaseCard({ c, clinicName, returningRound, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -2656,7 +2661,10 @@ function LabCaseCard({ c, returningRound, onAdvance, onRevert, onOpenCase, onLog
       <div className="mb-2.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <InvoiceNumberField value={c.invoiceNumber} onSave={(v) => onSetInvoiceNumber(c.id, v)} />
-          <p className="truncate text-sm font-semibold text-slate-600">{c.patientName}</p>
+          <p className="truncate text-sm font-semibold text-slate-600">
+            {c.patientName}
+            {clinicName && <span className="font-normal text-slate-400"> · {clinicName}</span>}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {urgent && <AppointmentBadge caseObj={c} />}
