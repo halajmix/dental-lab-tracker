@@ -80,7 +80,7 @@ import {
   updateCase,
   subscribeCases,
   fetchClinicsByIds,
-  fetchClinicsByOwner,
+  fetchMyClinics,
   insertClinic,
   updateClinic,
   caseFromRow,
@@ -919,15 +919,15 @@ export default function DentalLabTracker({ auth }) {
     // re-run finds `missing` empty and bails at the guard above.
   }, [cases, clinicsById]);
 
-  // Multi-clinic: load every clinic this dentist owns (Settings "My Clinics"
-  // + the Rx form's "Sending Clinic" selector). clinics_select already
-  // matches owner_id=auth.uid(), so no new policy is needed for this read.
+  // Multi-clinic: every clinic this user can act for — owned plus Phase 56
+  // memberships (Settings "My Clinics" + the Rx form's "Sending Clinic"
+  // selector). Each row carries myRole for role-gated UI.
   useEffect(() => {
     if (!isDentist || !profile.id) return;
     let cancelled = false;
-    fetchClinicsByOwner(profile.id)
+    fetchMyClinics(profile.id)
       .then((rows) => !cancelled && setMyClinics(rows))
-      .catch((err) => console.error("Failed to load owned clinics", err));
+      .catch((err) => console.error("Failed to load clinics", err));
     return () => {
       cancelled = true;
     };
@@ -1579,14 +1579,23 @@ export default function DentalLabTracker({ auth }) {
               <div className="space-y-2">
                 {myClinics.length === 0 && <p className="text-sm text-slate-400">Loading…</p>}
                 {myClinics.map((c) => (
+                  // Clinic details are editable by the owner only (RLS:
+                  // clinics_update_own) — staff get a passive card with
+                  // their role instead of an edit that would silently no-op.
                   <button
                     key={c.id}
+                    disabled={c.ownerId !== profile.id}
                     onClick={() => { setClinicModal({ editing: c }); setShowSettings(false); }}
-                    className="block w-full rounded-lg border border-slate-200 p-3 text-left hover:border-blue-300 hover:bg-blue-50/40"
+                    className={`block w-full rounded-lg border border-slate-200 p-3 text-left ${c.ownerId === profile.id ? "hover:border-blue-300 hover:bg-blue-50/40" : "cursor-default"}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-semibold text-slate-800">{c.name}</p>
                       <span className="flex shrink-0 items-center gap-1">
+                        {c.ownerId !== profile.id && c.myRole && (
+                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium capitalize text-slate-600 ring-1 ring-inset ring-slate-200">
+                            {c.myRole}
+                          </span>
+                        )}
                         {c.status === "pending" && (
                           <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
                             Awaiting approval

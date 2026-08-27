@@ -63,6 +63,8 @@ export const caseFromRow = (r) => ({
   priceOverridden: r.price_overridden ?? false,
   // Phase 36: shade determined by the lab when the Rx said "Shade by Lab".
   labShade: r.lab_shade ?? "",
+  // Phase 56: which clinic user authored the case (stamped server-side).
+  createdBy: r.created_by ?? null,
 });
 
 export const clinicFromRow = (r) => ({
@@ -97,12 +99,38 @@ export async function fetchAllClinics() {
   return data.map(clinicFromRow);
 }
 
-// Every clinic this dentist owns (multi-clinic support) — "clinics_select"
-// already matches on owner_id=auth.uid(), no new policy needed for this read.
-export async function fetchClinicsByOwner(userId) {
-  const { data, error } = await supabase.from("clinics").select("*").eq("owner_id", userId).order("created_at");
+// Every clinic this user can act for: owned (always admin) plus Phase 56
+// clinic_members rows. Each row carries `myRole` for role-gated UI. The
+// membership read fails soft so owners keep working before the Phase 56
+// SQL has run (same fail-soft convention as fetchMyLabMemberships).
+export async function fetchMyClinics(userId) {
+  const [owned, member] = await Promise.all([
+    supabase.from("clinics").select("*").eq("owner_id", userId).order("created_at"),
+    supabase.from("clinic_members").select("role, clinics(*)").eq("user_id", userId),
+  ]);
+  if (owned.error) throw owned.error;
+  const out = owned.data.map((r) => ({ ...clinicFromRow(r), myRole: "admin" }));
+  if (!member.error) {
+    for (const m of member.data ?? []) {
+      // clinics comes back null when the clinic row is invisible (pending).
+      if (m.clinics && !out.some((c) => c.id === m.clinics.id)) {
+        out.push({ ...clinicFromRow(m.clinics), myRole: m.role });
+      }
+    }
+  }
+  return out;
+}
+
+// The caller's Phase 56 role at one clinic (null = no membership row).
+export async function fetchMyClinicRole(userId, clinicId) {
+  const { data, error } = await supabase
+    .from("clinic_members")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("clinic_id", clinicId)
+    .maybeSingle();
   if (error) throw error;
-  return data.map(clinicFromRow);
+  return data?.role ?? null;
 }
 
 export async function insertClinic(ownerId, data) {

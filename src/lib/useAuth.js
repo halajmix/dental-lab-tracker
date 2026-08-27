@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
-import { clinicFromRow, labFromRow, fetchMyLabMemberships, logLoginEvent, setActivityContext } from "./data.js";
+import { clinicFromRow, labFromRow, fetchMyLabMemberships, fetchMyClinicRole, logLoginEvent, setActivityContext } from "./data.js";
 import { clearSignedUrlCache } from "./storageUrl.jsx";
 
 /**
@@ -17,6 +17,11 @@ export function useAuth() {
   // non-lab users; [] means "no rows", which RLS treats as a legacy owner
   // with full access — the client mirrors that.
   const [labMemberships, setLabMemberships] = useState(null);
+  // Phase 56 clinic RBAC role at the primary clinic: 'admin' | 'receptionist'
+  // | 'doctor'. null for non-clinic users. Fails soft to 'admin' — a
+  // pre-Phase-56 schema or a legacy pointer-only profile has owner-level
+  // access under RLS, and the client mirrors that.
+  const [clinicRole, setClinicRole] = useState(null);
   const [loading, setLoading] = useState(true);
   // True once Supabase reports a PASSWORD_RECOVERY event (user clicked a
   // "reset password" email link) — the recovery link signs them in with a
@@ -50,8 +55,19 @@ export function useAuth() {
       if (!fresh()) return;
       clinicRow = c ?? null;
       setClinic(c ? clinicFromRow(c) : null);
+      let role = "admin";
+      if (c && c.owner_id !== userId) {
+        try {
+          role = (await fetchMyClinicRole(userId, prof.clinic_id)) ?? "admin";
+        } catch {
+          role = "admin";
+        }
+      }
+      if (!fresh()) return;
+      setClinicRole(role);
     } else {
       setClinic(null);
+      setClinicRole(null);
     }
 
     let labRowName = "";
@@ -146,6 +162,7 @@ export function useAuth() {
         loadedUserRef.current = null;
         setProfile(null);
         setClinic(null);
+        setClinicRole(null);
         setLab(null);
         setLabMemberships(null);
         setLoading(false);
@@ -173,5 +190,5 @@ export function useAuth() {
   // drop into the normal signed-in app (or Onboarding, if profile is null).
   const clearRecovery = () => setRecovery(false);
 
-  return { session, profile, clinic, lab, labMemberships, loading, recovery, refreshProfile, signOut, clearRecovery };
+  return { session, profile, clinic, clinicRole, lab, labMemberships, loading, recovery, refreshProfile, signOut, clearRecovery };
 }
