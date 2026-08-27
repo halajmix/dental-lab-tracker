@@ -478,3 +478,313 @@ exception when others then
   return null;
 end;
 $$;
+
+/* --------------------------------------------------------------------- */
+/*  Phase 57 — Clinic team invitations + membership hygiene              */
+/*                                                                       */
+/*  Tokenized email invitations for clinic staff (the clinic half of     */
+/*  Phase 21's lab invites, upgraded): clinic_invitations rows carry a   */
+/*  random 64-hex token, expire after 7 days, and can be revoked while   */
+/*  pending. Admins invite anyone; receptionists invite doctors and      */
+/*  receptionists but never admins. The invite email (case-notify, via   */
+/*  the Phase 21 webhook poster, now table-agnostic) links to            */
+/*  /?clinic_invite=<token>; accepting happens in accept_clinic_         */
+/*  invitation() — unlike the lab email-match flow, a token invite can   */
+/*  also be accepted by an ALREADY-REGISTERED dentist account, which     */
+/*  becomes a multi-clinic member. Also closes two Phase 56 leftovers:   */
+/*  my_clinic_role()'s legacy pointer-as-admin branch is dropped         */
+/*  (backfill-verified: every pointer profile is an owner with a member  */
+/*  row), and remove_clinic_member() repoints/clears the removed user's  */
+/*  primary clinic pointer so a stale pointer can't retain access.       */
+/* --------------------------------------------------------------------- */
+
+create table if not exists clinic_invitations (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references clinics(id) on delete cascade,
+  email text not null,
+  role text not null default 'doctor' check (role in ('admin', 'receptionist', 'doctor')),
+  invited_by uuid not null references auth.users(id) on delete cascade,
+  -- 64 hex chars of pg_strong_random via two v4 uuids — same entropy shape
+  -- as gen_random_bytes(32) without requiring the pgcrypto extension.
+  token text unique not null default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'expired', 'revoked')),
+  expires_at timestamptz not null default (now() + interval '7 days'),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists clinic_invitations_clinic_idx on clinic_invitations (clinic_id);
+-- One live invite per address per clinic; older accepted/revoked rows stay
+-- as the audit trail.
+create unique index if not exists clinic_invitations_pending_key
+  on clinic_invitations (clinic_id, lower(email)) where status = 'pending';
+
+alter table clinic_invitations enable row level security;
+
+-- Members' emails on the roster (profiles has no email column, and
+-- auth.users is off-limits to clients). Backfilled for the Phase 56
+-- owner rows; the accept RPC fills it for invited staff.
+alter table clinic_members add column if not exists email text not null default '';
+update clinic_members m set email = coalesce(u.email, '')
+  from auth.users u
+ where u.id = m.user_id and m.email = '';
+
+-- Owner auto-membership now records the owner's email too.
+create or replace function backfill_clinic_owner_membership()
+returns trigger
+security definer
+set search_path = public
+as $$
+begin
+  -- OLD is unassigned on INSERT — TG_OP must be checked first.
+  if new.owner_id is not null
+     and (TG_OP = 'INSERT' or new.owner_id is distinct from old.owner_id) then
+    insert into clinic_members (clinic_id, user_id, role, email)
+    values (new.id, new.owner_id, 'admin',
+            coalesce((select email from auth.users where id = new.owner_id), ''))
+    on conflict (clinic_id, user_id) do update set role = 'admin';
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+-- my_clinic_role: the Phase 56 legacy pointer-as-admin branch is gone.
+-- Every legitimate pointer-holder is an owner or has a member row
+-- (backfill-verified in prod 2026-08-27); keeping the branch would have
+-- let a REMOVED member with a stale pointer walk back in as admin.
+create or replace function my_clinic_role(target uuid)
+returns text
+language sql security definer stable
+set search_path = public
+as $$
+  select case
+    when exists (select 1 from clinics where id = target and owner_id = auth.uid())
+      then 'admin'
+    else (select role from clinic_members where clinic_id = target and user_id = auth.uid())
+  end;
+$$;
+
+/* ---- clinic_invitations RLS + column guard -------------------------- */
+
+-- Managing invites is an admin/receptionist affair; invitees never read
+-- the table directly — the token in their email is their credential and
+-- the two RPCs below are their only door.
+drop policy if exists "clinic_invitations_select" on clinic_invitations;
+create policy "clinic_invitations_select" on clinic_invitations for select
+  using (has_clinic_role(clinic_id, array['admin', 'receptionist']) or is_admin());
+
+drop policy if exists "clinic_invitations_insert" on clinic_invitations;
+create policy "clinic_invitations_insert" on clinic_invitations for insert
+  with check (
+    invited_by = auth.uid()
+    and (
+      has_clinic_role(clinic_id, array['admin'])
+      or (has_clinic_role(clinic_id, array['receptionist']) and role <> 'admin')
+    )
+  );
+
+drop policy if exists "clinic_invitations_update" on clinic_invitations;
+create policy "clinic_invitations_update" on clinic_invitations for update
+  using (has_clinic_role(clinic_id, array['admin', 'receptionist']) or is_admin());
+
+-- No delete policy: revoked/accepted invites are the audit trail.
+
+-- Client updates can only ever mean "revoke a pending invite" — every
+-- identifying column is frozen and the only status transition allowed is
+-- pending -> revoked. The accept RPC marks accepted under a transaction-
+-- local flag (same current_setting technique as the service_role gates).
+create or replace function guard_clinic_invitation()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) = 'service_role'
+     or current_setting('drcrown.accept_invite', true) = '1' then
+    return new;
+  end if;
+  new.clinic_id := old.clinic_id;
+  new.email := old.email;
+  new.role := old.role;
+  new.token := old.token;
+  new.invited_by := old.invited_by;
+  new.expires_at := old.expires_at;
+  new.created_at := old.created_at;
+  if new.status is distinct from old.status
+     and not (old.status = 'pending' and new.status = 'revoked') then
+    raise exception 'Only pending invitations can be revoked.';
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists clinic_invitations_guard on clinic_invitations;
+create trigger clinic_invitations_guard
+  before update on clinic_invitations
+  for each row execute function guard_clinic_invitation();
+
+/* ---- invite emails (reuse the Phase 21 webhook poster) -------------- */
+
+-- Now table-agnostic: the hardcoded 'lab_members' literal becomes
+-- TG_TABLE_NAME so clinic_invitations can share it. Payload shape for the
+-- existing lab trigger is unchanged.
+create or replace function notify_invite_webhook()
+returns trigger
+security definer
+set search_path = public, private
+as $$
+declare
+  secret text;
+begin
+  select value into secret from private.webhook_config where key = 'case_notify_secret';
+  perform net.http_post(
+    url := 'https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/case-notify',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-webhook-secret', coalesce(secret, '')
+    ),
+    body := jsonb_build_object(
+      'type', 'INSERT',
+      'table', TG_TABLE_NAME,
+      'schema', 'public',
+      'record', to_jsonb(NEW)
+    )
+  );
+  return NEW;
+end;
+$$ language plpgsql;
+
+drop trigger if exists clinic_invitations_notify on clinic_invitations;
+create trigger clinic_invitations_notify
+  after insert on clinic_invitations
+  for each row execute function notify_invite_webhook();
+
+/* ---- invitee-facing RPCs -------------------------------------------- */
+
+-- What the /?clinic_invite=<token> landing screen shows before the user
+-- signs in: clinic name, invited address, role, effective status. The
+-- token is the credential; holding it means holding the invite email.
+create or replace function peek_clinic_invitation(p_token text)
+returns jsonb
+language plpgsql security definer stable
+set search_path = public
+as $$
+declare
+  inv clinic_invitations%rowtype;
+begin
+  select * into inv from clinic_invitations where token = p_token;
+  if inv.id is null then
+    return null;
+  end if;
+  return jsonb_build_object(
+    'clinicName', (select name from clinics where id = inv.clinic_id),
+    'email', inv.email,
+    'role', inv.role,
+    'status', case when inv.status = 'pending' and inv.expires_at < now()
+                   then 'expired' else inv.status end
+  );
+end;
+$$;
+
+-- Accepting binds the signed-in user to the clinic. Works for a brand-new
+-- signup (creates the dentist profile, p_name fills the display name) AND
+-- for an existing dentist account (becomes a multi-clinic member — the
+-- fix for the lab flow's "inviting a registered email does nothing").
+-- The signed-in email must match the invited address exactly.
+create or replace function accept_clinic_invitation(p_token text, p_name text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  inv clinic_invitations%rowtype;
+  caller uuid := auth.uid();
+  caller_email text := lower(coalesce(auth.jwt()->>'email', ''));
+  prof_role text;
+  cname text;
+begin
+  if caller is null then
+    raise exception 'Sign in first, then open the invitation link again.';
+  end if;
+  select * into inv from clinic_invitations where token = p_token;
+  if inv.id is null then
+    raise exception 'This invitation link is not valid.';
+  end if;
+  select name into cname from clinics where id = inv.clinic_id and status = 'active';
+  if cname is null then
+    raise exception 'This clinic is not active on Dr-Crown.';
+  end if;
+  if inv.status = 'revoked' then
+    raise exception 'This invitation was withdrawn by the clinic.';
+  end if;
+  if inv.status = 'accepted' then
+    if exists (select 1 from clinic_members where clinic_id = inv.clinic_id and user_id = caller) then
+      -- double-click / re-opened link by the same person: succeed quietly
+      return jsonb_build_object('clinicId', inv.clinic_id, 'clinicName', cname, 'role', inv.role, 'already', true);
+    end if;
+    raise exception 'This invitation has already been used.';
+  end if;
+  if inv.expires_at < now() then
+    raise exception 'This invitation has expired — ask the clinic to send a new one.';
+  end if;
+  if caller_email is distinct from lower(inv.email) then
+    raise exception 'This invitation was sent to % — you are signed in as %.',
+      inv.email, coalesce(nullif(caller_email, ''), 'an account without an email');
+  end if;
+
+  select role into prof_role from profiles where id = caller;
+  if prof_role is null then
+    insert into profiles (id, role, name, clinic_id)
+    values (caller, 'dentist', coalesce(nullif(trim(p_name), ''), ''), inv.clinic_id);
+  elsif prof_role <> 'dentist' then
+    raise exception 'This account is registered as a % account — clinic invitations need a dentist account.', prof_role;
+  end if;
+
+  insert into clinic_members (clinic_id, user_id, role, email)
+  values (inv.clinic_id, caller, inv.role, inv.email)
+  on conflict (clinic_id, user_id) do update
+    set role = case when clinic_owner(excluded.clinic_id) = excluded.user_id
+                    then 'admin' else excluded.role end,
+        email = excluded.email;
+
+  -- primary clinic pointer: only set when empty (never steal an existing
+  -- dentist's default clinic)
+  update profiles set clinic_id = inv.clinic_id where id = caller and clinic_id is null;
+
+  perform set_config('drcrown.accept_invite', '1', true);
+  update clinic_invitations set status = 'accepted' where id = inv.id;
+
+  return jsonb_build_object('clinicId', inv.clinic_id, 'clinicName', cname, 'role', inv.role);
+end;
+$$;
+
+/* ---- member removal (mirror of remove_lab_member, gentler) ---------- */
+
+-- Unlike the lab version this does NOT delete the profile: clinic staff
+-- can belong to several clinics, so removal deletes the membership and
+-- repoints (or clears) the primary clinic pointer. With no memberships
+-- left the account simply drops to Onboarding on next load.
+create or replace function remove_clinic_member(p_clinic uuid, p_user uuid)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not (has_clinic_role(p_clinic, array['admin']) or is_admin()) then
+    raise exception 'Only a clinic admin can remove members.';
+  end if;
+  if p_user = clinic_owner(p_clinic) then
+    raise exception 'The clinic owner cannot be removed.';
+  end if;
+  if p_user = auth.uid() and not is_admin() then
+    raise exception 'You cannot remove yourself.';
+  end if;
+
+  delete from clinic_members where clinic_id = p_clinic and user_id = p_user;
+
+  -- A stale primary pointer must never linger (my_clinic_ids() honors it):
+  -- repoint to another clinic they belong to, or clear it.
+  update profiles set clinic_id = (
+      select m.clinic_id from clinic_members m
+      where m.user_id = p_user and m.clinic_id <> p_clinic
+      order by m.created_at limit 1)
+  where id = p_user and clinic_id = p_clinic;
+end;
+$$;

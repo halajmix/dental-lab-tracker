@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES, SHADE_BY_LAB, ARCH_LABELS } from "./PrescriptionForm.jsx";
 import DeviceManagement from "./DeviceManagement.jsx";
+import ClinicTeamPanel from "./ClinicTeam.jsx";
 import {
   STAGES,
   STAGE_INDEX,
@@ -781,7 +782,7 @@ function PendingApprovalScreen({ orgType, orgName, onRefresh, onSignOut }) {
 /* ------------------------------------------------------------------ */
 
 export default function DentalLabTracker({ auth }) {
-  const { profile, clinic, lab, labMemberships, signOut, refreshProfile } = auth;
+  const { profile, clinic, clinicRole, lab, labMemberships, signOut, refreshProfile } = auth;
   const isDentist = profile.role === "dentist";
 
   // ---- Lab staff RBAC (Phase 16) ----
@@ -935,6 +936,7 @@ export default function DentalLabTracker({ auth }) {
 
   // Modals
   const [clinicModal, setClinicModal] = useState(null); // { editing: clinicObj | null } | null
+  const [teamClinic, setTeamClinic] = useState(null); // clinic whose Team panel is open (Phase 57)
   const [showCaseModal, setShowCaseModal] = useState(false);
   // Case being edited in the Rx form (30-minute window), null = new case.
   const [editingCase, setEditingCase] = useState(null);
@@ -1270,11 +1272,27 @@ export default function DentalLabTracker({ auth }) {
     }
   };
 
+  // Phase 57 role gating. myClinics carries myRole per clinic; before it
+  // loads (or pre-Phase-56 schema) everything falls back to 'admin' — the
+  // access every existing account actually has.
+  const clinicRoleById = useMemo(
+    () => Object.fromEntries(myClinics.map((c) => [c.id, c.myRole ?? "admin"])),
+    [myClinics],
+  );
+  const roleForCase = (c) => clinicRoleById[c.clinicId] ?? clinicRole ?? "admin";
+  // Receptionists never author prescriptions (cases_insert RLS enforces it).
+  const rxClinics = myClinics.filter((c) => c.status === "active" && (c.myRole ?? "admin") !== "receptionist");
+  const canCreateRx = myClinics.length === 0 ? clinicRole !== "receptionist" : rxClinics.length > 0;
+
   // 30-minute Rx edit window (mirrors the cases_guard_prescription trigger,
   // which is the real enforcement — this just decides whether to show the
   // menu item). Legacy rows without created_at simply aren't editable.
+  // Receptionists don't get the item at all (their Rx writes raise).
   const RX_EDIT_WINDOW_MS = 30 * 60 * 1000;
-  const canEditRx = (c) => !!c.createdAt && Date.now() - new Date(c.createdAt).getTime() < RX_EDIT_WINDOW_MS;
+  const canEditRx = (c) =>
+    !!c.createdAt &&
+    Date.now() - new Date(c.createdAt).getTime() < RX_EDIT_WINDOW_MS &&
+    roleForCase(c) !== "receptionist";
 
   const editCase = async (caseId, data) => {
     const c = cases.find((x) => x.id === caseId);
@@ -1384,7 +1402,7 @@ export default function DentalLabTracker({ auth }) {
               onSignOut={signOut}
               onOpenProfile={() => setShowProfileSettings(true)}
             />
-            {isDentist && !orgBlocked && (
+            {isDentist && !orgBlocked && canCreateRx && (
               <button
                 onClick={() => setShowCaseModal(true)}
                 className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
@@ -1542,6 +1560,14 @@ export default function DentalLabTracker({ auth }) {
           onSave={saveClinic}
         />
       )}
+      {isDentist && teamClinic && (
+        <ClinicTeamPanel
+          clinic={teamClinic}
+          myRole={teamClinic.myRole ?? "admin"}
+          currentUserId={profile.id}
+          onClose={() => setTeamClinic(null)}
+        />
+      )}
       {isDentist && (
         <PrescriptionForm
           open={showCaseModal}
@@ -1555,7 +1581,7 @@ export default function DentalLabTracker({ auth }) {
           cases={cases}
           authorName={currentUser}
           userId={auth.session?.user?.id}
-          clinics={myClinics.filter((c) => c.status === "active")}
+          clinics={rxClinics}
           defaultClinicId={clinic?.id}
         />
       )}
@@ -1582,8 +1608,10 @@ export default function DentalLabTracker({ auth }) {
                   // Clinic details are editable by the owner only (RLS:
                   // clinics_update_own) — staff get a passive card with
                   // their role instead of an edit that would silently no-op.
+                  // The Team action sits OUTSIDE the card button: a nested
+                  // control inside a disabled button never receives clicks.
+                  <div key={c.id}>
                   <button
-                    key={c.id}
                     disabled={c.ownerId !== profile.id}
                     onClick={() => { setClinicModal({ editing: c }); setShowSettings(false); }}
                     className={`block w-full rounded-lg border border-slate-200 p-3 text-left ${c.ownerId === profile.id ? "hover:border-blue-300 hover:bg-blue-50/40" : "cursor-default"}`}
@@ -1617,6 +1645,17 @@ export default function DentalLabTracker({ auth }) {
                       {[c.wilayat, c.governorate].filter(Boolean).join(", ") || "No location set"}
                     </p>
                   </button>
+                  {/* Team management (Phase 57) — admins run the roster,
+                      receptionists can view + invite; doctors have no entry */}
+                  {c.status === "active" && (c.myRole ?? "admin") !== "doctor" && (
+                    <button
+                      onClick={() => { setTeamClinic(c); setShowSettings(false); }}
+                      className="mt-1.5 flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                    >
+                      <Users size={11} /> Manage team
+                    </button>
+                  )}
+                  </div>
                 ))}
               </div>
             </div>

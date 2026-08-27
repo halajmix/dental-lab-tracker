@@ -181,6 +181,40 @@ Deno.serve(async (req) => {
   const admin = createClient(supabaseUrl, serviceKey);
 
   try {
+    // ------------- clinic team invitations (clinic_invitations INSERTs) -------------
+    if (table === "clinic_invitations") {
+      if (type !== "INSERT" || !record.email || !record.token || record.status !== "pending") {
+        return json({ ok: true, skipped: "not a pending clinic invite" });
+      }
+      const [{ data: clinic }, { data: inviter }] = await Promise.all([
+        admin.from("clinics").select("name").eq("id", record.clinic_id).maybeSingle(),
+        admin.from("profiles").select("name").eq("id", record.invited_by).maybeSingle(),
+      ]);
+      const clinicName = clinic?.name ?? "a dental clinic";
+      const roleLabel =
+        record.role === "admin" ? "Clinic Admin" : record.role === "receptionist" ? "Receptionist" : "Doctor";
+      // The token IS the credential — the link works for a brand-new signup
+      // and for an already-registered dentist account alike.
+      const link = `${APP_URL}/?clinic_invite=${encodeURIComponent(String(record.token))}`;
+
+      const emailed = await sendEmail(
+        String(record.email),
+        subj(`You're invited to join ${clinicName} on Dr-Crown`),
+        emailShell(
+          `Join ${clinicName} on Dr-Crown`,
+          `<p style="color:#475569">${inviter?.name ? `<b>${esc(inviter.name)}</b> has invited you` : "You've been invited"}
+           to join <b>${esc(clinicName)}</b> as <b>${esc(roleLabel)}</b>.</p>
+           <p style="color:#475569">Open the link below while signed in with <b>this email address</b> &mdash;
+           or create your account with it &mdash; and you'll join ${esc(clinicName)} automatically.</p>
+           <p style="margin:16px 0">
+             <a href="${link}" style="background:#2563eb;color:#ffffff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Accept invitation</a>
+           </p>
+           <p style="color:#94a3b8;font-size:12px">This invitation expires in 7 days and can only be used by ${esc(record.email)}.</p>`,
+        ),
+      );
+      return json({ ok: true, emailed });
+    }
+
     // ---------------- staff invitations (lab_members INSERTs) ----------------
     if (table === "lab_members") {
       if (type !== "INSERT" || record.user_id || !record.email) {

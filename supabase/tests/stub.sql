@@ -22,6 +22,15 @@ $$;
 create role authenticated nologin;
 create role service_role nologin;
 
+-- pg_net + webhook config stand-ins (the invite triggers call these; the
+-- stub just swallows the POST)
+create schema private;
+create table private.webhook_config (key text primary key, value text);
+insert into private.webhook_config values ('case_notify_secret', 'test-secret');
+create schema net;
+create function net.http_post(url text, headers jsonb default '{}'::jsonb, body jsonb default '{}'::jsonb)
+returns bigint language sql as $$ select 1::bigint $$;
+
 create table clinics (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid references auth.users(id),

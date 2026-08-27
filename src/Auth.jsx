@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Mail, Lock, LogIn, UserPlus, Stethoscope, Building2, Loader2, ArrowLeft, CheckCircle2, KeyRound } from "lucide-react";
+import { Mail, Lock, LogIn, UserPlus, Stethoscope, Building2, Loader2, ArrowLeft, CheckCircle2, KeyRound, Users } from "lucide-react";
 import { supabase } from "./lib/supabaseClient.js";
 import { useAuth } from "./lib/useAuth.js";
+import { peekClinicInvitation, acceptClinicInvitation } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 
 const inputCls =
@@ -24,6 +25,49 @@ const inviteEmailParam = (() => {
     return "";
   }
 })();
+
+// Clinic team invitation deep link (Phase 57): /?clinic_invite=<token>.
+// Unlike the lab email-match flow above, the token IS the invitation —
+// peek_clinic_invitation() shows who/what it's for, and once a session
+// exists AuthGate routes through ClinicInviteAccept to bind the account.
+const clinicInviteToken = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get("clinic_invite")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+})();
+
+const clearClinicInviteParam = () => {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("clinic_invite");
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+  } catch {
+    /* cosmetic only */
+  }
+};
+
+// One shared peek for the signup banner and the accept screen.
+function useClinicInvitePeek() {
+  const [peek, setPeek] = useState(undefined); // undefined loading | null invalid | {clinicName,email,role,status}
+  useEffect(() => {
+    if (!clinicInviteToken) {
+      setPeek(null);
+      return;
+    }
+    let cancelled = false;
+    peekClinicInvitation(clinicInviteToken)
+      .then((v) => !cancelled && setPeek(v ?? null))
+      .catch(() => !cancelled && setPeek(null));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return peek;
+}
+
+const INVITE_ROLE_LABEL = { admin: "Clinic Admin", receptionist: "Receptionist", doctor: "Doctor" };
 
 function Field({ label, children }) {
   return (
@@ -266,6 +310,12 @@ function SignupScreen({ onSwitch }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const clinicInvitePeek = useClinicInvitePeek();
+  // Clinic invites carry the address server-side — prefill once peeked.
+  useEffect(() => {
+    if (clinicInvitePeek?.status === "pending" && !email) setEmail(clinicInvitePeek.email);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clinicInvitePeek]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -326,6 +376,13 @@ function SignupScreen({ onSwitch }) {
           password — your invitation is linked to it.
         </div>
       )}
+      {clinicInvitePeek?.status === "pending" && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
+          <b>You've been invited to join {clinicInvitePeek.clinicName}</b> as{" "}
+          {INVITE_ROLE_LABEL[clinicInvitePeek.role] ?? clinicInvitePeek.role}. Sign up with{" "}
+          <b>{clinicInvitePeek.email}</b> and choose a password — the invitation only works for that address.
+        </div>
+      )}
       <ErrorBanner message={error} />
       <form onSubmit={submit} className="space-y-4">
         <Field label="Email">
@@ -361,7 +418,7 @@ function SignupScreen({ onSwitch }) {
 
 function AuthScreen() {
   // An invitation link drops the visitor straight onto signup.
-  const [mode, setMode] = useState(inviteEmailParam ? "signup" : "login"); // "login" | "signup" | "forgot"
+  const [mode, setMode] = useState(inviteEmailParam || clinicInviteToken ? "signup" : "login"); // "login" | "signup" | "forgot"
   if (mode === "signup") return <SignupScreen onSwitch={() => setMode("login")} />;
   if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
   return <LoginScreen onSwitch={() => setMode("signup")} onForgot={() => setMode("forgot")} />;
@@ -789,6 +846,159 @@ function Onboarding({ session, onDone }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Clinic invite acceptance (Phase 57) — shown by AuthGate when a     */
+/*  session exists and /?clinic_invite=<token> is present. Works for   */
+/*  brand-new signups (asks for a name, the RPC creates the dentist    */
+/*  profile) and for existing dentist accounts (joins as an extra      */
+/*  clinic). Exported for the test harness.                            */
+/* ------------------------------------------------------------------ */
+
+export function ClinicInviteAccept({ session, profile, onDone }) {
+  const peek = useClinicInvitePeek();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [joined, setJoined] = useState(null); // accept RPC result
+
+  const myEmail = (session?.user?.email ?? "").toLowerCase();
+  const emailMismatch = peek?.status === "pending" && myEmail && myEmail !== (peek.email ?? "").toLowerCase();
+  const needsName = profile === null;
+  const wrongAccountType = profile && profile.role !== "dentist";
+
+  const join = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await acceptClinicInvitation(clinicInviteToken, needsName ? name : null);
+      setJoined(res);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Loading: token peek or (post-login) profile still resolving.
+  if (peek === undefined || profile === undefined) {
+    return (
+      <Shell>
+        <div className="flex items-center justify-center py-10 text-blue-500">
+          <Loader2 size={22} className="animate-spin" />
+        </div>
+      </Shell>
+    );
+  }
+
+  if (joined) {
+    return (
+      <Shell>
+        <div className="mb-3 flex justify-center"><CheckCircle2 size={32} className="text-emerald-500" /></div>
+        <h2 className="mb-1 text-center text-lg font-bold text-slate-800">You've joined {joined.clinicName}</h2>
+        <p className="mb-5 text-center text-xs text-slate-500">
+          Your role: {INVITE_ROLE_LABEL[joined.role] ?? joined.role}.
+        </p>
+        <button onClick={onDone} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700">
+          Open Dr-Crown
+        </button>
+      </Shell>
+    );
+  }
+
+  const dead =
+    !peek
+      ? "This invitation link is not valid — ask the clinic to send a new one."
+      : peek.status === "revoked"
+        ? "This invitation was withdrawn by the clinic."
+        : peek.status === "expired"
+          ? "This invitation has expired — ask the clinic to send a new one."
+          : peek.status === "accepted"
+            ? "This invitation has already been used."
+            : "";
+
+  return (
+    <Shell>
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-800">
+        <Users size={18} className="text-blue-600" /> Clinic invitation
+      </h2>
+      {dead ? (
+        <>
+          <p className="mb-5 mt-2 text-sm text-slate-600">{dead}</p>
+          <button onClick={onDone} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700">
+            Continue to Dr-Crown
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="mb-4 mt-1 text-sm text-slate-600">
+            You've been invited to join <b>{peek.clinicName}</b> as{" "}
+            <b>{INVITE_ROLE_LABEL[peek.role] ?? peek.role}</b>.
+          </p>
+          {emailMismatch ? (
+            <>
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
+                This invitation was sent to <b>{peek.email}</b>, but you're signed in as <b>{session.user.email}</b>.
+                Sign out and use the invited address.
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => supabase.auth.signOut()} className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700">
+                  Sign out
+                </button>
+                <button onClick={onDone} className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">
+                  Not now
+                </button>
+              </div>
+            </>
+          ) : wrongAccountType ? (
+            <>
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
+                You're signed in with a {profile.role} account — clinic invitations need a dentist account.
+                Sign out and create one with {peek.email}.
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => supabase.auth.signOut()} className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700">
+                  Sign out
+                </button>
+                <button onClick={onDone} className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">
+                  Not now
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {error && <ErrorBanner message={error} />}
+              {needsName && (
+                <Field label="Your name">
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Dr. …"
+                    className={inputCls}
+                  />
+                </Field>
+              )}
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={join}
+                  disabled={busy || (needsName && !name.trim())}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {busy ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}
+                  Join {peek.clinicName}
+                </button>
+                <button onClick={onDone} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">
+                  Not now
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </Shell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Top-level gate                                                     */
 /*                                                                     */
 /*  Used to also gate on a Lab Station device-session heartbeat + OTP  */
@@ -807,6 +1017,9 @@ function Onboarding({ session, onDone }) {
 
 export function AuthGate({ children }) {
   const auth = useAuth();
+  // Clinic invite deep link: held in state so accepting (or declining)
+  // dismisses the screen for the rest of the session.
+  const [pendingClinicInvite, setPendingClinicInvite] = useState(clinicInviteToken);
 
   if (auth.loading || auth.session === undefined) {
     return (
@@ -822,6 +1035,22 @@ export function AuthGate({ children }) {
   // the "set new password" screen before letting them into the app itself.
   if (auth.recovery) {
     return <ResetPasswordScreen onDone={auth.clearRecovery} />;
+  }
+
+  // Clinic invitation (Phase 57): runs BEFORE Onboarding on purpose —
+  // invited staff join an existing clinic instead of creating one.
+  if (pendingClinicInvite) {
+    return (
+      <ClinicInviteAccept
+        session={auth.session}
+        profile={auth.profile}
+        onDone={() => {
+          clearClinicInviteParam();
+          setPendingClinicInvite("");
+          auth.refreshProfile();
+        }}
+      />
+    );
   }
 
   if (auth.profile === null) {

@@ -133,6 +133,102 @@ export async function fetchMyClinicRole(userId, clinicId) {
   return data?.role ?? null;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Clinic team (Phase 57) — roster, invitations, membership RPCs      */
+/* ------------------------------------------------------------------ */
+
+// Roster + pending invitations for the Team panel. Invitations are only
+// visible to admins/receptionists under RLS; a doctor's empty read is
+// normal (they never see the invite section anyway).
+export async function fetchClinicTeam(clinicId) {
+  const [members, invites] = await Promise.all([
+    supabase.from("clinic_members").select("*").eq("clinic_id", clinicId).order("created_at"),
+    supabase.from("clinic_invitations").select("*").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
+  ]);
+  if (members.error) throw members.error;
+  const rows = members.data.map((m) => ({
+    id: m.id,
+    clinicId: m.clinic_id,
+    userId: m.user_id,
+    role: m.role,
+    email: m.email ?? "",
+    createdAt: m.created_at,
+  }));
+  // Names/avatars via profiles_select_clinic_members.
+  const profilesById = {};
+  if (rows.length) {
+    const { data: profs } = await supabase
+      .from("profiles")
+      .select("id, name, avatar_url")
+      .in("id", rows.map((m) => m.userId));
+    for (const p of profs ?? []) profilesById[p.id] = p;
+  }
+  return {
+    members: rows.map((m) => ({
+      ...m,
+      name: profilesById[m.userId]?.name ?? "",
+      avatarUrl: profilesById[m.userId]?.avatar_url ?? null,
+    })),
+    invitations: (invites.error ? [] : invites.data).map((i) => ({
+      id: i.id,
+      email: i.email,
+      role: i.role,
+      // pending-past-expiry renders as expired; the row itself stays pending.
+      status: i.status === "pending" && new Date(i.expires_at) < new Date() ? "expired" : i.status,
+      expiresAt: i.expires_at,
+      createdAt: i.created_at,
+    })),
+  };
+}
+
+export async function createClinicInvitation(clinicId, invitedBy, { email, role }) {
+  const { data, error } = await supabase
+    .from("clinic_invitations")
+    .insert({ clinic_id: clinicId, email: email.trim(), role, invited_by: invitedBy })
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "23505") throw new Error("There is already a pending invitation for that email.");
+    throw error;
+  }
+  return data;
+}
+
+export async function revokeClinicInvitation(id) {
+  const { data, error } = await supabase
+    .from("clinic_invitations")
+    .update({ status: "revoked" })
+    .eq("id", id)
+    .select();
+  if (error) throw error;
+  // RLS-0-row lesson: an unauthorized update "succeeds" with nothing changed.
+  if (!data?.length) throw new Error("Couldn't revoke the invitation — refresh and try again.");
+}
+
+export async function updateClinicMemberRole(memberId, role) {
+  const { data, error } = await supabase.from("clinic_members").update({ role }).eq("id", memberId).select();
+  if (error) throw error;
+  if (!data?.length) throw new Error("Couldn't change the role — only clinic admins can, and the owner's role is fixed.");
+}
+
+export async function removeClinicMember(clinicId, userId) {
+  const { error } = await supabase.rpc("remove_clinic_member", { p_clinic: clinicId, p_user: userId });
+  if (error) throw error;
+}
+
+// Invite-link landing info ({clinicName, email, role, status} or null).
+export async function peekClinicInvitation(token) {
+  const { data, error } = await supabase.rpc("peek_clinic_invitation", { p_token: token });
+  if (error) throw error;
+  return data;
+}
+
+export async function acceptClinicInvitation(token, name = null) {
+  const { data, error } = await supabase.rpc("accept_clinic_invitation", { p_token: token, p_name: name });
+  if (error) throw error;
+  return data; // {clinicId, clinicName, role, already?}
+}
+
 export async function insertClinic(ownerId, data) {
   const { data: row, error } = await supabase
     .from("clinics")
