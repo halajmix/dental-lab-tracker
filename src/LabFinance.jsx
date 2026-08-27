@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Upload,
@@ -23,6 +23,7 @@ import {
 import { STAGE_INDEX } from "./LifecycleEngine.jsx";
 import {
   fetchStatements,
+  fetchStatementLineItems,
   fetchPayments,
   fetchExpenses,
   generateStatements,
@@ -118,18 +119,43 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkMsg, setBulkMsg] = useState("");
 
+  // Imported-history line items are most of the billing payload, so the
+  // table paints from a lean statement fetch while the detail loads behind
+  // it; anything that needs a statement's lines awaits this via withLines.
+  const linesPromiseRef = useRef(null);
+
   const load = async () => {
     setLoading(true);
     setError("");
+    const linesP = fetchStatementLineItems(lab.id).catch(() => null);
+    linesPromiseRef.current = linesP;
     try {
       const [st, pay] = await Promise.all([fetchStatements(lab.id), fetchPayments(lab.id)]);
       setStatements(st);
       setPayments(pay);
+      linesP.then((map) => {
+        if (map?.size) {
+          setStatements((prev) =>
+            prev.some((s) => map.has(s.id))
+              ? prev.map((s) => (map.has(s.id) ? { ...s, lineItems: map.get(s.id) } : s))
+              : prev,
+          );
+        }
+      });
     } catch (err) {
       setError("Couldn't load billing data — " + err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Resolve a statement WITH its line items, whether or not the background
+  // detail fetch has landed yet (exports and PDFs must never miss detail).
+  const withLines = async (s) => {
+    if (s.lineItems?.length) return s;
+    const map = await linesPromiseRef.current;
+    const lines = map?.get(s.id);
+    return lines?.length ? { ...s, lineItems: lines } : s;
   };
   useEffect(() => {
     load();
@@ -217,7 +243,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     await downloadStatementPdf({
       lab,
       clinic: clinicsById[s.clinicId] ?? { name: s.clinicName || "Clinic" },
-      statement: s,
+      statement: await withLines(s),
       cases: included,
       paidSoFar: paidByStatement[s.id] ?? 0,
     });
@@ -319,18 +345,20 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
 
   const [exporting, setExporting] = useState(false);
   const exportItems = () =>
-    selectedAll.map((s) => ({
-      clinic: clinicsById[s.clinicId] ?? { name: s.clinicName || "Clinic" },
-      statement: s,
-      cases: (cases ?? []).filter((c) => c.statementId === s.id),
-      paidSoFar: paidByStatement[s.id] ?? 0,
-    }));
+    Promise.all(
+      selectedAll.map(async (s) => ({
+        clinic: clinicsById[s.clinicId] ?? { name: s.clinicName || "Clinic" },
+        statement: await withLines(s),
+        cases: (cases ?? []).filter((c) => c.statementId === s.id),
+        paidSoFar: paidByStatement[s.id] ?? 0,
+      })),
+    );
 
   const downloadSelectedPdf = async () => {
     setExporting(true);
     try {
       const { downloadStatementsPdf } = await import("./lib/statementPdf.js");
-      await downloadStatementsPdf({ lab, items: exportItems() });
+      await downloadStatementsPdf({ lab, items: await exportItems() });
       logActivity("downloaded statements PDF (bulk)", `${selectedAll.length} statements`);
     } catch (err) {
       alert("Couldn't build the PDF — " + err.message);
@@ -343,7 +371,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     setExporting(true);
     try {
       const XLSX = await import("xlsx");
-      const items = exportItems();
+      const items = await exportItems();
       const summary = [
         ["Clinic", "Month", "Total (OMR)", "Paid (OMR)", "Balance (OMR)", "Status"],
         ...items.map(({ clinic, statement: s, paidSoFar }) => [

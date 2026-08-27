@@ -1202,13 +1202,30 @@ const fetchAllPages = async (buildQuery) => {
   }
 };
 
+// line_items is deliberately absent here — the imported-history detail is
+// ~95% of the table's bytes, so the Billing tab first paints from this lean
+// select and fetchStatementLineItems fills the detail in behind it.
+const STATEMENT_COLUMNS = "id, lab_id, clinic_id, clinic_name, month, total, status, created_at";
+
 export async function fetchStatements(labId) {
   // Secondary order on id keeps pages stable — rows sharing a month would
   // otherwise shuffle between pages and get skipped or duplicated.
   const rows = await fetchAllPages(() =>
-    supabase.from("clinic_statements").select("*").eq("lab_id", labId).order("month", { ascending: false }).order("id")
+    supabase.from("clinic_statements").select(STATEMENT_COLUMNS).eq("lab_id", labId).order("month", { ascending: false }).order("id")
   );
   return rows.map(statementFromRow);
+}
+
+export async function fetchStatementLineItems(labId) {
+  const rows = await fetchAllPages(() =>
+    supabase
+      .from("clinic_statements")
+      .select("id, line_items")
+      .eq("lab_id", labId)
+      .neq("line_items", "[]")
+      .order("id")
+  );
+  return new Map(rows.map((r) => [r.id, r.line_items ?? []]));
 }
 
 export async function fetchPayments(labId) {
