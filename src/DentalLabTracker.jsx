@@ -82,6 +82,7 @@ import {
   subscribeCases,
   fetchClinicsByIds,
   fetchMyClinics,
+  fetchClinicLabAccess,
   insertClinic,
   updateClinic,
   caseFromRow,
@@ -1272,6 +1273,32 @@ export default function DentalLabTracker({ auth }) {
     }
   };
 
+  // Phase 58: this clinic's lab-access mappings (RLS returns only rows for
+  // clinics the caller belongs to). Fail-soft null = no filtering, which is
+  // also the pre-SQL behavior. RLS on labs already narrows the DIRECTORY;
+  // this only refines the Rx picker per SENDING clinic for multi-clinic
+  // staff (the cases_insert policy is the real enforcement).
+  const [labAccess, setLabAccess] = useState(null);
+  useEffect(() => {
+    if (!isDentist || !profile.id) return;
+    let cancelled = false;
+    fetchClinicLabAccess()
+      .then((rows) => !cancelled && setLabAccess(rows))
+      .catch(() => !cancelled && setLabAccess(null));
+    return () => { cancelled = true; };
+  }, [isDentist, profile.id]);
+  const labAllowedForClinic = useCallback(
+    (labId, clinicId) => {
+      const cl = myClinics.find((c) => c.id === clinicId);
+      if (!cl) return true; // unknown clinic — leave it to RLS
+      if (labAccess?.some((a) => a.clinicId === clinicId && a.labId === labId)) return true;
+      if (cl.isExclusive) return false;
+      const l = labById[labId];
+      return l ? l.isPublic !== false : true;
+    },
+    [myClinics, labAccess, labById],
+  );
+
   // Phase 57 role gating. myClinics carries myRole per clinic; before it
   // loads (or pre-Phase-56 schema) everything falls back to 'admin' — the
   // access every existing account actually has.
@@ -1582,6 +1609,7 @@ export default function DentalLabTracker({ auth }) {
           authorName={currentUser}
           userId={auth.session?.user?.id}
           clinics={rxClinics}
+          labAllowed={labAllowedForClinic}
           defaultClinicId={clinic?.id}
         />
       )}

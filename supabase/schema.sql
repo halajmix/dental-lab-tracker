@@ -5048,3 +5048,145 @@ begin
   where id = p_user and clinic_id = p_clinic;
 end;
 $$;
+/* --------------------------------------------------------------------- */
+/*  Phase 58 — Super-admin lab visibility: exclusive clinics, private    */
+/*  labs, and the clinic↔lab access map                                  */
+/*                                                                       */
+/*  Until now every authenticated user saw the whole labs directory      */
+/*  (labs_select_all). Visibility is now a super-admin-controlled rule:  */
+/*    - labs.is_public (default true): a private lab is visible only to  */
+/*      clinics mapped to it in clinic_lab_access.                       */
+/*    - clinics.is_exclusive (default false): an exclusive clinic sees   */
+/*      ONLY its mapped labs — public labs disappear from its picker.    */
+/*    - clinic_lab_access rows are managed by the super admin alone.     */
+/*  Enforced in RLS (labs select + cases insert per SENDING clinic), so  */
+/*  the Rx form's LabPicker follows automatically and a hand-rolled      */
+/*  request can't sidestep it. Untouched: a lab always sees itself, a    */
+/*  clinic always sees labs it has cases with (invoices/statements for   */
+/*  later-revoked labs must keep rendering), unclaimed orphan rows stay  */
+/*  reachable for the claim flow, and the super admin sees everything.   */
+/*  Defaults reproduce today's behavior exactly (all public, none        */
+/*  exclusive) — nothing changes until the admin flips a switch.        */
+/* --------------------------------------------------------------------- */
+
+create table if not exists clinic_lab_access (
+  id uuid primary key default gen_random_uuid(),
+  clinic_id uuid not null references clinics(id) on delete cascade,
+  lab_id uuid not null references labs(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (clinic_id, lab_id)
+);
+
+create index if not exists clinic_lab_access_lab_idx on clinic_lab_access (lab_id);
+
+alter table clinic_lab_access enable row level security;
+
+alter table clinics add column if not exists is_exclusive boolean not null default false;
+alter table labs add column if not exists is_public boolean not null default true;
+
+-- Clinic members can read their own clinic's mappings (the Rx form uses
+-- them to filter the picker per sending clinic); only the super admin
+-- writes them. No update policy: rows are granted/revoked, never edited.
+drop policy if exists "clinic_lab_access_select" on clinic_lab_access;
+create policy "clinic_lab_access_select" on clinic_lab_access for select
+  using (clinic_id in (select my_clinic_ids()) or is_admin());
+
+drop policy if exists "clinic_lab_access_insert" on clinic_lab_access;
+create policy "clinic_lab_access_insert" on clinic_lab_access for insert
+  with check (is_admin());
+
+drop policy if exists "clinic_lab_access_delete" on clinic_lab_access;
+create policy "clinic_lab_access_delete" on clinic_lab_access for delete
+  using (is_admin());
+
+/* ---- visibility helpers --------------------------------------------- */
+
+-- May THIS clinic send to THIS lab? Mapped always wins; otherwise a
+-- standard clinic may use any public lab. SECURITY DEFINER so the labs
+-- lookup doesn't re-enter labs RLS from inside the labs policy below.
+create or replace function clinic_can_use_lab(p_clinic uuid, p_lab uuid)
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select exists (select 1 from clinic_lab_access
+                 where clinic_id = p_clinic and lab_id = p_lab)
+      or exists (select 1 from clinics c
+                 join labs l on l.id = p_lab
+                 where c.id = p_clinic
+                   and not c.is_exclusive
+                   and l.is_public);
+$$;
+
+-- Is the lab visible to ANY clinic the caller belongs to?
+create or replace function lab_visible_for_rx(p_lab uuid)
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select exists (select 1 from my_clinic_ids() mc(cid)
+                 where clinic_can_use_lab(mc.cid, p_lab));
+$$;
+
+/* ---- labs directory RLS --------------------------------------------- */
+
+drop policy if exists "labs_select_all" on labs;
+drop policy if exists "labs_select" on labs;
+create policy "labs_select" on labs for select
+  using (
+    is_admin()
+    or owner_id = auth.uid()
+    or id = my_lab_id()
+    or created_by_clinic_id in (select my_clinic_ids())
+    -- unclaimed placeholder/orphan rows stay reachable: the lab signup
+    -- claim flow must find them (they are already filtered out of every
+    -- dentist-facing list client-side)
+    or owner_id is null
+    -- labs this caller's clinics have cases with — history must render
+    -- even after a mapping is revoked or a lab goes private
+    or id in (select lab_id from cases where clinic_id in (select my_clinic_ids()))
+    or lab_visible_for_rx(id)
+  );
+
+-- Super-admin toggles (clinics.is_exclusive / labs.is_public) are plain
+-- RLS-gated updates from the Admin Dashboard — no Edge Function needed.
+drop policy if exists "clinics_update_admin" on clinics;
+create policy "clinics_update_admin" on clinics for update
+  using (is_admin());
+
+drop policy if exists "labs_update_admin" on labs;
+create policy "labs_update_admin" on labs for update
+  using (is_admin());
+
+/* ---- enforcement on cases ------------------------------------------- */
+
+-- New cases must go to a lab the SENDING clinic may use — "one of my
+-- other clinics could" is not enough for a multi-clinic doctor.
+drop policy if exists "cases_insert_own_clinic" on cases;
+create policy "cases_insert_own_clinic" on cases for insert
+  with check (
+    has_clinic_role(clinic_id, array['admin', 'doctor'])
+    and (lab_id is null or clinic_can_use_lab(clinic_id, lab_id))
+  );
+
+-- A case never changes labs client-side (the Rx edit flow already strips
+-- labId). Freezing it here closes the re-point hole: without this, a
+-- hand-rolled PATCH could move a case to an unmapped lab, since UPDATE
+-- policies can't compare old vs new. Service role stays exempt (the
+-- super-admin clinic-reassign recipe).
+create or replace function guard_case_lab_binding()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) <> 'service_role'
+     and new.lab_id is distinct from old.lab_id then
+    new.lab_id := old.lab_id;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists cases_guard_lab_binding on cases;
+create trigger cases_guard_lab_binding
+  before update on cases
+  for each row execute function guard_case_lab_binding();

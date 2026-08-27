@@ -26,6 +26,9 @@ import {
 import {
   fetchAllClinics,
   fetchLabs,
+} from "./lib/data.js";
+import ClinicLabMatrix from "./ClinicLabMatrix.jsx";
+import {
   fetchCases,
   adminListUsers,
   adminDeleteAccount,
@@ -213,7 +216,7 @@ export default function AdminDashboard({ auth }) {
   const [actionError, setActionError] = useState("");
 
   const [confirmTarget, setConfirmTarget] = useState(null); // { message, run: () => Promise }
-  const [view, setView] = useState("overview"); // "overview" | "logs" (Staff logs)
+  const [view, setView] = useState("overview"); // "overview" | "logs" | "labaccess" (Phase 58)
   const [busy, setBusy] = useState(false);
   const [viewAsBusyId, setViewAsBusyId] = useState(null);
 
@@ -373,11 +376,13 @@ export default function AdminDashboard({ auth }) {
                 <p className="text-sm text-slate-500">
                   {view === "logs"
                     ? "Every sign-in and action across the platform — views, downloads, payments and more."
-                    : "Every clinic and lab on Dr-Crown, at a glance."}
+                    : view === "labaccess"
+                      ? "Who sees which lab — exclusive contracts and private labs."
+                      : "Every clinic and lab on Dr-Crown, at a glance."}
                 </p>
               </div>
               <nav className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
-                {[["overview", "Overview"], ["logs", "Staff logs"]].map(([id, label]) => (
+                {[["overview", "Overview"], ["labaccess", "Lab access"], ["logs", "Staff logs"]].map(([id, label]) => (
                   <button
                     key={id}
                     onClick={() => setView(id)}
@@ -393,6 +398,8 @@ export default function AdminDashboard({ auth }) {
 
             {view === "logs" ? (
               <StaffLogsPanel />
+            ) : view === "labaccess" ? (
+              <ClinicLabMatrix clinics={clinics} labs={labs} onFlagsChanged={load} />
             ) : (
             <>
 

@@ -1390,7 +1390,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId, authorName = "", cases = [], clinics = [], defaultClinicId = null }) {
+export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId, authorName = "", cases = [], clinics = [], defaultClinicId = null, labAllowed = () => true }) {
   const [formKind, setFormKind] = useState("new"); // "new" | "followup" — MUST stay above the !open early return
   const [notation, setNotation] = useState("FDI");
   const [mode, setMode] = useState("unit");
@@ -1439,6 +1439,13 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
   const [labId, setLabId] = useState("");
+  // Phase 58: switching the sending clinic can make the chosen lab
+  // unavailable (exclusive contracts) — clear it rather than letting the
+  // submit fail against the cases_insert policy.
+  useEffect(() => {
+    if (labId && !labAllowed(labId, selectedClinicId || defaultClinicId)) setLabId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClinicId, labId, labAllowed]);
   const [deliveryTime, setDeliveryTime] = useState(DELIVERY_TIMES[0]);
   const [pickupRequested, setPickupRequested] = useState(false); // ask the lab to collect the case from the clinic
 
@@ -2149,8 +2156,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 </Field>
               ) : (
                 <Field label="Select Lab" required>
+                  {/* Phase 58: the picker follows the SENDING clinic — an
+                      exclusive clinic offers only its contracted labs. */}
                   <LabPicker
-                    labs={labs}
+                    labs={labs.filter((l) => labAllowed(l.id, selectedClinicId || defaultClinicId))}
                     value={labId}
                     onChange={setLabId}
                     clinicGov={clinics.find((c) => c.id === (selectedClinicId || defaultClinicId))?.governorate || ""}

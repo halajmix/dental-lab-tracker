@@ -42,6 +42,7 @@ create table clinics (
 create table labs (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid references auth.users(id),
+  created_by_clinic_id uuid,
   name text not null,
   status text not null default 'active'
 );
@@ -87,6 +88,7 @@ create table clinic_price_rules (
 );
 
 alter table clinics enable row level security;
+alter table labs enable row level security;
 alter table profiles enable row level security;
 alter table cases enable row level security;
 alter table case_notes enable row level security;
@@ -128,6 +130,7 @@ create trigger cases_guard_prescription
 
 -- pre-Phase-56 policies that phase56.sql replaces (so the drops are real)
 create policy "profiles_select_own" on profiles for select using (id = auth.uid());
+create policy "clinics_select_admin" on clinics for select using (is_admin());
 create policy "clinics_select" on clinics for select
   using (owner_id = auth.uid() or id = my_clinic_id()
          or id in (select clinic_id from cases where lab_id = my_lab_id()));

@@ -23,6 +23,9 @@ export const labFromRow = (r) => ({
   ownerId: r.owner_id,
   createdByClinicId: r.created_by_clinic_id,
   status: r.status ?? "active",
+  // Phase 58: private labs are visible only to clinics mapped in
+  // clinic_lab_access. Default true = pre-58 behavior.
+  isPublic: r.is_public ?? true,
   // Who receives new-case emails; "" = the lab's general contact email.
   notifyEmail: r.notify_email ?? "",
   // Monthly unpaid-invoice reminder emails to clinics (Lab Settings toggle).
@@ -81,6 +84,8 @@ export const clinicFromRow = (r) => ({
   ownerId: r.owner_id ?? null,
   // Phase 30 activation gate — rows created before the column existed are active.
   status: r.status ?? "active",
+  // Phase 58: an exclusive clinic sees only its super-admin-mapped labs.
+  isExclusive: r.is_exclusive ?? false,
 });
 
 export async function fetchClinicsByIds(ids) {
@@ -214,6 +219,49 @@ export async function updateClinicMemberRole(memberId, role) {
 export async function removeClinicMember(clinicId, userId) {
   const { error } = await supabase.rpc("remove_clinic_member", { p_clinic: clinicId, p_user: userId });
   if (error) throw error;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Clinic↔lab access map (Phase 58). RLS scopes reads: a clinic sees   */
+/*  its own mappings, the super admin sees (and writes) everything.     */
+/* ------------------------------------------------------------------ */
+
+export async function fetchClinicLabAccess() {
+  const { data, error } = await supabase.from("clinic_lab_access").select("clinic_id, lab_id");
+  if (error) throw error;
+  return data.map((r) => ({ clinicId: r.clinic_id, labId: r.lab_id }));
+}
+
+export async function grantClinicLabAccess(clinicId, labId) {
+  const { error } = await supabase.from("clinic_lab_access").insert({ clinic_id: clinicId, lab_id: labId });
+  if (error && error.code !== "23505") throw error; // already granted = fine
+}
+
+export async function revokeClinicLabAccess(clinicId, labId) {
+  const { data, error } = await supabase
+    .from("clinic_lab_access")
+    .delete()
+    .eq("clinic_id", clinicId)
+    .eq("lab_id", labId)
+    .select();
+  if (error) throw error;
+  if (!data?.length) throw new Error("Couldn't revoke — only the super admin can change lab access.");
+}
+
+export async function setClinicExclusive(clinicId, isExclusive) {
+  const { data, error } = await supabase
+    .from("clinics")
+    .update({ is_exclusive: isExclusive })
+    .eq("id", clinicId)
+    .select();
+  if (error) throw error;
+  if (!data?.length) throw new Error("Couldn't update the clinic — super admin only.");
+}
+
+export async function setLabPublic(labId, isPublic) {
+  const { data, error } = await supabase.from("labs").update({ is_public: isPublic }).eq("id", labId).select();
+  if (error) throw error;
+  if (!data?.length) throw new Error("Couldn't update the lab — super admin only.");
 }
 
 // Invite-link landing info ({clinicName, email, role, status} or null).
