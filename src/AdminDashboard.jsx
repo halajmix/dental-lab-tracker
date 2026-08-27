@@ -26,6 +26,8 @@ import {
 import {
   fetchAllClinics,
   fetchLabs,
+  fetchAllProfiles,
+  adminSetUserStatus,
 } from "./lib/data.js";
 import ClinicLabMatrix from "./ClinicLabMatrix.jsx";
 import {
@@ -87,14 +89,19 @@ const fmtDate = (iso) => {
 
 /** Small confirm-before-destructive-action dialog — this console has no
  * undo, so every delete routes through here rather than firing on click. */
+// Defaults keep the historical delete voice; a target may override
+// title/actionLabel and set tone: "primary" for non-destructive actions
+// (Phase 59's activate/deactivate — "Delete permanently?" over a status
+// toggle would be alarming and wrong).
 function ConfirmDialog({ target, busy, onCancel, onConfirm }) {
   if (!target) return null;
+  const primary = target.tone === "primary";
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
-        <div className="mb-3 flex items-center gap-2 text-rose-600">
-          <AlertTriangle size={20} />
-          <h3 className="text-base font-bold text-slate-800">Delete permanently?</h3>
+        <div className={`mb-3 flex items-center gap-2 ${primary ? "text-blue-600" : "text-rose-600"}`}>
+          {primary ? <Power size={20} /> : <AlertTriangle size={20} />}
+          <h3 className="text-base font-bold text-slate-800">{target.title ?? "Delete permanently?"}</h3>
         </div>
         <p className="mb-5 text-sm text-slate-600">{target.message}</p>
         <div className="flex justify-end gap-2">
@@ -104,9 +111,10 @@ function ConfirmDialog({ target, busy, onCancel, onConfirm }) {
           <button
             onClick={onConfirm}
             disabled={busy}
-            className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+            className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${primary ? "bg-blue-600 hover:bg-blue-700" : "bg-rose-600 hover:bg-rose-700"}`}
           >
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete
+            {busy ? <Loader2 size={14} className="animate-spin" /> : primary ? <Power size={14} /> : <Trash2 size={14} />}{" "}
+            {target.actionLabel ?? "Delete"}
           </button>
         </div>
       </div>
@@ -211,6 +219,7 @@ export default function AdminDashboard({ auth }) {
   const [labs, setLabs] = useState([]);
   const [cases, setCases] = useState([]);
   const [users, setUsers] = useState([]);
+  const [profilesById, setProfilesById] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -222,12 +231,21 @@ export default function AdminDashboard({ auth }) {
 
   const load = () => {
     setLoading(true);
-    Promise.all([fetchAllClinics(), fetchLabs(), fetchCases(), adminListUsers()])
-      .then(([c, l, cs, u]) => {
+    // Profiles ride along fail-soft: pre-Phase-59 the status column is
+    // missing and the Users panel simply hides its controls.
+    Promise.all([
+      fetchAllClinics(),
+      fetchLabs(),
+      fetchCases(),
+      adminListUsers(),
+      fetchAllProfiles().catch(() => []),
+    ])
+      .then(([c, l, cs, u, profs]) => {
         setClinics(c);
         setLabs(l);
         setCases(cs);
         setUsers(u);
+        setProfilesById(Object.fromEntries(profs.map((p) => [p.id, p])));
         setError("");
       })
       .catch((err) => setError(err.message))
@@ -717,6 +735,85 @@ export default function AdminDashboard({ auth }) {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ---------------------- All users: per-account on/off (Phase 59) ---------------------- */}
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+                <UserCog size={15} className="text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-800">All users ({users.length})</h3>
+                <span className="ml-auto text-[11px] font-medium text-slate-400">
+                  Deactivating an account cuts its access instantly — clinics/labs and their data stay untouched.
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    <tr>
+                      <th className="px-5 py-2">Email</th>
+                      <th className="px-5 py-2">Name</th>
+                      <th className="px-5 py-2">Role</th>
+                      <th className="px-5 py-2">Organization</th>
+                      <th className="px-5 py-2">Status</th>
+                      <th className="px-5 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {users.map((u) => {
+                      const p = profilesById[u.id];
+                      const orgName = p?.clinic_id
+                        ? clinics.find((c) => c.id === p.clinic_id)?.name ?? "—"
+                        : p?.lab_id
+                          ? labs.find((l) => l.id === p.lab_id)?.name ?? "—"
+                          : "—";
+                      const inactive = p?.status === "inactive";
+                      const protectedAcct = !p || p.role === "admin" || u.id === profile.id;
+                      return (
+                        <tr key={u.id} className={`hover:bg-slate-50/60 ${inactive ? "opacity-60" : ""}`}>
+                          <td className="px-5 py-2.5 font-medium text-slate-700">{u.email}</td>
+                          <td className="px-5 py-2.5 text-slate-600">{p?.name || "—"}</td>
+                          <td className="px-5 py-2.5 capitalize text-slate-600">{p?.role ?? "no profile"}</td>
+                          <td className="max-w-[180px] truncate px-5 py-2.5 text-slate-600">{orgName}</td>
+                          <td className="px-5 py-2.5">
+                            {inactive ? (
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">Inactive</span>
+                            ) : (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Active</span>
+                            )}
+                          </td>
+                          <td className="px-5 py-2.5">
+                            <div className="flex justify-end">
+                              {!protectedAcct && (
+                                <button
+                                  onClick={() =>
+                                    setConfirmTarget({
+                                      tone: "primary",
+                                      title: inactive ? "Reactivate this account?" : "Deactivate this account?",
+                                      actionLabel: inactive ? "Activate" : "Deactivate",
+                                      message: inactive
+                                        ? `Reactivate "${u.email}"? They regain access to everything immediately.`
+                                        : `Deactivate "${u.email}"? They lose access to all data instantly — even if currently signed in — until reactivated. Nothing is deleted.`,
+                                      run: () => adminSetUserStatus(u.id, inactive ? "active" : "inactive"),
+                                    })
+                                  }
+                                  className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
+                                    inactive
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                      : "border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-700"
+                                  }`}
+                                  title={inactive ? "Reactivate this account" : "Deactivate this account"}
+                                >
+                                  <Power size={12} /> {inactive ? "Activate" : "Deactivate"}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

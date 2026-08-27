@@ -55,6 +55,16 @@ create table profiles (
   name text default ''
 );
 
+-- prod Phase 16 (referenced by the real my_lab_id body)
+create table lab_members (
+  id uuid primary key default gen_random_uuid(),
+  lab_id uuid references labs(id),
+  user_id uuid,
+  email text default '',
+  role text not null,
+  status text not null default 'active'
+);
+
 create table cases (
   id text primary key,
   clinic_id uuid references clinics(id),

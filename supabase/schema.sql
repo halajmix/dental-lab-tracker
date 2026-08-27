@@ -5190,3 +5190,139 @@ drop trigger if exists cases_guard_lab_binding on cases;
 create trigger cases_guard_lab_binding
   before update on cases
   for each row execute function guard_case_lab_binding();
+/* --------------------------------------------------------------------- */
+/*  Phase 59 — per-USER activate/deactivate from the super admin          */
+/*                                                                       */
+/*  Orgs already have a full on/off lifecycle (Phase 30 suspend ↔        */
+/*  activate); this adds the same for individual accounts. profiles.     */
+/*  status = 'inactive' makes the four identity helpers (my_clinic_id,   */
+/*  my_clinic_ids, my_clinic_role, my_lab_id) return nothing, which      */
+/*  darkens every clinic- and lab-side policy derived from them —        */
+/*  instantly, even for a session that is already signed in. The client  */
+/*  additionally shows a "deactivated" screen (profiles_select_own       */
+/*  still returns the user's own row, so they can see WHY the app is    */
+/*  empty). is_admin() is deliberately NOT gated and admin accounts      */
+/*  cannot be deactivated — no self-lockout. A trigger freezes the      */
+/*  column so a user cannot reactivate themselves through the own-       */
+/*  profile update policy; the only write path is the RPC below.         */
+/* --------------------------------------------------------------------- */
+
+alter table profiles add column if not exists status text not null default 'active'
+  check (status in ('active', 'inactive'));
+
+-- Missing profile row = active on purpose: onboarding and the org claim
+-- flows run before a profile exists and must not go dark.
+create or replace function is_active_user()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select coalesce((select status <> 'inactive' from profiles where id = auth.uid()), true);
+$$;
+
+-- The four identity helpers, re-created with the gate. Bodies are the
+-- latest versions (Phases 30/16/56/57) with only is_active_user() added.
+
+create or replace function my_clinic_id()
+returns uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select p.clinic_id from profiles p
+  join clinics c on c.id = p.clinic_id
+  where p.id = auth.uid()
+    and c.status = 'active'
+    and is_active_user();
+$$;
+
+create or replace function my_lab_id()
+returns uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select p.lab_id from profiles p
+  join labs l on l.id = p.lab_id
+  where p.id = auth.uid()
+    and l.status = 'active'
+    and is_active_user()
+    and not exists (
+      select 1 from lab_members m
+      where m.user_id = auth.uid()
+        and m.lab_id = p.lab_id
+        and m.status = 'suspended'
+    );
+$$;
+
+create or replace function my_clinic_ids()
+returns setof uuid
+language sql security definer stable
+set search_path = public
+as $$
+  select c.id from clinics c
+  where c.status = 'active'
+    and is_active_user()
+    and (c.owner_id = auth.uid()
+         or c.id = (select clinic_id from profiles where id = auth.uid())
+         or c.id in (select clinic_id from clinic_members where user_id = auth.uid()));
+$$;
+
+create or replace function my_clinic_role(target uuid)
+returns text
+language sql security definer stable
+set search_path = public
+as $$
+  select case
+    when not is_active_user() then null
+    when exists (select 1 from clinics where id = target and owner_id = auth.uid())
+      then 'admin'
+    else (select role from clinic_members where clinic_id = target and user_id = auth.uid())
+  end;
+$$;
+
+-- Only the super admin flips accounts, only through here (the trigger
+-- below freezes the column for every other writer).
+create or replace function admin_set_user_status(p_user uuid, p_status text)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if not is_admin() then
+    raise exception 'Only the super admin can change account status.';
+  end if;
+  if p_status not in ('active', 'inactive') then
+    raise exception 'Invalid status %.', p_status;
+  end if;
+  if p_user = auth.uid() then
+    raise exception 'You cannot deactivate your own account.';
+  end if;
+  if (select role from profiles where id = p_user) = 'admin' then
+    raise exception 'Admin accounts cannot be deactivated.';
+  end if;
+  perform set_config('drcrown.admin_status', '1', true);
+  update profiles set status = p_status where id = p_user;
+  if not found then
+    raise exception 'No profile found for that user.';
+  end if;
+end;
+$$;
+
+-- profiles_update_own allows any column — without this, a deactivated
+-- user could simply set themselves active again.
+create or replace function guard_profile_status()
+returns trigger
+as $$
+begin
+  if current_setting('role', true) = 'service_role'
+     or current_setting('drcrown.admin_status', true) = '1' then
+    return new;
+  end if;
+  new.status := old.status;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists profiles_guard_status on profiles;
+create trigger profiles_guard_status
+  before update on profiles
+  for each row execute function guard_profile_status();

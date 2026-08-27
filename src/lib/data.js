@@ -936,6 +936,21 @@ export async function adminDeleteAccount(userId) {
   await callAdminAction("delete-account", { userId });
 }
 
+// Phase 59: per-user on/off. RLS-side RPC (no Edge Function involved);
+// the DB blocks self-targets and admin accounts.
+export async function adminSetUserStatus(userId, status) {
+  const { error } = await supabase.rpc("admin_set_user_status", { p_user: userId, p_status: status });
+  if (error) throw error;
+}
+
+// All profiles for the admin console (profiles_select_admin). Keyed by id
+// so the Users panel can show role/org/status next to each login.
+export async function fetchAllProfiles() {
+  const { data, error } = await supabase.from("profiles").select("id, name, role, clinic_id, lab_id, status");
+  if (error) throw error;
+  return data;
+}
+
 export async function adminDeleteOrg(orgType, id) {
   await callAdminAction("delete-org", { orgType, id });
 }

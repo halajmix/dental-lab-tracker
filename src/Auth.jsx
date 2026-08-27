@@ -999,6 +999,32 @@ export function ClinicInviteAccept({ session, profile, onDone }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Deactivated account (Phase 59): RLS already returns nothing for    */
+/*  this user — this screen just says WHY instead of an empty app.     */
+/* ------------------------------------------------------------------ */
+
+export function DeactivatedScreen({ email, onSignOut }) {
+  return (
+    <Shell>
+      <div className="mb-3 flex justify-center">
+        <Lock size={30} className="text-slate-400" />
+      </div>
+      <h2 className="mb-1 text-center text-lg font-bold text-slate-800">Account deactivated</h2>
+      <p className="mb-5 text-center text-xs text-slate-500">
+        The account {email ? <b>{email}</b> : "you're signed in with"} has been deactivated by Dr-Crown.
+        Your data is untouched — contact support to have it reactivated.
+      </p>
+      <button
+        onClick={onSignOut}
+        className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
+      >
+        Sign out
+      </button>
+    </Shell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Top-level gate                                                     */
 /*                                                                     */
 /*  Used to also gate on a Lab Station device-session heartbeat + OTP  */
@@ -1035,6 +1061,12 @@ export function AuthGate({ children }) {
   // the "set new password" screen before letting them into the app itself.
   if (auth.recovery) {
     return <ResetPasswordScreen onDone={auth.clearRecovery} />;
+  }
+
+  // Deactivated account (Phase 59) — before everything else: RLS has
+  // already gone dark for them, so no other screen makes sense.
+  if (auth.profile?.status === "inactive") {
+    return <DeactivatedScreen email={auth.session.user?.email} onSignOut={auth.signOut} />;
   }
 
   // Clinic invitation (Phase 57): runs BEFORE Onboarding on purpose —
