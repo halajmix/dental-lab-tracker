@@ -20,15 +20,28 @@
  *     (single use); the desktop hears it over Realtime.
  *
  * Fail-closed: no token, unknown token, expired, cancelled or already-used
- * -> refused. Limits: max 10 files per session, 10 MB each, images only
- * (the bucket enforces the same limits platform-side as a second layer).
+ * -> refused. Limits: max 10 files per session; photos 10 MB each, STL/PDF
+ * scan files 50 MB each (Phase 61) — the bucket enforces the same limits
+ * platform-side as a second layer.
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MAX_FILES = 10;
-const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const MAX_SCAN_BYTES = 50 * 1024 * 1024;
+const ALLOWED_IMAGES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const BUCKET = "case-photos";
+
+// Phase 61: STL/PDF ride the same session. Browsers report STL as
+// octet-stream or nothing, so kind is decided by extension and the
+// contentType we store is normalized — the bucket allowlist stays exact.
+function classify(file: File): { kind: "photo" | "scan"; contentType: string } | null {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (ext === "stl") return { kind: "scan", contentType: "model/stl" };
+  if (ext === "pdf") return { kind: "scan", contentType: "application/pdf" };
+  if (ALLOWED_IMAGES.has(file.type)) return { kind: "photo", contentType: file.type };
+  return null;
+}
 
 // The mobile page is served from the app's own origins only.
 const ORIGINS = new Set(["https://dr-crown.com", "https://www.dr-crown.com", "http://localhost:5173"]);
@@ -98,18 +111,22 @@ Deno.serve(async (req) => {
 
     const uploaded: { name: string; size: number; url: string; kind: string }[] = [];
     for (const [i, file] of files.entries()) {
-      if (file.size > MAX_BYTES) return json({ error: `"${file.name}" is over 10 MB.` }, 400, origin);
-      if (!ALLOWED.has(file.type)) return json({ error: `"${file.name}" is not a supported image.` }, 400, origin);
+      const cls = classify(file);
+      if (!cls) return json({ error: `"${file.name}" is not a supported photo, STL or PDF.` }, 400, origin);
+      const cap = cls.kind === "scan" ? MAX_SCAN_BYTES : MAX_PHOTO_BYTES;
+      if (file.size > cap) {
+        return json({ error: `"${file.name}" is over ${cls.kind === "scan" ? 50 : 10} MB.` }, 400, origin);
+      }
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
       const path = `${session.user_id}/${session.group_id}/mob-${Date.now().toString(36)}-${i}.${ext}`;
       const { error } = await admin.storage
         .from(BUCKET)
-        .upload(path, await file.arrayBuffer(), { contentType: file.type });
+        .upload(path, await file.arrayBuffer(), { contentType: cls.contentType });
       if (error) return json({ error: "Upload failed — please try again." }, 500, origin);
       // Stored in the app's canonical public-URL format: the PATH inside it is
       // what the client's signing layer extracts, same as desktop uploads.
       const { data: pub } = admin.storage.from(BUCKET).getPublicUrl(path);
-      uploaded.push({ name: file.name, size: file.size, url: pub.publicUrl, kind: "photo" });
+      uploaded.push({ name: file.name, size: file.size, url: pub.publicUrl, kind: cls.kind });
     }
 
     // Single use: append the batch and burn the token in one write. The

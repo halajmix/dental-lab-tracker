@@ -440,7 +440,24 @@ function CaseRxDetails({ c }) {
       <div className="divide-y divide-slate-100">
         {row("Deliver by", c.appointmentDate ? `${c.appointmentDate}${c.deliveryTime && c.deliveryTime !== "Anytime" ? ` · ${c.deliveryTime}` : ""}` : null)}
         {row("Included", includedSummary(p))}
-        {row("Scans", p.files?.filter((f) => f.kind === "scan").length ? `${p.files.filter((f) => f.kind === "scan").length} STL file(s)` : null)}
+        {row(
+          "Scans / Docs",
+          p.files?.filter((f) => f.kind === "scan").length ? (
+            // Phase 61: real uploads are downloadable via signed URLs; older
+            // metadata-only entries still render as plain names.
+            <span className="flex flex-col items-end gap-0.5">
+              {p.files.filter((f) => f.kind === "scan").map((f, i) =>
+                f.url ? (
+                  <SignedDownloadLink key={i} url={f.url} name={f.name} className="text-blue-600 hover:underline">
+                    {f.name}
+                  </SignedDownloadLink>
+                ) : (
+                  <span key={i}>{f.name}</span>
+                ),
+              )}
+            </span>
+          ) : null,
+        )}
         {row("Patient ID", c.patientId !== "PT-NEW" ? c.patientId : null)}
         {row("Patient WhatsApp", c.patientPhone || null)}
       </div>

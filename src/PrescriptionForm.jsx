@@ -30,7 +30,11 @@ import {
   Search,
   Smartphone,
 } from "lucide-react";
-import { uploadCasePhoto, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
+import { uploadCasePhoto, classifyRxFile, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
+
+// Phase 61: STL exports dwarf photos — 50 MB cap, enforced here and by
+// the bucket itself.
+const SCAN_MAX_BYTES = 50 * 1024 * 1024;
 import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
 import MobilePhotoQR from "./MobilePhotoQR.jsx";
@@ -1133,10 +1137,28 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
       if (t?.previewUrl) URL.revokeObjectURL(t.previewUrl);
       return p.filter((ph) => ph.id !== id);
     });
-  const addScans = (fileList) =>
-    setScans((prev) => [...prev, ...Array.from(fileList).map((f) => ({ name: f.name, size: f.size }))]);
+  // Phase 61: follow-up STL/PDF files are real uploads too (same group
+  // folder as the follow-up's photos).
+  const uploadOneScan = async (entryId, file) => {
+    try {
+      const url = await uploadCasePhoto(userId, groupId, file, classifyRxFile(file.name).contentType);
+      setScans((p) => p.map((s) => (s.id === entryId ? { ...s, url, uploading: false, error: null } : s)));
+    } catch (err) {
+      setScans((p) => p.map((s) => (s.id === entryId ? { ...s, uploading: false, error: err.message || "Upload failed" } : s)));
+    }
+  };
+  const addScans = (fileList) => {
+    const entries = Array.from(fileList).map((file) => ({
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      file, name: file.name, size: file.size, url: null,
+      uploading: file.size <= SCAN_MAX_BYTES,
+      error: file.size > SCAN_MAX_BYTES ? "Over 50 MB" : null,
+    }));
+    setScans((p) => [...p, ...entries]);
+    entries.filter((e) => e.uploading).forEach((e) => uploadOneScan(e.id, e.file));
+  };
 
-  const photosUploading = photos.some((p) => p.uploading);
+  const photosUploading = photos.some((p) => p.uploading) || scans.some((s) => s.uploading);
   const canSubmit = !!parent && !photosUploading && !saving && (instructions.trim() || photos.length || scans.length);
 
   const submit = async () => {
@@ -1153,7 +1175,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
         instructions: instructions.trim(),
         attachments: [
           ...photos.filter((p) => p.url).map((p) => ({ name: p.name, size: p.size, url: p.url, kind: "photo" })),
-          ...scans.map((s) => ({ name: s.name, size: s.size, kind: "scan" })),
+          ...scans.filter((s) => !s.error).map((s) => ({ name: s.name, size: s.size, kind: "scan", ...(s.url ? { url: s.url } : {}) })),
         ],
         pickupRequested,
         createdByRole: "dentist",
@@ -1302,24 +1324,25 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
               <MobilePhotoQR
                 open={qrOpen ? groupId : false}
                 onClose={() => setQrOpen(false)}
-                onPhotos={(list) =>
-                  setPhotos((p) => [
-                    ...p,
-                    ...list.map((m, i) => ({
-                      id: `mob-${Date.now().toString(36)}-${i}`,
-                      name: m.name || `phone-photo-${i + 1}.jpg`,
-                      size: m.size ?? 0,
-                      previewUrl: null,
-                      url: m.url,
-                      uploading: false,
-                      error: null,
-                    })),
-                  ])
-                }
+                onPhotos={(list) => {
+                  const entry = (m, i) => ({
+                    id: `mob-${Date.now().toString(36)}-${i}`,
+                    name: m.name || `phone-file-${i + 1}`,
+                    size: m.size ?? 0,
+                    previewUrl: null,
+                    url: m.url,
+                    uploading: false,
+                    error: null,
+                  });
+                  const ph = list.filter((m) => m.kind !== "scan").map(entry);
+                  const sc = list.filter((m) => m.kind === "scan").map(entry);
+                  if (ph.length) setPhotos((p) => [...p, ...ph]);
+                  if (sc.length) setScans((p) => [...p, ...sc]);
+                }}
               />
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                <ScanLine size={14} /> + Add STL scans
-                <input type="file" accept=".stl,.ply,.obj" multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
+                <ScanLine size={14} /> + Add STL / PDF
+                <input type="file" accept=".stl,.pdf" multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
               </label>
             </div>
             {photos.length > 0 && (
@@ -1338,10 +1361,17 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
             )}
             {scans.length > 0 && (
               <ul className="mt-2 space-y-1">
-                {scans.map((s, i) => (
-                  <li key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
-                    <span className="flex items-center gap-1.5"><ScanLine size={13} className="text-slate-400" /> {s.name}</span>
-                    <button type="button" onClick={() => setScans((prev) => prev.filter((_, j) => j !== i))} className="text-slate-400 hover:text-rose-600"><Trash2 size={13} /></button>
+                {scans.map((s) => (
+                  <li key={s.id ?? s.name} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {/\.pdf$/i.test(s.name) ? <FileText size={13} className="shrink-0 text-rose-500" /> : <ScanLine size={13} className="shrink-0 text-slate-400" />}
+                      <span className="truncate">{s.name}</span>
+                    </span>
+                    <span className="ml-2 flex shrink-0 items-center gap-2">
+                      {s.uploading && <Loader2 size={12} className="animate-spin text-blue-500" />}
+                      {s.error && <span className="font-semibold text-rose-600">{s.error}</span>}
+                      <button type="button" onClick={() => setScans((prev) => prev.filter((x) => x !== s))} className="text-slate-400 hover:text-rose-600"><Trash2 size={13} /></button>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -1365,7 +1395,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
           {submitError ? (
             <span className="flex items-start gap-1.5 text-xs font-semibold text-rose-700"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> {submitError}</span>
           ) : (
-            <span className="flex items-center gap-1.5 text-[11px] text-slate-500"><Info size={13} /> {photosUploading ? "Waiting for photos to finish uploading…" : "The lab is notified in-app; no charge is created."}</span>
+            <span className="flex items-center gap-1.5 text-[11px] text-slate-500"><Info size={13} /> {photosUploading ? "Waiting for files to finish uploading…" : "The lab is notified in-app; no charge is created."}</span>
           )}
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
             <button
@@ -1573,7 +1603,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     // Already-uploaded files come back as plain {name, size, url} entries —
     // no uploading/error flags, so the thumbnails render them as done.
     const files = p.files ?? [];
-    setScans(files.filter((f) => f.kind === "scan").map((f) => ({ name: f.name, size: f.size })));
+    setScans(files.filter((f) => f.kind === "scan").map((f, i) => ({ id: `existing-scan-${i}`, name: f.name, size: f.size, url: f.url ?? null })));
     setPhotos(files.filter((f) => f.kind === "photo" && f.url).map((f, i) => ({ id: `existing-${i}`, name: f.name, size: f.size, url: f.url })));
     setPhotoGroupId(crypto.randomUUID());
     setTouched(false);
@@ -1618,7 +1648,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     cartDraft: draft, cartDraftOpen: draftOpen, cartDraftTouched: draftTouched,
     labId, insertionDate, deliveryTime, pickupRequested,
     implantSystem, abutmentType, abutmentColor, notes,
-    scans: scans.map((f) => ({ name: f.name, size: f.size })),
+    scans: scans.filter((f) => !f.error).map((f) => ({ name: f.name, size: f.size, url: f.url ?? null })),
     photos: photos.filter((f) => f.url).map((f) => ({ name: f.name, size: f.size, url: f.url })),
     photoGroupId,
   });
@@ -1652,7 +1682,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setAbutmentType(d.abutmentType ?? "");
     setAbutmentColor(d.abutmentColor ?? "");
     setNotes(d.notes ?? "");
-    setScans((d.scans ?? []).map((f) => ({ name: f.name, size: f.size })));
+    setScans((d.scans ?? []).map((f, i) => ({ id: `draft-scan-${i}`, name: f.name, size: f.size, url: f.url ?? null })));
     setPhotos((d.photos ?? []).filter((f) => f.url).map((f, i) => ({ id: `draft-${i}`, name: f.name, size: f.size, url: f.url })));
     setPhotoGroupId(d.photoGroupId ?? crypto.randomUUID());
   };
@@ -1993,12 +2023,34 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   };
 
   /* ---------------- file handling ---------------- */
-  // STL scans are still simulated — there's no in-browser way to preview or
-  // usefully validate a mesh file, and the lab receiving a real intraoral
-  // scanner export isn't this app's job.
-  const addFiles = (fileList, setter) => {
-    const arr = Array.from(fileList).map((f) => ({ name: f.name, size: f.size }));
-    setter((prev) => [...prev, ...arr]);
+  // Phase 61: STL/PDF scan files are REAL uploads now, same private bucket
+  // and signed-URL rules as photos. Browsers report STL as octet-stream (or
+  // nothing), so the normalized contentType from classifyRxFile is what the
+  // bucket's exact mime allowlist accepts.
+  const uploadOneScan = async (entryId, file) => {
+    try {
+      const url = await uploadCasePhoto(userId, photoGroupId, file, classifyRxFile(file.name).contentType);
+      setScans((p) => p.map((s) => (s.id === entryId ? { ...s, url, uploading: false, error: null } : s)));
+    } catch (err) {
+      setScans((p) => p.map((s) => (s.id === entryId ? { ...s, uploading: false, error: err.message || "Upload failed" } : s)));
+    }
+  };
+  const addScans = (fileList) => {
+    const entries = Array.from(fileList).map((file) => ({
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      file,
+      name: file.name,
+      size: file.size,
+      url: null,
+      uploading: file.size <= SCAN_MAX_BYTES,
+      error: file.size > SCAN_MAX_BYTES ? "Over 50 MB" : null,
+    }));
+    setScans((p) => [...p, ...entries]);
+    entries.filter((e) => e.uploading).forEach((e) => uploadOneScan(e.id, e.file));
+  };
+  const retryScan = (entry) => {
+    setScans((p) => p.map((s) => (s.id === entry.id ? { ...s, uploading: true, error: null } : s)));
+    uploadOneScan(entry.id, entry.file);
   };
   // Clinical/shade photos are REAL uploads to Supabase Storage so the lab
   // sees the actual image, not just a filename. Each file gets a local
@@ -2042,23 +2094,25 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     });
   };
 
-  const photosUploading = photos.some((p) => p.uploading);
+  const photosUploading = photos.some((p) => p.uploading) || scans.some((s) => s.uploading);
 
-  // Photos that arrived from the phone via the QR session: already uploaded
+  // Files that arrived from the phone via the QR session: already uploaded
   // server-side, so they enter as finished entries (same shape as edit-mode
-  // rehydration) — no spinner, no retry state.
+  // rehydration) — no spinner, no retry state. Phase 61: the phone can send
+  // STL/PDF too — routed into the scan list by kind.
   const addMobilePhotos = (list) => {
-    setPhotos((p) => [
-      ...p,
-      ...list.map((m, i) => ({
-        id: `mob-${Date.now().toString(36)}-${i}`,
-        name: m.name || `phone-photo-${i + 1}.jpg`,
-        size: m.size ?? 0,
-        url: m.url,
-        uploading: false,
-        error: null,
-      })),
-    ]);
+    const entry = (m, i) => ({
+      id: `mob-${Date.now().toString(36)}-${i}`,
+      name: m.name || `phone-file-${i + 1}`,
+      size: m.size ?? 0,
+      url: m.url,
+      uploading: false,
+      error: null,
+    });
+    const incomingPhotos = list.filter((m) => m.kind !== "scan").map(entry);
+    const incomingScans = list.filter((m) => m.kind === "scan").map(entry);
+    if (incomingPhotos.length) setPhotos((p) => [...p, ...incomingPhotos]);
+    if (incomingScans.length) setScans((p) => [...p, ...incomingScans]);
   };
 
   /* ---------------- validation & submit ---------------- */
@@ -2097,7 +2151,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     implantSystem: "Implant brand",
     abutmentType: "Abutment size",
     insertionDate: "Deliver to Clinic date",
-    photosUploading: "Photos still uploading",
+    photosUploading: "Files still uploading",
   };
   const missing = Object.entries(errors)
     .filter(([, bad]) => bad)
@@ -2116,7 +2170,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       effTat,
       estReady: estReady ? iso(estReady) : null,
       files: [
-        ...scans.map((f) => ({ name: f.name, size: f.size, kind: "scan" })),
+        // failed scan uploads are dropped rather than shipping a dead name
+        ...scans.filter((f) => !f.error).map((f) => ({ name: f.name, size: f.size, kind: "scan", ...(f.url ? { url: f.url } : {}) })),
         ...photos.filter((f) => f.url).map((f) => ({ name: f.name, size: f.size, kind: "photo", url: f.url })),
       ],
       notes: notes.trim(),
@@ -2725,21 +2780,35 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           <section className="mt-6">
             <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach intraoral scans and clinical/shade photos for the lab" />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {/* STL scans */}
+              {/* STL scans + PDFs — real uploads since Phase 61 */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Intraoral Scans (STL)</div>
+                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Scans &amp; Documents (STL / PDF)</div>
                 <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
-                  <Plus size={13} /> Add STL scan file
-                  <input type="file" accept=".stl,.ply,.obj" multiple className="hidden" onChange={(e) => addFiles(e.target.files, setScans)} />
+                  <Plus size={13} /> Add STL / PDF file
+                  <input type="file" accept=".stl,.pdf" multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
                 </label>
                 <ul className="mt-3 space-y-1.5">
-                  {scans.length === 0 && <li className="text-[11px] text-slate-400">No scans attached.</li>}
-                  {scans.map((f, i) => (
-                    <li key={i} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs ring-1 ring-slate-200">
-                      <span className="flex min-w-0 items-center gap-1.5 text-slate-700"><ScanLine size={13} className="shrink-0 text-blue-500" /> <span className="truncate">{f.name}</span></span>
+                  {scans.length === 0 && <li className="text-[11px] text-slate-400">No files attached — up to 50 MB each; the phone QR below sends these too.</li>}
+                  {scans.map((f) => (
+                    <li key={f.id ?? f.name} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs ring-1 ring-slate-200">
+                      <span className="flex min-w-0 items-center gap-1.5 text-slate-700">
+                        {/\.pdf$/i.test(f.name) ? <FileText size={13} className="shrink-0 text-rose-500" /> : <ScanLine size={13} className="shrink-0 text-blue-500" />}
+                        <span className="truncate">{f.name}</span>
+                      </span>
                       <span className="ml-2 flex shrink-0 items-center gap-2">
-                        <span className="text-slate-400">{fmtSize(f.size)}</span>
-                        <button type="button" onClick={() => setScans((p) => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-rose-500"><Trash2 size={13} /></button>
+                        {f.uploading ? (
+                          <Loader2 size={12} className="animate-spin text-blue-500" />
+                        ) : f.error ? (
+                          <span className="flex items-center gap-1 font-semibold text-rose-600">
+                            {f.error}
+                            {f.file && f.size <= SCAN_MAX_BYTES && (
+                              <button type="button" onClick={() => retryScan(f)} className="underline">Retry</button>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">{fmtSize(f.size)}</span>
+                        )}
+                        <button type="button" onClick={() => setScans((p) => p.filter((s) => s !== f))} className="text-slate-400 hover:text-rose-500"><Trash2 size={13} /></button>
                       </span>
                     </li>
                   ))}

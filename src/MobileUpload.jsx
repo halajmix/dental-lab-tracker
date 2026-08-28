@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, ImagePlus, X, Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Camera, ImagePlus, FileUp, FileText, ScanLine, X, Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /*  /mobile-upload/<token> — the page a phone lands on after scanning   */
@@ -14,16 +14,19 @@ import { Camera, ImagePlus, X, Loader2, CheckCircle2, AlertTriangle, ShieldCheck
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mobile-upload`;
 const MAX_FILES = 10;
-const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const MAX_SCAN_BYTES = 50 * 1024 * 1024; // STL exports dwarf photos
+const isScanFile = (name) => /\.(stl|pdf)$/i.test(name || "");
 
 export default function MobileUpload({ token }) {
   // gate: checking | ready | invalid ; then upload: idle | sending | done | error
   const [gate, setGate] = useState("checking");
-  const [files, setFiles] = useState([]); // {id, file, previewUrl}
+  const [files, setFiles] = useState([]); // {id, file, previewUrl|null, scan}
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
+  const scanRef = useRef(null); // Phase 61: STL / PDF picker
 
   useEffect(() => {
     let alive = true;
@@ -41,12 +44,16 @@ export default function MobileUpload({ token }) {
     const incoming = Array.from(list ?? []);
     setFiles((prev) => {
       const room = MAX_FILES - prev.length;
-      const extra = incoming.slice(0, Math.max(0, room)).map((file) => ({
-        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-        file,
-        previewUrl: URL.createObjectURL(file),
-      }));
-      if (incoming.length > room) setError(`At most ${MAX_FILES} photos per upload.`);
+      const extra = incoming.slice(0, Math.max(0, room)).map((file) => {
+        const scan = isScanFile(file.name);
+        return {
+          id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+          file,
+          scan,
+          previewUrl: scan ? null : URL.createObjectURL(file),
+        };
+      });
+      if (incoming.length > room) setError(`At most ${MAX_FILES} files per upload.`);
       return [...prev, ...extra];
     });
   };
@@ -60,9 +67,9 @@ export default function MobileUpload({ token }) {
 
   const submit = async () => {
     if (files.length === 0) return;
-    const tooBig = files.find((f) => f.file.size > MAX_BYTES);
+    const tooBig = files.find((f) => f.file.size > (f.scan ? MAX_SCAN_BYTES : MAX_PHOTO_BYTES));
     if (tooBig) {
-      setError(`"${tooBig.file.name}" is over 10 MB — remove it and try again.`);
+      setError(`"${tooBig.file.name}" is over ${tooBig.scan ? 50 : 10} MB — remove it and try again.`);
       return;
     }
     setPhase("sending");
@@ -84,9 +91,9 @@ export default function MobileUpload({ token }) {
   const shell = (children) => (
     <div className="flex min-h-screen flex-col bg-slate-50">
       <header className="bg-white px-5 py-4 shadow-sm">
-        <h1 className="text-base font-black text-slate-800">Dr-Crown — Photo Upload</h1>
+        <h1 className="text-base font-black text-slate-800">Dr-Crown — Case Upload</h1>
         <p className="flex items-center gap-1 text-[11px] text-slate-400">
-          <ShieldCheck size={12} className="text-emerald-500" /> Secure one-time link · photos go straight to the case
+          <ShieldCheck size={12} className="text-emerald-500" /> Secure one-time link · files go straight to the case
         </p>
       </header>
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-5">{children}</main>
@@ -116,7 +123,7 @@ export default function MobileUpload({ token }) {
       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center">
         <CheckCircle2 size={30} className="mx-auto text-emerald-500" />
         <h2 className="mt-2 text-base font-bold text-emerald-800">
-          {files.length} photo{files.length === 1 ? "" : "s"} sent
+          {files.length} file{files.length === 1 ? "" : "s"} sent
         </h2>
         <p className="mt-1 text-xs text-emerald-700">
           They're already on the computer screen — you can close this page.
@@ -130,6 +137,7 @@ export default function MobileUpload({ token }) {
           input has no capture attr so the photo library opens instead. */}
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
       <input ref={galleryRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+      <input ref={scanRef} type="file" accept=".stl,.pdf" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
 
       <div className="grid grid-cols-2 gap-3">
         <button type="button" onClick={() => cameraRef.current?.click()} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-200 bg-white px-4 py-6 text-sm font-bold text-blue-700 shadow-sm active:bg-blue-50">
@@ -139,12 +147,22 @@ export default function MobileUpload({ token }) {
           <ImagePlus size={26} /> From gallery
         </button>
       </div>
+      <button type="button" onClick={() => scanRef.current?.click()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-white px-4 py-4 text-sm font-bold text-violet-700 shadow-sm active:bg-violet-50">
+        <FileUp size={22} /> STL scan / PDF file
+      </button>
 
       {files.length > 0 && (
         <div className="mt-4 grid grid-cols-3 gap-2">
           {files.map((f) => (
             <div key={f.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white">
-              <img src={f.previewUrl} alt="" className="h-28 w-full object-cover" />
+              {f.previewUrl ? (
+                <img src={f.previewUrl} alt="" className="h-28 w-full object-cover" />
+              ) : (
+                <div className="flex h-28 w-full flex-col items-center justify-center gap-1 px-2 text-violet-600">
+                  {/\.pdf$/i.test(f.file.name) ? <FileText size={24} /> : <ScanLine size={24} />}
+                  <span className="w-full truncate text-center text-[10px] font-semibold text-slate-600">{f.file.name}</span>
+                </div>
+              )}
               <button type="button" onClick={() => removeFile(f.id)} className="absolute right-1 top-1 rounded-full bg-slate-900/60 p-1 text-white active:bg-rose-600" aria-label="Remove">
                 <X size={13} />
               </button>
@@ -172,10 +190,10 @@ export default function MobileUpload({ token }) {
             <Loader2 size={18} className="animate-spin" /> Uploading…
           </>
         ) : (
-          <>Send {files.length > 0 ? `${files.length} photo${files.length === 1 ? "" : "s"}` : "photos"} to the case</>
+          <>Send {files.length > 0 ? `${files.length} file${files.length === 1 ? "" : "s"}` : "files"} to the case</>
         )}
       </button>
-      <p className="mt-2 text-center text-[11px] text-slate-400">Up to {MAX_FILES} photos, 10 MB each. This link works once.</p>
+      <p className="mt-2 text-center text-[11px] text-slate-400">Up to {MAX_FILES} files — photos 10 MB, STL/PDF 50 MB. This link works once.</p>
     </>
   );
 }

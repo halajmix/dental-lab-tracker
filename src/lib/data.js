@@ -887,7 +887,7 @@ export async function uploadAvatar(userId, file) {
 /*  the path is keyed by a client-side temp id rather than a case id.   */
 /* ------------------------------------------------------------------ */
 
-export async function uploadCasePhoto(userId, groupId, file) {
+export async function uploadCasePhoto(userId, groupId, file, contentType = null) {
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
   const stamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 6);
@@ -895,18 +895,33 @@ export async function uploadCasePhoto(userId, groupId, file) {
   // The public URL is derived from the path alone, so we know it before the
   // bytes are uploaded — the case can carry the final URL even offline.
   const publicUrl = supabase.storage.from("case-photos").getPublicUrl(path).data.publicUrl;
+  // Phase 61: STL/PDF scan files need a normalized contentType — browsers
+  // report STL as octet-stream (or nothing), which the bucket's exact mime
+  // allowlist rejects. storage-js IGNORES the contentType option for
+  // File/Blob bodies (it wraps them in multipart and the part carries the
+  // blob's OWN type), so the file itself is re-typed before upload.
+  const type = contentType || file.type || "image/jpeg";
+  const body = file.type === type ? file : new File([file], file.name, { type });
   try {
-    const { error: uploadError } = await supabase.storage.from("case-photos").upload(path, file);
+    const { error: uploadError } = await supabase.storage.from("case-photos").upload(path, body);
     if (uploadError) throw uploadError;
     return publicUrl;
   } catch (err) {
     if (isNetworkError(err)) {
       // Offline: stash the blob to upload later; the case already has the URL.
-      await putBlob({ path, bucket: "case-photos", blob: file, contentType: file.type || "image/jpeg" });
+      await putBlob({ path, bucket: "case-photos", blob: body, contentType: type });
       return publicUrl;
     }
     throw err; // a real rejection (size/mime/RLS) — let the form show it
   }
+}
+
+// Kind + normalized contentType for a Rx attachment, by extension.
+export function classifyRxFile(name) {
+  const ext = (String(name).split(".").pop() || "").toLowerCase();
+  if (ext === "stl") return { kind: "scan", contentType: "model/stl" };
+  if (ext === "pdf") return { kind: "scan", contentType: "application/pdf" };
+  return { kind: "photo", contentType: null };
 }
 
 // Drain the offline photo queue: upload each stashed blob to its path. A

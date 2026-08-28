@@ -1157,3 +1157,28 @@ select cron.schedule(
   '30 21 * * *',
   $job$ delete from rx_drafts where updated_at < now() - interval '1 day' $job$
 );
+
+/* --------------------------------------------------------------------- */
+/*  Phase 61 — real STL + PDF uploads (desktop and phone-QR)             */
+/*                                                                       */
+/*  Scans were metadata-only since day one ("STL real uploads" open      */
+/*  item). They now upload to the same private case-photos bucket as     */
+/*  clinical photos — same folders, same Phase 50 signed-URL rules, and  */
+/*  can_read_case_photo() already matches ANY prescription.files entry   */
+/*  by url regardless of kind, so no policy changes are needed. The      */
+/*  only server-side change is the bucket contract: Phase 50 pinned it   */
+/*  to images at 10 MB, which would reject every STL/PDF. Both upload    */
+/*  paths (desktop client and the mobile-upload Edge Function) send a    */
+/*  normalized contentType — model/stl or application/pdf — so the      */
+/*  allowlist stays exact, no octet-stream catch-all. 50 MB covers real  */
+/*  intraoral scanner exports; per-kind caps (photos 10 MB, scans 50 MB) */
+/*  are enforced in both clients and in the Edge Function.               */
+/* --------------------------------------------------------------------- */
+
+update storage.buckets
+   set file_size_limit = 52428800,
+       allowed_mime_types = array[
+         'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
+         'model/stl', 'application/pdf'
+       ]
+ where id = 'case-photos';
