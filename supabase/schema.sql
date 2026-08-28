@@ -5326,3 +5326,91 @@ drop trigger if exists profiles_guard_status on profiles;
 create trigger profiles_guard_status
   before update on profiles
   for each row execute function guard_profile_status();
+/* --------------------------------------------------------------------- */
+/*  Phase 60 — persisted Rx drafts with a 1-day lifetime                 */
+/*                                                                       */
+/*  The minimize-to-pill draft (3b0fefe) only lived in React state — a   */
+/*  reload or sign-out lost it. Now closing a started prescription       */
+/*  upserts the form state here (one draft per user, personal to the     */
+/*  author), and the app rehydrates it on next load. The 1-day limit is  */
+/*  enforced twice: the select policy hides drafts older than 24h from   */
+/*  the moment they expire, and a nightly pg_cron janitor deletes them.  */
+/*  updated_at is stamped server-side (client clocks don't get a vote),  */
+/*  and every save restarts the clock.                                   */
+/* --------------------------------------------------------------------- */
+
+create table if not exists rx_drafts (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  clinic_id uuid,
+  patient_name text not null default '',
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table rx_drafts enable row level security;
+
+-- Freshness lives in the read policy: an expired draft is already
+-- invisible before the janitor gets to it.
+drop policy if exists "rx_drafts_select" on rx_drafts;
+create policy "rx_drafts_select" on rx_drafts for select
+  using (user_id = auth.uid() and updated_at > now() - interval '1 day');
+
+drop policy if exists "rx_drafts_insert" on rx_drafts;
+create policy "rx_drafts_insert" on rx_drafts for insert
+  with check (user_id = auth.uid());
+
+-- Update stays possible on an expired row on purpose — the upsert that
+-- replaces yesterday's dead draft with today's new one is an UPDATE.
+drop policy if exists "rx_drafts_update" on rx_drafts;
+create policy "rx_drafts_update" on rx_drafts for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+drop policy if exists "rx_drafts_delete" on rx_drafts;
+create policy "rx_drafts_delete" on rx_drafts for delete
+  using (user_id = auth.uid());
+
+create or replace function rx_drafts_touch()
+returns trigger
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists rx_drafts_touch on rx_drafts;
+create trigger rx_drafts_touch
+  before insert or update on rx_drafts
+  for each row execute function rx_drafts_touch();
+
+-- Saving goes through a definer RPC: the freshness SELECT policy makes an
+-- EXPIRED row unreachable even to its owner (RLS applies SELECT visibility
+-- to upsert-conflicts and delete targets alike — verified empirically), so
+-- a plain client upsert would bounce off yesterday's dead draft. The RPC
+-- replaces whatever is there; the janitor reaps what nobody replaces.
+create or replace function save_rx_draft(p_clinic uuid, p_patient text, p_payload jsonb)
+returns void
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in to save a draft.';
+  end if;
+  insert into rx_drafts (user_id, clinic_id, patient_name, payload)
+  values (auth.uid(), p_clinic, coalesce(p_patient, ''), coalesce(p_payload, '{}'::jsonb))
+  on conflict (user_id) do update
+    set clinic_id = excluded.clinic_id,
+        patient_name = excluded.patient_name,
+        payload = excluded.payload;
+end;
+$$;
+
+-- Nightly janitor, 01:30 Muscat. cron.schedule by name is an upsert in
+-- pg_cron — safe to re-run.
+select cron.schedule(
+  'rx-drafts-cleanup',
+  '30 21 * * *',
+  $job$ delete from rx_drafts where updated_at < now() - interval '1 day' $job$
+);

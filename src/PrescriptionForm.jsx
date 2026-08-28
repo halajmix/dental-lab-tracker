@@ -30,7 +30,7 @@ import {
   Search,
   Smartphone,
 } from "lucide-react";
-import { uploadCasePhoto, estimateCasePrice } from "./lib/data.js";
+import { uploadCasePhoto, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
 import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
 import MobilePhotoQR from "./MobilePhotoQR.jsx";
@@ -1604,6 +1604,62 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setStep(1);
   };
 
+  /* ---- Phase 60: persisted draft (1-day server lifetime) ------------ */
+  // Closing a started NEW prescription saves the whole form state to
+  // rx_drafts (one per user); the next app load — any device — restores
+  // it into the minimized pill. Submitting or discarding deletes it; the
+  // server hides + deletes drafts older than 24 hours.
+  const serializeRxDraft = () => ({
+    notation, mode, selection,
+    patientName, patientId, patientPhone, showPatientExtras,
+    selectedClinicId, included, includedOther,
+    category, material, shadeGuide, vitaShade, stumpShade, arches,
+    caseMode, restorations,
+    cartDraft: draft, cartDraftOpen: draftOpen, cartDraftTouched: draftTouched,
+    labId, insertionDate, deliveryTime, pickupRequested,
+    implantSystem, abutmentType, abutmentColor, notes,
+    scans: scans.map((f) => ({ name: f.name, size: f.size })),
+    photos: photos.filter((f) => f.url).map((f) => ({ name: f.name, size: f.size, url: f.url })),
+    photoGroupId,
+  });
+  const hydrateRxDraft = (d) => {
+    setNotation(d.notation ?? "FDI");
+    setMode(d.mode ?? "unit");
+    setSelection(d.selection ?? {});
+    setPatientName(d.patientName ?? "");
+    setPatientId(d.patientId ?? "");
+    setPatientPhone(d.patientPhone ?? "");
+    setShowPatientExtras(!!d.showPatientExtras);
+    setSelectedClinicId(d.selectedClinicId ?? defaultClinicId);
+    setIncluded(d.included ?? []);
+    setIncludedOther(d.includedOther ?? "");
+    setCategory(d.category ?? "Crown - tooth");
+    setMaterial(d.material ?? CATEGORIES["Crown - tooth"].materials[0]);
+    setShadeGuide(d.shadeGuide ?? "Vita Classical");
+    setVitaShade(d.vitaShade ?? "A2");
+    setStumpShade(d.stumpShade ?? "N/A");
+    setArches(d.arches ?? "upper");
+    setCaseMode(d.caseMode ?? "restorations");
+    setRestorations(d.restorations ?? []);
+    setDraft(d.cartDraft ?? emptyDraft());
+    setDraftOpen(!!d.cartDraftOpen);
+    setDraftTouched(!!d.cartDraftTouched);
+    setLabId(d.labId ?? "");
+    setInsertionDate(d.insertionDate ?? "");
+    setDeliveryTime(d.deliveryTime ?? DELIVERY_TIMES[0]);
+    setPickupRequested(!!d.pickupRequested);
+    setImplantSystem(d.implantSystem ?? "");
+    setAbutmentType(d.abutmentType ?? "");
+    setAbutmentColor(d.abutmentColor ?? "");
+    setNotes(d.notes ?? "");
+    setScans((d.scans ?? []).map((f) => ({ name: f.name, size: f.size })));
+    setPhotos((d.photos ?? []).filter((f) => f.url).map((f, i) => ({ id: `draft-${i}`, name: f.name, size: f.size, url: f.url })));
+    setPhotoGroupId(d.photoGroupId ?? crypto.randomUUID());
+  };
+  const discardRxDraft = () => {
+    if (userId) deleteRxDraft(userId).catch(() => {});
+  };
+
   // A closed NEW-case form with content keeps living as a minimized pill —
   // the draft already survives close (state stays mounted); this just makes
   // that visible and offers resume / discard. Edits never minimize.
@@ -1625,12 +1681,59 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       draftTouched
     );
 
+  // Persist on close (Phase 60): open -> closed with content saves the
+  // draft; closed empty removes any stored one (so an emptied-out form
+  // can't resurrect stale data on the next load). Both fire-and-forget —
+  // pre-SQL schemas and offline just keep the in-memory pill behavior.
+  // MUST stay above the !open early return (hook-count — React #310).
+  const prevOpenRef = useRef(open);
+  useEffect(() => {
+    const was = prevOpenRef.current;
+    prevOpenRef.current = open;
+    if (!was || open || isEditing || wasEditingRef.current || !userId) return;
+    if (hasDraft) {
+      saveRxDraft({
+        clinicId: selectedClinicId || defaultClinicId || null,
+        patientName: patientName.trim(),
+        payload: serializeRxDraft(),
+      }).catch(() => {});
+    } else {
+      deleteRxDraft(userId).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Restore on load: one fetch per session, and only into an idle, empty,
+  // non-editing form — never over live typing.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const hasDraftRef = useRef(false);
+  hasDraftRef.current = hasDraft;
+  const draftFetchedRef = useRef(false);
+  useEffect(() => {
+    if (draftFetchedRef.current || !userId) return;
+    draftFetchedRef.current = true;
+    fetchMyRxDraft(userId)
+      .then((row) => {
+        if (!row?.payload) return;
+        if (openRef.current || hasDraftRef.current || wasEditingRef.current) return;
+        hydrateRxDraft(row.payload);
+      })
+      .catch(() => {}); // pre-Phase-60 schema / offline: no stored draft
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
   if (!open) {
     if (!hasDraft) return null;
     return (
       <div className="fixed bottom-4 right-4 z-40 flex max-w-[calc(100vw-2rem)] items-center gap-1 rounded-full border border-blue-200 bg-white py-1.5 pl-4 pr-1.5 shadow-lg">
         <FileText size={15} className="shrink-0 text-blue-600" />
-        <button type="button" onClick={onResume} className="min-w-0 truncate px-1 text-left text-sm font-semibold text-slate-700 hover:text-blue-700">
+        <button
+          type="button"
+          onClick={onResume}
+          title="Saved as a draft — kept for 1 day, then deleted automatically if not submitted"
+          className="min-w-0 truncate px-1 text-left text-sm font-semibold text-slate-700 hover:text-blue-700"
+        >
           Unfinished Rx{patientName.trim() ? ` — ${patientName.trim()}` : ""}
           <span className="ml-1.5 text-xs font-medium text-blue-600">Resume</span>
         </button>
@@ -1638,7 +1741,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           <span className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={() => { reset(); setDiscardConfirm(false); }}
+              onClick={() => { reset(); setDiscardConfirm(false); discardRxDraft(); }}
               className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-700"
             >
               Discard
@@ -2051,7 +2154,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       prescription,
     };
     if (isEditing) onSaveEdit(editing.id, payload);
-    else onSave(payload, opts);
+    else {
+      onSave(payload, opts);
+      discardRxDraft(); // submitted — the stored draft is obsolete
+    }
     reset();
     onClose();
   };
@@ -2804,7 +2910,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <span className="flex items-center justify-center gap-1 sm:order-0">
                     <button
                       type="button"
-                      onClick={() => { reset(); onClose(); }}
+                      onClick={() => { reset(); onClose(); discardRxDraft(); }}
                       className="rounded-lg bg-rose-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-rose-700 sm:py-2"
                     >
                       Discard

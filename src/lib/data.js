@@ -264,6 +264,37 @@ export async function setLabPublic(labId, isPublic) {
   if (!data?.length) throw new Error("Couldn't update the lab — super admin only.");
 }
 
+/* ------------------------------------------------------------------ */
+/*  Rx drafts (Phase 60) — one persisted draft per user, 1-day life.    */
+/* ------------------------------------------------------------------ */
+
+// null = no fresh draft (the select policy already hides expired ones).
+export async function fetchMyRxDraft(userId) {
+  const { data, error } = await supabase
+    .from("rx_drafts")
+    .select("payload, patient_name, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+// Definer RPC: a plain upsert can't replace an EXPIRED row (RLS applies
+// SELECT visibility to conflict targets), the RPC always can.
+export async function saveRxDraft({ clinicId, patientName, payload }) {
+  const { error } = await supabase.rpc("save_rx_draft", {
+    p_clinic: clinicId ?? null,
+    p_patient: patientName ?? "",
+    p_payload: payload,
+  });
+  if (error) throw error;
+}
+
+export async function deleteRxDraft(userId) {
+  const { error } = await supabase.from("rx_drafts").delete().eq("user_id", userId);
+  if (error) throw error;
+}
+
 // Invite-link landing info ({clinicName, email, role, status} or null).
 export async function peekClinicInvitation(token) {
   const { data, error } = await supabase.rpc("peek_clinic_invitation", { p_token: token });

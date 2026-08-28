@@ -31,6 +31,16 @@ create schema net;
 create function net.http_post(url text, headers jsonb default '{}'::jsonb, body jsonb default '{}'::jsonb)
 returns bigint language sql as $$ select 1::bigint $$;
 
+-- pg_cron stand-in (records the schedule; nothing fires in tests)
+create schema cron;
+create table cron.job (jobid bigserial primary key, jobname text unique, schedule text, command text);
+create function cron.schedule(job_name text, schedule text, command text)
+returns bigint language sql as $$
+  insert into cron.job (jobname, schedule, command) values (job_name, schedule, command)
+  on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command
+  returning jobid
+$$;
+
 create table clinics (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid references auth.users(id),
