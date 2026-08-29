@@ -1982,7 +1982,7 @@ function DentistDashboard({
                     </div>
                     {c.prescription?.restorations?.length ? (
                       <div className="mt-0.5 text-[11px] text-slate-400">
-                        {c.prescription.restorations.length} restoration{c.prescription.restorations.length === 1 ? "" : "s"}: {c.prescription.restorations.map((r) => r.category).join(", ")}
+                        {rxCategorySummary(c.prescription)}
                       </div>
                     ) : (
                       c.prescription?.category && <div className="mt-0.5 text-[11px] text-slate-400">{c.prescription.category}</div>
@@ -2178,6 +2178,24 @@ function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
 /* ------------------------------------------------------------------ */
 
 // Follow-up round kinds, in the words a technician would use.
+// A cart line covers several units (one crown per tooth); arch work with no
+// tooth list counts as one unit. Counting lines instead of units read as
+// "1 restoration" for a five-implant case entered on one line.
+const rxLineUnits = (r) => (Array.isArray(r?.teeth) && r.teeth.length ? r.teeth.length : 1);
+const rxUnitCount = (rx) => (rx?.restorations ?? []).reduce((n, r) => n + rxLineUnits(r), 0);
+const rxCategorySummary = (rx) => {
+  const counts = new Map();
+  for (const r of rx?.restorations ?? []) {
+    const cat = r?.category || "Restoration";
+    counts.set(cat, (counts.get(cat) || 0) + rxLineUnits(r));
+  }
+  // "Crown - implant \u00d7 5" = five crowns, but a bridge is ONE piece spanning
+  // its units \u2014 "Bridge - implant \u00d7 3" would read as three bridges.
+  return [...counts]
+    .map(([cat, n]) => (n <= 1 ? cat : /bridge/i.test(cat) ? `${cat} (${n} units)` : `${cat} \u00d7 ${n}`))
+    .join(", ");
+};
+
 const ROUND_KIND_LABEL = { update: "Update", stage: "Follow-up", remake: "Remake", adjustment: "Adjustment", refit: "Re-fit" };
 
 /**
@@ -2806,7 +2824,7 @@ function LabCaseCard({ c, clinicName, returningRound, onAdvance, onRevert, onOpe
             <span className="min-w-0">
               <span className="font-medium text-slate-400">Restorations </span>
               <span className="font-bold text-slate-700">
-                {c.prescription.restorations.length} ·{" "}
+                {rxUnitCount(c.prescription)} unit{rxUnitCount(c.prescription) === 1 ? "" : "s"} ·{" "}
                 {c.prescription.restorations
                   .map((r) => `${r.category} (${toothSummary({ teeth: r.teeth, notation: c.prescription.notation }) || "—"})`)
                   .join(", ")}

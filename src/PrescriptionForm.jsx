@@ -1061,8 +1061,18 @@ const FOLLOWUP_KINDS = [
 function caseWorkSummary(c) {
   const rx = c?.prescription ?? {};
   if (Array.isArray(rx.restorations) && rx.restorations.length) {
-    const cats = [...new Set(rx.restorations.map((r) => r?.category).filter(Boolean))];
-    return cats.join(", ") || `${rx.restorations.length} restoration(s)`;
+    // Per-category UNIT counts (one crown per tooth; arch work = 1 unit) —
+    // a single "Crown - implant" line with five teeth is five crowns.
+    const counts = new Map();
+    for (const r of rx.restorations) {
+      const cat = r?.category || "Restoration";
+      const units = Array.isArray(r?.teeth) && r.teeth.length ? r.teeth.length : 1;
+      counts.set(cat, (counts.get(cat) || 0) + units);
+    }
+    // A bridge is ONE piece spanning its units — "× 3" would read as three bridges.
+    return [...counts]
+      .map(([cat, n]) => (n <= 1 ? cat : /bridge/i.test(cat) ? `${cat} (${n} units)` : `${cat} × ${n}`))
+      .join(", ");
   }
   return rx.category || toothSummary(rx) || "—";
 }
