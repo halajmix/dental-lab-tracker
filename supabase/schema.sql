@@ -2908,7 +2908,7 @@ alter table login_events add column if not exists email text not null default ''
 create table if not exists case_rounds (
   id uuid primary key default gen_random_uuid(),
   parent_case_id text not null references cases(id) on delete cascade,
-  kind text not null check (kind in ('stage', 'remake', 'adjustment', 'refit')),
+  kind text not null check (kind in ('stage', 'update', 'remake', 'adjustment', 'refit')),
   instructions text not null default '',
   attachments jsonb not null default '[]'::jsonb,   -- [{name,size,url,kind:'photo'|'scan'}]
   pickup_requested boolean not null default false,
@@ -5438,3 +5438,18 @@ update storage.buckets
          'model/stl', 'application/pdf'
        ]
  where id = 'case-photos';
+
+/* --------------------------------------------------------------------- */
+/*  Phase 62 — 'update' follow-up kind                                   */
+/*                                                                       */
+/*  A follow-up that just adds files or instructions to work in          */
+/*  progress is neither a remake nor an adjustment — but the form        */
+/*  defaulted to "Remake", so a plain update got recorded (and shown to  */
+/*  the lab) as one. New neutral kind 'update', now the form's default.  */
+/*  Existing-database path: the inline CHECK above only applies to       */
+/*  fresh installs, so re-create the constraint here — safe to re-run.   */
+/* --------------------------------------------------------------------- */
+
+alter table case_rounds drop constraint if exists case_rounds_kind_check;
+alter table case_rounds add constraint case_rounds_kind_check
+  check (kind in ('stage', 'update', 'remake', 'adjustment', 'refit'));

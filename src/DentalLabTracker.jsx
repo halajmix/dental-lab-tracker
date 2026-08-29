@@ -2178,7 +2178,7 @@ function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
 /* ------------------------------------------------------------------ */
 
 // Follow-up round kinds, in the words a technician would use.
-const ROUND_KIND_LABEL = { stage: "Follow-up", remake: "Remake", adjustment: "Adjustment", refit: "Re-fit" };
+const ROUND_KIND_LABEL = { update: "Update", stage: "Follow-up", remake: "Remake", adjustment: "Adjustment", refit: "Re-fit" };
 
 /**
  * Delivery-pressure matrix: every live, unfinished case whose appointment is

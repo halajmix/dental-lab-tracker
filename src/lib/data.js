@@ -1202,8 +1202,9 @@ export async function insertCaseNote(caseId, authorRole, authorName, body) {
 /*  table (case_round_costs) that technicians can't read.                */
 /* ------------------------------------------------------------------ */
 
-export const ROUND_KINDS = ["stage", "remake", "adjustment", "refit"];
+export const ROUND_KINDS = ["update", "stage", "remake", "adjustment", "refit"];
 export const ROUND_KIND_LABELS = {
+  update: "Update",
   stage: "Next stage",
   remake: "Remake",
   adjustment: "Adjustment",

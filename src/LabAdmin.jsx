@@ -2518,6 +2518,7 @@ export function StaffPanel({ lab, meId }) {
 /* ================================================================== */
 
 const KIND_STYLE = {
+  update: "bg-blue-100 text-blue-700",
   stage: "bg-sky-100 text-sky-700",
   remake: "bg-rose-100 text-rose-700",
   adjustment: "bg-amber-100 text-amber-700",

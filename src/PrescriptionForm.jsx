@@ -1051,6 +1051,7 @@ function ModeToggle({ value, onChange }) {
 }
 
 const FOLLOWUP_KINDS = [
+  { id: "update", label: "Update case", hint: "Extra files or instructions for the case — nothing wrong with the work." },
   { id: "stage", label: "Next stage", hint: "The next lab stage of a multi-visit case (e.g. denture try-in)." },
   { id: "remake", label: "Remake", hint: "Redo the work — a fit failure or clinically unacceptable result." },
   { id: "adjustment", label: "Adjustment", hint: "A minor correction to delivered work." },
@@ -1073,7 +1074,7 @@ function caseWorkSummary(c) {
 function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", defaultClinicId = null, onSubmit, onClose, onSwitchToNew }) {
   const [query, setQuery] = useState("");
   const [parentId, setParentId] = useState(null);
-  const [kind, setKind] = useState("remake");
+  const [kind, setKind] = useState("update");
   const [instructions, setInstructions] = useState("");
   const [pickupRequested, setPickupRequested] = useState(false);
   const [photos, setPhotos] = useState([]);
@@ -1090,7 +1091,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open && !wasOpen.current) {
-      setQuery(""); setParentId(null); setKind("remake"); setInstructions("");
+      setQuery(""); setParentId(null); setKind("update"); setInstructions("");
       setPickupRequested(false); setPhotos([]); setScans([]);
       setGroupId(crypto.randomUUID()); setTouched(false); setSaving(false); setSubmitError("");
     }
@@ -1282,7 +1283,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
           {/* 2 · What kind of follow-up */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <p className="mb-2 text-sm font-bold text-slate-800">2 · What kind of follow-up?</p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {FOLLOWUP_KINDS.map((k) => (
                 <button
                   key={k.id}
