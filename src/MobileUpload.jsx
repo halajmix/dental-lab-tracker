@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Camera, ImagePlus, FileUp, FileText, ScanLine, X, Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react";
+import { scanPickerAccept } from "./lib/data.js";
 
 /* ------------------------------------------------------------------ */
 /*  /mobile-upload/<token> — the page a phone lands on after scanning   */
@@ -17,6 +18,10 @@ const MAX_FILES = 10;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const MAX_SCAN_BYTES = 50 * 1024 * 1024; // STL exports dwarf photos
 const isScanFile = (name) => /\.(stl|pdf)$/i.test(name || "");
+// With the accept filter off on iOS (see scanPickerAccept) the picker can
+// hand over anything — only images and scan files may join the upload.
+const isSupportedFile = (file) =>
+  isScanFile(file.name) || (file.type || "").startsWith("image/") || /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(file.name || "");
 
 export default function MobileUpload({ token }) {
   // gate: checking | ready | invalid ; then upload: idle | sending | done | error
@@ -41,7 +46,10 @@ export default function MobileUpload({ token }) {
 
   const addFiles = (list) => {
     setError("");
-    const incoming = Array.from(list ?? []);
+    const picked = Array.from(list ?? []);
+    const incoming = picked.filter(isSupportedFile);
+    const rejected = picked.find((f) => !isSupportedFile(f));
+    if (rejected) setError(`"${rejected.name}" isn't a photo, STL, or PDF — it was left out.`);
     setFiles((prev) => {
       const room = MAX_FILES - prev.length;
       const extra = incoming.slice(0, Math.max(0, room)).map((file) => {
@@ -137,7 +145,7 @@ export default function MobileUpload({ token }) {
           input has no capture attr so the photo library opens instead. */}
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
       <input ref={galleryRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
-      <input ref={scanRef} type="file" accept=".stl,.pdf" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+      <input ref={scanRef} type="file" accept={scanPickerAccept()} multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
 
       <div className="grid grid-cols-2 gap-3">
         <button type="button" onClick={() => cameraRef.current?.click()} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-200 bg-white px-4 py-6 text-sm font-bold text-blue-700 shadow-sm active:bg-blue-50">

@@ -924,6 +924,19 @@ export function classifyRxFile(name) {
   return { kind: "photo", contentType: null };
 }
 
+// accept value for the STL/PDF pickers. iOS has no built-in file type for
+// .stl, and its Files sheet greys out anything the accept list can't map to
+// a known type — so on Apple touch devices the filter must be omitted
+// entirely (STLs become selectable; the pickers' extension check still
+// rejects wrong files). iPadOS 13+ reports platform "MacIntel", hence the
+// maxTouchPoints probe. Read at call time so tests can spoof navigator.
+export function scanPickerAccept() {
+  const applePhone =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return applePhone ? undefined : ".stl,.pdf";
+}
+
 // Drain the offline photo queue: upload each stashed blob to its path. A
 // network failure keeps it for the next flush; a success (or an "already
 // exists" from a duplicate replay) removes it. Returns how many uploaded.

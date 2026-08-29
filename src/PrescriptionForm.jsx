@@ -30,7 +30,7 @@ import {
   Search,
   Smartphone,
 } from "lucide-react";
-import { uploadCasePhoto, classifyRxFile, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
+import { uploadCasePhoto, classifyRxFile, scanPickerAccept, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
 
 // Phase 61: STL exports dwarf photos — 50 MB cap, enforced here and by
 // the bucket itself.
@@ -1148,12 +1148,16 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
     }
   };
   const addScans = (fileList) => {
-    const entries = Array.from(fileList).map((file) => ({
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      file, name: file.name, size: file.size, url: null,
-      uploading: file.size <= SCAN_MAX_BYTES,
-      error: file.size > SCAN_MAX_BYTES ? "Over 50 MB" : null,
-    }));
+    const entries = Array.from(fileList).map((file) => {
+      // The accept filter is off on iOS (scanPickerAccept) — gate by extension here.
+      const typeOk = classifyRxFile(file.name).kind === "scan";
+      return {
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        file, name: file.name, size: file.size, url: null,
+        uploading: typeOk && file.size <= SCAN_MAX_BYTES,
+        error: !typeOk ? "Not an STL or PDF" : file.size > SCAN_MAX_BYTES ? "Over 50 MB" : null,
+      };
+    });
     setScans((p) => [...p, ...entries]);
     entries.filter((e) => e.uploading).forEach((e) => uploadOneScan(e.id, e.file));
   };
@@ -1342,7 +1346,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
               />
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
                 <ScanLine size={14} /> + Add STL / PDF
-                <input type="file" accept=".stl,.pdf" multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
+                <input type="file" accept={scanPickerAccept()} multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
               </label>
             </div>
             {photos.length > 0 && (
@@ -2036,15 +2040,19 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     }
   };
   const addScans = (fileList) => {
-    const entries = Array.from(fileList).map((file) => ({
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      file,
-      name: file.name,
-      size: file.size,
-      url: null,
-      uploading: file.size <= SCAN_MAX_BYTES,
-      error: file.size > SCAN_MAX_BYTES ? "Over 50 MB" : null,
-    }));
+    const entries = Array.from(fileList).map((file) => {
+      // The accept filter is off on iOS (scanPickerAccept) — gate by extension here.
+      const typeOk = classifyRxFile(file.name).kind === "scan";
+      return {
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        file,
+        name: file.name,
+        size: file.size,
+        url: null,
+        uploading: typeOk && file.size <= SCAN_MAX_BYTES,
+        error: !typeOk ? "Not an STL or PDF" : file.size > SCAN_MAX_BYTES ? "Over 50 MB" : null,
+      };
+    });
     setScans((p) => [...p, ...entries]);
     entries.filter((e) => e.uploading).forEach((e) => uploadOneScan(e.id, e.file));
   };
@@ -2785,7 +2793,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Scans &amp; Documents (STL / PDF)</div>
                 <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
                   <Plus size={13} /> Add STL / PDF file
-                  <input type="file" accept=".stl,.pdf" multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
+                  <input type="file" accept={scanPickerAccept()} multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
                 </label>
                 <ul className="mt-3 space-y-1.5">
                   {scans.length === 0 && <li className="text-[11px] text-slate-400">No files attached — up to 50 MB each; the phone QR below sends these too.</li>}
