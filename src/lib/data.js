@@ -930,14 +930,20 @@ export function classifyRxFile(name) {
 // still recognizing PDF, so only PDFs stay selectable. On mobile the filter
 // must be omitted entirely (STLs become selectable; the pickers' extension
 // check still rejects wrong files); desktop browsers handle extension
-// filters fine and keep the nicer filtered dialog. iPadOS 13+ reports
-// platform "MacIntel", hence the maxTouchPoints probe. Read at call time so
-// tests can spoof navigator.
+// filters fine and keep the nicer filtered dialog.
 export function scanPickerAccept() {
-  const mobile =
+  return isMobileDevice() ? undefined : ".stl,.pdf";
+}
+
+// Phone/tablet check, shared by the picker quirk above and by desktop-only
+// UI like the "From phone (QR)" bridge (pointless when you're already on
+// the phone). iPadOS 13+ reports platform "MacIntel", hence the
+// maxTouchPoints probe. Read at call time so tests can spoof navigator.
+export function isMobileDevice() {
+  return (
     /iPad|iPhone|iPod|Android/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  return mobile ? undefined : ".stl,.pdf";
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
 }
 
 // Drain the offline photo queue: upload each stashed blob to its path. A

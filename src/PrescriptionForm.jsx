@@ -30,7 +30,7 @@ import {
   Search,
   Smartphone,
 } from "lucide-react";
-import { uploadCasePhoto, classifyRxFile, scanPickerAccept, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
+import { uploadCasePhoto, classifyRxFile, scanPickerAccept, isMobileDevice, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
 
 // Phase 61: STL exports dwarf photos — 50 MB cap, enforced here and by
 // the bucket itself.
@@ -1323,9 +1323,11 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
                 <ImageIcon size={14} /> + Add photos
                 <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
               </label>
-              <button type="button" onClick={() => setQrOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50">
-                <Smartphone size={14} /> From phone (QR)
-              </button>
+              {!isMobileDevice() && (
+                <button type="button" onClick={() => setQrOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50">
+                  <Smartphone size={14} /> From phone (QR)
+                </button>
+              )}
               <MobilePhotoQR
                 open={qrOpen ? groupId : false}
                 onClose={() => setQrOpen(false)}
@@ -2838,9 +2840,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                         chooser. Plain accept="image/*" gives the normal picker. */}
                     <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
                   </label>
-                  <button type="button" onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
-                    <Smartphone size={13} /> From phone (QR)
-                  </button>
+                  {!isMobileDevice() && (
+                    <button type="button" onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
+                      <Smartphone size={13} /> From phone (QR)
+                    </button>
+                  )}
                 </span>
                 <MobilePhotoQR open={qrOpen ? photoGroupId : false} onClose={() => setQrOpen(false)} onPhotos={addMobilePhotos} />
                 {photos.length === 0 ? (
