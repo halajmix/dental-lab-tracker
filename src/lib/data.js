@@ -924,17 +924,20 @@ export function classifyRxFile(name) {
   return { kind: "photo", contentType: null };
 }
 
-// accept value for the STL/PDF pickers. iOS has no built-in file type for
-// .stl, and its Files sheet greys out anything the accept list can't map to
-// a known type — so on Apple touch devices the filter must be omitted
-// entirely (STLs become selectable; the pickers' extension check still
-// rejects wrong files). iPadOS 13+ reports platform "MacIntel", hence the
-// maxTouchPoints probe. Read at call time so tests can spoof navigator.
+// accept value for the STL/PDF pickers. Mobile OSes have no built-in file
+// type for .stl and their pickers grey out (iOS Files) or hide (some Android
+// file managers) anything the accept list can't map to a known type — while
+// still recognizing PDF, so only PDFs stay selectable. On mobile the filter
+// must be omitted entirely (STLs become selectable; the pickers' extension
+// check still rejects wrong files); desktop browsers handle extension
+// filters fine and keep the nicer filtered dialog. iPadOS 13+ reports
+// platform "MacIntel", hence the maxTouchPoints probe. Read at call time so
+// tests can spoof navigator.
 export function scanPickerAccept() {
-  const applePhone =
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  const mobile =
+    /iPad|iPhone|iPod|Android/.test(navigator.userAgent) ||
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  return applePhone ? undefined : ".stl,.pdf";
+  return mobile ? undefined : ".stl,.pdf";
 }
 
 // Drain the offline photo queue: upload each stashed blob to its path. A
