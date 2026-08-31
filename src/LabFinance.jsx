@@ -33,6 +33,8 @@ import {
   deleteExpense,
   importFinanceRows,
   logActivity,
+  rxUnitCount,
+  rxCategorySummary,
 } from "./lib/data.js";
 import { downloadStatementPdf } from "./lib/statementPdf.js";
 import { IMPORT_CATEGORIES, readWorkbookRows, mapImportRows } from "./lib/financeImport.js";
@@ -235,6 +237,34 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
 
   const clinicLabel = (s) => clinicsById[s.clinicId]?.name ?? s.clinicName ?? "Unknown clinic";
 
+  // Statements GENERATED from completed cases store no line_items — their
+  // detail lives in the linked cases (cases.statement_id). Derive display
+  // rows so the on-screen expansion and search match imported history.
+  // Price stays "—": the platform prices per case, not per line. Exports
+  // and PDFs already itemize from the linked cases and are untouched.
+  const derivedLines = useMemo(() => {
+    const m = new Map();
+    for (const c of cases ?? []) {
+      if (!c.statementId) continue;
+      const cancelled = c.cancelStatus === "cancelled";
+      const summary = rxCategorySummary(c.prescription);
+      const d = completedAt(c) ?? (c.createdAt ? new Date(c.createdAt) : null);
+      const row = {
+        date: d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` : null,
+        invoice: c.invoiceNumber || "",
+        patient: c.patientName || "",
+        dentist: clinicsById[c.clinicId]?.dentist || "",
+        procedure: cancelled ? `Cancellation fee${summary ? ` — ${summary}` : ""}` : summary,
+        units: rxUnitCount(c.prescription) || 1,
+        price: null,
+        amount: cancelled ? (c.cancellationFee ?? 0) : (c.totalPrice ?? 0),
+      };
+      if (!m.has(c.statementId)) m.set(c.statementId, []);
+      m.get(c.statementId).push(row);
+    }
+    return m;
+  }, [cases, clinicsById]);
+
   const downloadPdf = async (s) => {
     const included = cases
       .filter((c) => c.statementId === s.id)
@@ -256,12 +286,13 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     const m = new Map();
     for (const s of statements) {
       const parts = [clinicLabel(s), monthLabel(s.month), s.status];
-      for (const li of s.lineItems ?? []) parts.push(li.invoice, li.patient, li.dentist, li.procedure);
+      const lines = s.lineItems?.length ? s.lineItems : derivedLines.get(s.id) ?? [];
+      for (const li of lines) parts.push(li.invoice, li.patient, li.dentist, li.procedure);
       m.set(s.id, parts.filter(Boolean).join(" ").toLowerCase());
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statements, clinicsById]);
+  }, [statements, clinicsById, derivedLines]);
 
   const years = useMemo(
     () => [...new Set(statements.map((s) => s.month.slice(0, 4)))].sort().reverse(),
@@ -634,7 +665,8 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
               <tbody>
                 {pageRows.map((s) => {
                   const paid = paidByStatement[s.id] ?? 0;
-                  const hasLines = s.lineItems?.length > 0;
+                  const shownLines = s.lineItems?.length ? s.lineItems : derivedLines.get(s.id) ?? [];
+                  const hasLines = shownLines.length > 0;
                   const open = openStatementId === s.id;
                   const payable = (statementMeta.get(s.id)?.remaining ?? 0) > 0;
                   return (
@@ -697,7 +729,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {s.lineItems.map((li, i) => (
+                                  {shownLines.map((li, i) => (
                                     <tr key={i} className="border-t border-slate-200/70">
                                       <td className="py-1.5 pr-3 whitespace-nowrap text-slate-500">
                                         {li.date ? new Date(li.date + "T00:00:00").toLocaleDateString("en-GB") : "—"}

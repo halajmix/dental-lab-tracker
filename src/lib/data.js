@@ -1208,6 +1208,27 @@ export async function insertCaseNote(caseId, authorRole, authorName, body) {
 /*  table (case_round_costs) that technicians can't read.                */
 /* ------------------------------------------------------------------ */
 
+// Per-category unit summary for an Rx ("Crown - implant \u00d7 5"): one crown
+// per tooth; a bridge is ONE piece spanning its units, so it reads
+// "(3 units)"; arch work with no tooth list counts as one unit. Handles both
+// the cart shape (restorations[]) and the legacy single-item shape.
+export const rxLineUnits = (r) => (Array.isArray(r?.teeth) && r.teeth.length ? r.teeth.length : 1);
+export const rxUnitCount = (rx) =>
+  Array.isArray(rx?.restorations) && rx.restorations.length
+    ? rx.restorations.reduce((n, r) => n + rxLineUnits(r), 0)
+    : rxLineUnits(rx);
+export const rxCategorySummary = (rx) => {
+  if (!Array.isArray(rx?.restorations) || !rx.restorations.length) return rx?.category || "";
+  const counts = new Map();
+  for (const r of rx.restorations) {
+    const cat = r?.category || "Restoration";
+    counts.set(cat, (counts.get(cat) || 0) + rxLineUnits(r));
+  }
+  return [...counts]
+    .map(([cat, n]) => (n <= 1 ? cat : /bridge/i.test(cat) ? `${cat} (${n} units)` : `${cat} \u00d7 ${n}`))
+    .join(", ");
+};
+
 export const ROUND_KINDS = ["update", "stage", "remake", "adjustment", "refit"];
 export const ROUND_KIND_LABELS = {
   update: "Update",

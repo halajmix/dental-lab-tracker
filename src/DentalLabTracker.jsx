@@ -96,6 +96,8 @@ import {
   resolveCaseRound,
   subscribeCaseRounds,
   ROUND_KIND_LABELS,
+  rxUnitCount,
+  rxCategorySummary,
   applyStage,
   fetchCase,
   buildLocalCase,
@@ -2178,24 +2180,6 @@ function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
 /* ------------------------------------------------------------------ */
 
 // Follow-up round kinds, in the words a technician would use.
-// A cart line covers several units (one crown per tooth); arch work with no
-// tooth list counts as one unit. Counting lines instead of units read as
-// "1 restoration" for a five-implant case entered on one line.
-const rxLineUnits = (r) => (Array.isArray(r?.teeth) && r.teeth.length ? r.teeth.length : 1);
-const rxUnitCount = (rx) => (rx?.restorations ?? []).reduce((n, r) => n + rxLineUnits(r), 0);
-const rxCategorySummary = (rx) => {
-  const counts = new Map();
-  for (const r of rx?.restorations ?? []) {
-    const cat = r?.category || "Restoration";
-    counts.set(cat, (counts.get(cat) || 0) + rxLineUnits(r));
-  }
-  // "Crown - implant \u00d7 5" = five crowns, but a bridge is ONE piece spanning
-  // its units \u2014 "Bridge - implant \u00d7 3" would read as three bridges.
-  return [...counts]
-    .map(([cat, n]) => (n <= 1 ? cat : /bridge/i.test(cat) ? `${cat} (${n} units)` : `${cat} \u00d7 ${n}`))
-    .join(", ");
-};
-
 const ROUND_KIND_LABEL = { update: "Update", stage: "Follow-up", remake: "Remake", adjustment: "Adjustment", refit: "Re-fit" };
 
 /**
