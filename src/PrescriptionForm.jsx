@@ -2820,12 +2820,21 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               {/* STL scans + PDFs — real uploads since Phase 61 */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Scans &amp; Documents (STL / PDF)</div>
-                <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
-                  <Plus size={13} /> Add STL / PDF file
-                  <input type="file" accept={scanPickerAccept()} multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
-                </label>
+                <span className="flex flex-wrap items-center gap-3">
+                  <label className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
+                    <Plus size={13} /> Add STL / PDF file
+                    <input type="file" accept={scanPickerAccept()} multiple className="hidden" onChange={(e) => { addScans(e.target.files); e.target.value = ""; }} />
+                  </label>
+                  {/* Same QR session as the photos card — the phone page's
+                      STL/PDF picker routes kind=scan entries back here. */}
+                  {!isMobileDevice() && (
+                    <button type="button" onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
+                      <Smartphone size={13} /> From phone (QR)
+                    </button>
+                  )}
+                </span>
                 <ul className="mt-3 space-y-1.5">
-                  {scans.length === 0 && <li className="text-[11px] text-slate-400">No files attached — up to 50 MB each; the phone QR below sends these too.</li>}
+                  {scans.length === 0 && <li className="text-[11px] text-slate-400">No files attached — up to 50 MB each.</li>}
                   {scans.map((f) => (
                     <li key={f.id ?? f.name} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs ring-1 ring-slate-200">
                       <span className="flex min-w-0 items-center gap-1.5 text-slate-700">

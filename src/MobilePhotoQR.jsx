@@ -101,7 +101,7 @@ export default function MobilePhotoQR({ open, onClose, onPhotos }) {
       <div className="w-full max-w-xs rounded-2xl bg-white p-5 text-center shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
-            <Smartphone size={15} className="text-blue-600" /> Photos from your phone
+            <Smartphone size={15} className="text-blue-600" /> Photos &amp; files from your phone
           </h3>
           <button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label="Close">
             <X size={16} />
