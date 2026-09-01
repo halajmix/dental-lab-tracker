@@ -1043,15 +1043,30 @@ export function setActivityContext(ctx) {
   activityCtx = ctx; // { userId, name, email, role, orgName }
 }
 
+// View-as detection: impersonate.js stashes the admin session under this
+// key (importing it here would be circular — impersonate.js imports from
+// data.js). While the stash exists, every audit row is authored by the
+// SUPER ADMIN acting through the account, and must say so — support
+// actions must never be attributed to the real staff member.
+const VIEW_AS_KEY = "dr_crown_admin_stash";
+const viewAsActor = () => {
+  try {
+    return sessionStorage.getItem(VIEW_AS_KEY) ? { name: "Super Admin", email: "", role: "super-admin" } : null;
+  } catch {
+    return null;
+  }
+};
+
 export async function logActivity(action, detail = "") {
   const ctx = activityCtx;
   if (!ctx?.userId) return;
+  const actor = viewAsActor();
   try {
     await supabase.from("login_events").insert({
       user_id: ctx.userId,
-      name: ctx.name ?? "",
-      email: ctx.email ?? "",
-      role: ctx.role ?? "",
+      name: actor ? actor.name : ctx.name ?? "",
+      email: actor ? actor.email : ctx.email ?? "",
+      role: actor ? actor.role : ctx.role ?? "",
       org_name: ctx.orgName ?? "",
       action,
       detail: String(detail).slice(0, 300),
@@ -1063,12 +1078,15 @@ export async function logActivity(action, detail = "") {
 
 export async function logLoginEvent({ userId, name, email, role, orgName }) {
   setActivityContext({ userId, name, email, role, orgName });
+  // A View-as session begins with this very sign-in — the org's log must
+  // show the Super Admin arriving, not a normal staff sign-in.
+  const actor = viewAsActor();
   try {
     await supabase.from("login_events").insert({
       user_id: userId,
-      name: name ?? "",
-      email: email ?? "",
-      role: role ?? "",
+      name: actor ? actor.name : name ?? "",
+      email: actor ? actor.email : email ?? "",
+      role: actor ? actor.role : role ?? "",
       org_name: orgName ?? "",
       action: "sign-in",
     });

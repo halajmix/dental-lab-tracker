@@ -16,6 +16,8 @@ import { adminGetImpersonationToken } from "./data.js";
  * drops back to a normal logged-out/admin state rather than leaving a stuck
  * impersonation across restarts.
  */
+// NOTE: data.js reads this key directly (VIEW_AS_KEY) to stamp audit rows
+// as "Super Admin" during View-as — keep the two literals in sync.
 const STASH_KEY = "dr_crown_admin_stash";
 const CHANGE_EVENT = "dr-crown-impersonation-change";
 
