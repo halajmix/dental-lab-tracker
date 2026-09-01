@@ -208,19 +208,37 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
 
   const aging = useMemo(() => {
     const buckets = {
-      "0–30 days": { value: 0, count: 0 },
-      "31–60 days": { value: 0, count: 0 },
-      "60+ days": { value: 0, count: 0 },
+      "0–30 days": { value: 0, count: 0, months: new Set() },
+      "31–60 days": { value: 0, count: 0, months: new Set() },
+      "60+ days": { value: 0, count: 0, months: new Set() },
     };
-    for (const { remaining, bucket } of statementMeta.values()) {
-      if (bucket) {
-        buckets[bucket].value += remaining;
-        buckets[bucket].count += 1;
+    for (const s of statements) {
+      const meta = statementMeta.get(s.id);
+      if (meta?.bucket) {
+        buckets[meta.bucket].value += meta.remaining;
+        buckets[meta.bucket].count += 1;
+        buckets[meta.bucket].months.add(s.month);
       }
     }
     return buckets;
-  }, [statementMeta]);
+  }, [statements, statementMeta]);
   const outstanding = Object.values(aging).reduce((a, b) => a + b.value, 0);
+
+  // Tile headline: the billed month(s) actually sitting in the bucket —
+  // "August 2026", not "0–30 days". An empty bucket falls back to the
+  // calendar month its day range would cover today.
+  const bucketTitle = (bucketLabel, months) => {
+    const ms = [...months].sort();
+    if (!ms.length) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - ({ "0–30 days": 1, "31–60 days": 2, "60+ days": 3 })[bucketLabel]);
+      const base = d.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+      return bucketLabel === "60+ days" ? `${base} & older` : base;
+    }
+    if (bucketLabel === "60+ days") return `${monthLabel(ms[ms.length - 1])} & older`;
+    return ms.map(monthLabel).join(" + ");
+  };
 
   // Phase 63 monthly summary: production vs collections vs still-owed for
   // one selected month. "Work done" excludes opening-balance statements
@@ -566,7 +584,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
 
       {/* Aging — each card doubles as a quick-filter for the table below */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {Object.entries(aging).map(([label, { value, count }]) => {
+        {Object.entries(aging).map(([label, { value, count, months }]) => {
           const active = agingFilter === label;
           return (
             <button
@@ -578,10 +596,10 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                 active ? "border-blue-400 ring-2 ring-blue-200" : "border-slate-200 hover:border-blue-300"
               }`}
             >
-              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Outstanding {label}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Outstanding — {bucketTitle(label, months)}</p>
               <p className={`mt-1.5 text-xl font-bold ${value > 0 && label === "60+ days" ? "text-rose-600" : "text-slate-800"}`}>{fmtOMR(value)}</p>
               <p className="mt-0.5 text-[11px] font-medium text-slate-400">
-                {count} statement{count === 1 ? "" : "s"}{active ? " — tap to clear filter" : ""}
+                {count} statement{count === 1 ? "" : "s"} · {label}{active ? " — tap to clear filter" : ""}
               </p>
             </button>
           );
@@ -761,7 +779,15 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                           </span>
                         </td>
                         <td className="py-2.5 pr-3 text-right font-semibold text-slate-800 whitespace-nowrap">{fmtOMR(s.total)}</td>
-                        <td className="py-2.5 pr-3 text-right text-slate-600 whitespace-nowrap">{fmtOMR(paid)}</td>
+                        {/* Historical statements were imported already settled, with no
+                            per-payment records — "0 OMR paid" on a Paid row reads like a
+                            contradiction, so show a dash instead. */}
+                        <td
+                          className="py-2.5 pr-3 text-right text-slate-600 whitespace-nowrap"
+                          title={s.status === "paid" && paid === 0 ? "Settled before Dr-Crown — no payment record" : undefined}
+                        >
+                          {s.status === "paid" && paid === 0 ? "—" : fmtOMR(paid)}
+                        </td>
                         <td className="py-2.5 pr-3">
                           <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${STATUS_BADGE[s.status]}`}>{s.status}</span>
                         </td>
