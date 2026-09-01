@@ -18,7 +18,10 @@
  *                    row otherwise survives its owner (re-claimable by design)
  *   delete-org     — { orgType: "clinic"|"lab", id } -> deletes an org row
  *                    directly (for unclaimed/orphaned test rows with no login)
- *   delete-case    — { caseId } -> deletes one case row
+ *   delete-case    — { caseId } -> FULL case removal: its storage objects
+ *                    (Rx photos/scans + follow-up attachments), the row
+ *                    (notes/rounds/round costs cascade), and its billing
+ *                    statement re-summed — or deleted when left empty
  *   set-lab-status — { labId, status: "active"|"suspended" } -> tenant on/off;
  *                    a suspended lab's members lose all data access via
  *                    my_lab_id() until re-activated. Also how a 'pending'
@@ -147,9 +150,66 @@ Deno.serve(async (req) => {
       case "delete-case": {
         const caseId = String(body.caseId ?? "");
         if (!caseId) return json({ error: "caseId required" }, 400);
+        // Load everything needed for a FULL cleanup before the row is gone:
+        // notes / rounds / round costs cascade with the row, but storage
+        // objects and the billing statement do not.
+        const { data: c, error: cErr } = await admin
+          .from("cases").select("id, statement_id, prescription").eq("id", caseId).maybeSingle();
+        if (cErr) throw cErr;
+        if (!c) return json({ error: "case not found" }, 404);
+        const { data: rounds } = await admin
+          .from("case_rounds").select("attachments").eq("parent_case_id", caseId);
+
+        // Every attachment url (Rx photos/scans + follow-up rounds) points
+        // into the case-photos bucket — derive the object paths and remove.
+        const paths = new Set<string>();
+        const collect = (arr: unknown) => {
+          if (!Array.isArray(arr)) return;
+          for (const f of arr) {
+            const url = (f as { url?: unknown })?.url;
+            const m = typeof url === "string" ? url.match(/\/case-photos\/([^?]+)/) : null;
+            if (m) paths.add(decodeURIComponent(m[1]));
+          }
+        };
+        const rx = (c.prescription ?? {}) as { files?: unknown[]; photos?: unknown[] };
+        collect(rx.files);
+        collect(rx.photos);
+        for (const r of rounds ?? []) collect((r as { attachments?: unknown[] }).attachments);
+        let removedFiles = 0;
+        const all = [...paths];
+        for (let i = 0; i < all.length; i += 50) {
+          const batch = all.slice(i, i + 50);
+          const { error: rmErr } = await admin.storage.from("case-photos").remove(batch);
+          if (!rmErr) removedFiles += batch.length;
+        }
+
         const { error } = await admin.from("cases").delete().eq("id", caseId);
         if (error) throw error;
-        return json({ ok: true });
+
+        // Billing: cases.statement_id is ON DELETE SET NULL, so a billed
+        // case would leave its statement's stored total too high. Re-sum
+        // from the cases still linked; a statement left with no cases and
+        // no imported line items is deleted outright.
+        if (c.statement_id) {
+          const { data: rest } = await admin
+            .from("cases")
+            .select("total_price, cancellation_fee, cancel_status")
+            .eq("statement_id", c.statement_id);
+          const sum = (rest ?? []).reduce(
+            (a, r) => a + Number(r.cancel_status === "cancelled" ? r.cancellation_fee ?? 0 : r.total_price ?? 0),
+            0,
+          );
+          const { data: st } = await admin
+            .from("clinic_statements").select("line_items").eq("id", c.statement_id).maybeSingle();
+          const hasLines = Array.isArray(st?.line_items) && st.line_items.length > 0;
+          if ((rest ?? []).length === 0 && !hasLines) {
+            await admin.from("clinic_statements").delete().eq("id", c.statement_id);
+          } else {
+            await admin.from("clinic_statements").update({ total: sum }).eq("id", c.statement_id);
+            await admin.rpc("statement_recompute", { p_sid: c.statement_id });
+          }
+        }
+        return json({ ok: true, removedFiles, statementAdjusted: !!c.statement_id });
       }
 
       case "set-lab-status": {

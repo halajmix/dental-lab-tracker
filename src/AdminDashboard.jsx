@@ -226,6 +226,7 @@ export default function AdminDashboard({ auth }) {
 
   const [confirmTarget, setConfirmTarget] = useState(null); // { message, run: () => Promise }
   const [view, setView] = useState("overview"); // "overview" | "logs" | "labaccess" (Phase 58)
+  const [caseQuery, setCaseQuery] = useState(""); // Cases ops table quick-find
   const [busy, setBusy] = useState(false);
   const [viewAsBusyId, setViewAsBusyId] = useState(null);
 
@@ -275,6 +276,14 @@ export default function AdminDashboard({ auth }) {
 
   const clinicById = useMemo(() => Object.fromEntries(clinics.map((c) => [c.id, c])), [clinics]);
   const labById = useMemo(() => Object.fromEntries(labs.map((l) => [l.id, l])), [labs]);
+  const caseRows = useMemo(() => {
+    const q = caseQuery.trim().toLowerCase();
+    if (!q) return cases;
+    return cases.filter((c) =>
+      [c.id, c.patientName, clinicById[c.clinicId]?.name, labById[c.labId]?.name]
+        .filter(Boolean).join(" ").toLowerCase().includes(q),
+    );
+  }, [cases, caseQuery, clinicById, labById]);
 
   // Auth users with no org at all — the exact "junk unconfirmed signup"
   // noise that used to need manual SQL to clean up.
@@ -297,7 +306,9 @@ export default function AdminDashboard({ auth }) {
 
   const askDeleteCase = (c) =>
     setConfirmTarget({
-      message: `Delete case ${c.id} (${c.patientName})? This removes it permanently for both the clinic and the lab.`,
+      message:
+        `Delete case ${c.id} (${c.patientName})? This permanently removes EVERYTHING about it for both the clinic and the lab — ` +
+        `photos and scan files, notes, follow-up rounds — and its billing statement is re-totalled (or removed if this was its only case).`,
       run: () => adminDeleteCase(c.id),
     });
 
@@ -695,9 +706,17 @@ export default function AdminDashboard({ auth }) {
 
             {/* ---------------------- Cases ops table ---------------------- */}
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+              <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-3">
                 <ClipboardList size={15} className="text-slate-500" />
-                <h3 className="text-sm font-bold text-slate-800">Cases ({cases.length})</h3>
+                <h3 className="text-sm font-bold text-slate-800">
+                  Cases ({caseQuery ? `${caseRows.length} of ${cases.length}` : cases.length})
+                </h3>
+                <input
+                  value={caseQuery}
+                  onChange={(e) => setCaseQuery(e.target.value)}
+                  placeholder="Find by case ID, patient, clinic, lab…"
+                  className="ml-auto w-64 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none"
+                />
               </div>
               <div className="max-h-96 overflow-y-auto overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -712,10 +731,10 @@ export default function AdminDashboard({ auth }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {cases.length === 0 && (
-                      <tr><td colSpan={6} className="px-5 py-6 text-center text-slate-400">No cases yet.</td></tr>
+                    {caseRows.length === 0 && (
+                      <tr><td colSpan={6} className="px-5 py-6 text-center text-slate-400">{caseQuery ? "No cases match the search." : "No cases yet."}</td></tr>
                     )}
-                    {cases.map((c) => (
+                    {caseRows.map((c) => (
                       <tr key={c.id} className="hover:bg-slate-50/60">
                         <td className="px-5 py-2.5 font-mono text-xs text-slate-500">{c.id}</td>
                         <td className="px-5 py-2.5 font-semibold text-slate-800">{c.patientName}</td>
