@@ -60,6 +60,16 @@ export async function stopImpersonation() {
   }
 }
 
+// Drop the stash WITHOUT restoring the admin session — for a full sign-out
+// while impersonating: the admin wants out entirely, not back in as admin,
+// and leaving the stash would strand the violet banner over the login
+// screen (and over the next sign-in).
+export function clearImpersonationStash() {
+  if (!sessionStorage.getItem(STASH_KEY)) return;
+  sessionStorage.removeItem(STASH_KEY);
+  window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
 export function onImpersonationChange(handler) {
   window.addEventListener(CHANGE_EVENT, handler);
   return () => window.removeEventListener(CHANGE_EVENT, handler);

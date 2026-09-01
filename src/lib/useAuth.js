@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, recoveryDetectedEarly } from "./supabaseClient.js";
 import { clinicFromRow, labFromRow, fetchMyLabMemberships, fetchMyClinicRole, logLoginEvent, setActivityContext } from "./data.js";
 import { clearSignedUrlCache } from "./storageUrl.jsx";
+import { clearImpersonationStash } from "./impersonate.js";
 
 /**
  * Session + profile/org loader. `profile` carries the role; `clinic`/`lab`
@@ -183,6 +184,10 @@ export function useAuth() {
     // Signed photo links outlive the session otherwise — on a shared lab
     // bench that would leave the next user holding working PHI URLs.
     clearSignedUrlCache();
+    // Signing out during a "View as" session must also end the
+    // impersonation, or the violet banner survives onto the login screen
+    // and over the next sign-in ("can't log out" — caught live).
+    clearImpersonationStash();
     return supabase.auth.signOut();
   };
 
