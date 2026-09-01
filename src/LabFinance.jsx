@@ -222,6 +222,26 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
   }, [statementMeta]);
   const outstanding = Object.values(aging).reduce((a, b) => a + b.value, 0);
 
+  // Phase 63 monthly summary: production vs collections vs still-owed for
+  // one selected month. "Work done" excludes opening-balance statements
+  // (old debt booked into a month by the pending import); "Fees received"
+  // counts payments by the date the money arrived; "Pending" is the unpaid
+  // remainder on the month's statements, opening balances included.
+  const summaryMonths = useMemo(() => [...new Set(statements.map((s) => s.month))].sort().reverse(), [statements]);
+  const [summaryMonth, setSummaryMonth] = useState(null);
+  const activeSummaryMonth = summaryMonth ?? summaryMonths[0] ?? null;
+  const summary = useMemo(() => {
+    if (!activeSummaryMonth) return null;
+    const monthSts = statements.filter((s) => s.month === activeSummaryMonth);
+    const work = monthSts.reduce((a, s) => a + (s.kind === "opening_balance" ? 0 : s.total), 0);
+    const opening = monthSts.reduce((a, s) => a + (s.kind === "opening_balance" ? s.total : 0), 0);
+    const received = payments
+      .filter((p) => String(p.receivedDate ?? "").slice(0, 7) === activeSummaryMonth.slice(0, 7))
+      .reduce((a, p) => a + p.amount, 0);
+    const pending = monthSts.reduce((a, s) => a + (statementMeta.get(s.id)?.remaining ?? 0), 0);
+    return { work, opening, received, pending };
+  }, [statements, payments, statementMeta, activeSummaryMonth]);
+
   const runGenerate = async () => {
     setGenState({ confirming: false, busy: true, message: "" });
     try {
@@ -506,6 +526,44 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
         </span>
       </div>
 
+      {/* Monthly summary — work done vs fees received vs still pending */}
+      {summary && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-slate-800">Monthly summary</h3>
+            <select
+              value={activeSummaryMonth}
+              onChange={(e) => setSummaryMonth(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600"
+            >
+              {summaryMonths.map((m) => (
+                <option key={m} value={m}>{monthLabel(m)}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-blue-50 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-blue-500">Work done by lab</p>
+              <p className="mt-1.5 text-xl font-bold text-blue-800">{fmtOMR(summary.work)}</p>
+              <p className="mt-0.5 text-[11px] font-medium text-blue-500/80">
+                total billed for the month
+                {summary.opening > 0 ? ` — opening balances (${fmtOMR(summary.opening)}) not counted` : ""}
+              </p>
+            </div>
+            <div className="rounded-xl bg-emerald-50 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-600">Fees received</p>
+              <p className="mt-1.5 text-xl font-bold text-emerald-800">{fmtOMR(summary.received)}</p>
+              <p className="mt-0.5 text-[11px] font-medium text-emerald-600/80">payments received during the month</p>
+            </div>
+            <div className="rounded-xl bg-rose-50 p-4">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-rose-500">Pending payments</p>
+              <p className="mt-1.5 text-xl font-bold text-rose-800">{fmtOMR(summary.pending)}</p>
+              <p className="mt-0.5 text-[11px] font-medium text-rose-500/80">still unpaid from this month's statements</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Aging — each card doubles as a quick-filter for the table below */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Object.entries(aging).map(([label, { value, count }]) => {
@@ -692,8 +750,15 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                             {monthLabel(s.month)}
                           </span>
                         </td>
-                        <td className="max-w-[180px] truncate py-2.5 pr-3 font-semibold text-slate-700">
-                          {clinicLabel(s)}
+                        <td className="max-w-[180px] py-2.5 pr-3 font-semibold text-slate-700">
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate">{clinicLabel(s)}</span>
+                            {s.kind === "opening_balance" && (
+                              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                                Opening balance
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="py-2.5 pr-3 text-right font-semibold text-slate-800 whitespace-nowrap">{fmtOMR(s.total)}</td>
                         <td className="py-2.5 pr-3 text-right text-slate-600 whitespace-nowrap">{fmtOMR(paid)}</td>

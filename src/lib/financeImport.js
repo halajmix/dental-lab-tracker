@@ -226,7 +226,7 @@ export function mapImportRows(categoryId, rows) {
       const amount = amountOf(r);
       if (!clinic || !amount) { out.skipped++; continue; }
       const date = dateOf(r);
-      out.statements.push({ clinicName: clinic, month: date ? monthOf(date) : fallbackMonth, total: amount, paid: 0 });
+      out.statements.push({ clinicName: clinic, month: date ? monthOf(date) : fallbackMonth, total: amount, paid: 0, openingBalance: true });
     }
   } else if (categoryId === "spending") {
     for (const r of rows) {

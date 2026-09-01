@@ -1434,6 +1434,9 @@ const statementFromRow = (r) => ({
   // Imported-history statements carry their per-row detail here (Phase 31);
   // platform-generated statements itemize via cases.statement_id instead.
   lineItems: r.line_items ?? [],
+  // Phase 63: 'opening_balance' = a pending-import lump of old debt, not
+  // work done in its month. Absent column (pre-63 DB) reads as 'work'.
+  kind: r.kind ?? "work",
 });
 
 const paymentFromRow = (r) => ({
@@ -1482,14 +1485,19 @@ const fetchAllPages = async (buildQuery) => {
 // line_items is deliberately absent here — the imported-history detail is
 // ~95% of the table's bytes, so the Billing tab first paints from this lean
 // select and fetchStatementLineItems fills the detail in behind it.
-const STATEMENT_COLUMNS = "id, lab_id, clinic_id, clinic_name, month, total, status, created_at";
+const STATEMENT_COLUMNS = "id, lab_id, clinic_id, clinic_name, month, total, status, created_at, kind";
+// Pre-Phase-63 databases have no kind column; selecting it would 42703 the
+// whole billing load, so fall back to the legacy column list on error.
+const STATEMENT_COLUMNS_LEGACY = "id, lab_id, clinic_id, clinic_name, month, total, status, created_at";
 
 export async function fetchStatements(labId) {
   // Secondary order on id keeps pages stable — rows sharing a month would
   // otherwise shuffle between pages and get skipped or duplicated.
-  const rows = await fetchAllPages(() =>
-    supabase.from("clinic_statements").select(STATEMENT_COLUMNS).eq("lab_id", labId).order("month", { ascending: false }).order("id")
-  );
+  const fetchWith = (cols) =>
+    fetchAllPages(() =>
+      supabase.from("clinic_statements").select(cols).eq("lab_id", labId).order("month", { ascending: false }).order("id")
+    );
+  const rows = await fetchWith(STATEMENT_COLUMNS).catch(() => fetchWith(STATEMENT_COLUMNS_LEGACY));
   return rows.map(statementFromRow);
 }
 
@@ -1624,11 +1632,22 @@ export async function importFinanceRows(labId, { statements = [], payments = [],
     // Omitted when empty so categories without line detail still import on
     // databases where the Phase 31 column hasn't been added yet.
     if (st.lineItems?.length) row.line_items = st.lineItems;
+    // Phase 63: pending-payments rows are opening balances, not work done
+    // in their month — the monthly summary excludes them by this kind.
+    if (st.openingBalance) row.kind = "opening_balance";
     return row;
   };
-  await chunked(statements.filter((st) => !(st.paid > 0)), async (batch) => {
-    const { error } = await supabase.from("clinic_statements").insert(batch.map(stRow));
+  // A pre-Phase-63 database has no kind column; retry those inserts without
+  // it rather than failing the whole import (same spirit as line_items).
+  const insertStatements = async (rows) => {
+    let { error } = await supabase.from("clinic_statements").insert(rows);
+    if (error && rows.some((r) => r.kind)) {
+      ({ error } = await supabase.from("clinic_statements").insert(rows.map(({ kind, ...rest }) => rest)));
+    }
     if (error) throw error;
+  };
+  await chunked(statements.filter((st) => !(st.paid > 0)), async (batch) => {
+    await insertStatements(batch.map(stRow));
   });
   for (const st of statements.filter((st) => st.paid > 0)) {
     const { data, error } = await supabase

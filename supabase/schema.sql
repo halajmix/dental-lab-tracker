@@ -5453,3 +5453,25 @@ update storage.buckets
 alter table case_rounds drop constraint if exists case_rounds_kind_check;
 alter table case_rounds add constraint case_rounds_kind_check
   check (kind in ('stage', 'update', 'remake', 'adjustment', 'refit'));
+
+/* --------------------------------------------------------------------- */
+/*  Phase 63 — statement kind: work vs opening balance                   */
+/*                                                                       */
+/*  The pending-payments import books a clinic's outstanding remainder   */
+/*  as one lump statement. Structurally that row is indistinguishable    */
+/*  from an imported bills-category statement, but it is NOT work done   */
+/*  in its month — the Billing monthly summary must exclude it from      */
+/*  "Work done by lab" (while still counting it as pending). The nine    */
+/*  opening balances imported 2026-08-31 are backfilled by exact id.     */
+/* --------------------------------------------------------------------- */
+
+alter table clinic_statements add column if not exists kind text not null default 'work'
+  check (kind in ('work', 'opening_balance'));
+
+update clinic_statements set kind = 'opening_balance'
+ where kind = 'work'
+   and id in ('2028f926-8184-4dbd-a75f-043ca2d1bffe', '6f20c393-c652-4697-87b3-c12f22bf0b02',
+              '186c1a33-513e-4045-9da0-9ac56c99fc66', '7b1f2aaf-a641-4c50-a62f-9f7933a4e083',
+              'f461de0c-21f4-4668-a677-2a1c44b1a4ca', '3e202a18-273b-438a-bac0-b3adb4bc40a1',
+              '8d626006-e127-42aa-89d9-32903fa61561', '98754e11-abb2-42f0-b94a-c140bac1048e',
+              '75ec4542-9378-4996-89ef-88e84be0fe69');
