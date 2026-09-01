@@ -1174,13 +1174,18 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
   };
 
   const photosUploading = photos.some((p) => p.uploading) || scans.some((s) => s.uploading);
-  const canSubmit = !!parent && !photosUploading && !saving && (instructions.trim() || photos.length || scans.length);
+  // A remake must SAY what went wrong — photos alone don't tell the
+  // technician what to change, so instructions stop being optional there.
+  const instructionsRequired = kind === "remake";
+  const canSubmit =
+    !!parent && !photosUploading && !saving &&
+    (instructions.trim() || (!instructionsRequired && (photos.length || scans.length)));
 
   const submit = async () => {
     setTouched(true);
     setSubmitError("");
     if (!parent) return;
-    if (!instructions.trim() && !photos.length && !scans.length) return;
+    if (!instructions.trim() && (instructionsRequired || (!photos.length && !scans.length))) return;
     if (photosUploading) return;
     setSaving(true);
     try {
@@ -1314,14 +1319,25 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
 
           {/* 3 · Instructions for the lab */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="mb-2 text-sm font-bold text-slate-800">3 · Instructions for the lab technician</p>
+            <p className="mb-2 text-sm font-bold text-slate-800">
+              3 · Instructions for the lab technician
+              {instructionsRequired && <span className="ml-0.5 text-rose-600" title="Required for a remake">*</span>}
+            </p>
             <textarea
-              className={`${inputCls} min-h-[90px] resize-y`}
+              className={`${inputCls} min-h-[90px] resize-y ${instructionsRequired && touched && !instructions.trim() ? "ring-2 ring-rose-300" : ""}`}
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
               placeholder="Describe the issue or the next-stage instructions — e.g. 'High on the palatal of 26, please adjust the occlusion and re-polish.'"
               maxLength={4000}
             />
+            {instructionsRequired &&
+              (touched && !instructions.trim() ? (
+                <p className="mt-1.5 text-[11px] font-semibold text-rose-600">
+                  Required — tell the lab what went wrong and what to change.
+                </p>
+              ) : (
+                <p className="mt-1.5 text-[11px] text-slate-400">Required for a remake.</p>
+              ))}
           </div>
 
           {/* 4 · Attachments — always unlocked (troubleshooting photos + STL) */}
