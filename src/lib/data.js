@@ -32,7 +32,17 @@ export const labFromRow = (r) => ({
   paymentRemindersEnabled: r.payment_reminders_enabled ?? true,
 });
 
-export const caseFromRow = (r) => ({
+const noteSchema = (r) => {
+  if (r && "discount" in r && "billing_note" in r) schemaCaps.caseDiscount = true;
+};
+
+/* Phase 64 — is the discount/note migration in the database yet?
+   Set from the shape of the rows the API actually returns, so the UI can
+   hide controls whose writes would only fail. Same fail-soft habit as the
+   statement columns: ship the client, let the SQL land when it lands. */
+export const schemaCaps = { caseDiscount: false };
+
+export const caseFromRow = (r) => (noteSchema(r), {
   id: r.id,
   clinicId: r.clinic_id,
   patientName: r.patient_name,
@@ -64,6 +74,12 @@ export const caseFromRow = (r) => ({
   cancelStatus: r.cancel_status ?? "none",
   cancellationFee: r.cancellation_fee != null ? Number(r.cancellation_fee) : null,
   priceOverridden: r.price_overridden ?? false,
+  // Phase 64: flat OMR discount the lab granted. totalPrice above is ALREADY
+  // net of it — this is kept only so the invoice can show the line and the
+  // gross can be derived back (gross = totalPrice + discount).
+  discount: r.discount != null ? Number(r.discount) : 0,
+  // Phase 64: short line the lab types, printed under the work items.
+  billingNote: r.billing_note ?? "",
   // Phase 36: shade determined by the lab when the Rx said "Shade by Lab".
   labShade: r.lab_shade ?? "",
   // Phase 56: which clinic user authored the case (stamped server-side).
@@ -489,6 +505,9 @@ const PATCH_KEY_MAP = {
   // guard for lab members; priceOverridden makes them sticky vs repricing.
   totalPrice: "total_price",
   priceOverridden: "price_overridden",
+  // Phase 64 — lab-only, same financial guard as total_price.
+  discount: "discount",
+  billingNote: "billing_note",
   labShade: "lab_shade",
 };
 

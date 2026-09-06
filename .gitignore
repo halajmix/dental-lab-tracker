@@ -7,3 +7,6 @@ dist
 !.env.example
 .github/
 .ci-workflow-backup/
+
+# receipt print proofs (regenerate: node scripts/receipt-proof.mjs)
+scripts/.proof/

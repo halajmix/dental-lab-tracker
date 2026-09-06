@@ -16,3 +16,18 @@ input[type="date"] {
 input[type="date"]::-webkit-date-and-time-value {
   text-align: left;
 }
+
+/* Number inputs ship with a spinner (the tiny up/down stepper). In this app
+   every numeric field is a typed value — a price, a discount, a fee — never
+   something you nudge one step at a time, and the stepper eats width in the
+   narrow inline editors on a case card. Hidden in both engines; the field
+   still accepts only numbers and the arrow keys still work. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

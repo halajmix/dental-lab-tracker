@@ -18,6 +18,7 @@ import {
   Clock,
   Printer,
   Receipt,
+  ReceiptText,
   RefreshCcw,
   Check,
   Wrench,
@@ -582,22 +583,45 @@ function CaseNotes({ caseId, role, authorName }) {
    case lands on a statement (issued/paid cases are frozen server-side).
    A manual price shows a "manual" chip and survives repricing until the
    reset arrow puts the case back on automatic pricing. */
-export function CasePriceField({ c, onSave, onReset }) {
+export function CasePriceField({ c, onSave, onReset, onSaveDiscount }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [editingDisc, setEditingDisc] = useState(false);
+  const [discDraft, setDiscDraft] = useState("");
   const inputRef = useRef(null);
+  const discRef = useRef(null);
   useEffect(() => {
     if (editing) inputRef.current?.focus();
   }, [editing]);
+  useEffect(() => {
+    if (editingDisc) discRef.current?.focus();
+  }, [editingDisc]);
 
   const locked = c.invoiceStatus !== "draft" || !!c.statementId;
   const fmt = (n) => `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 })} OMR`;
+
+  /* `totalPrice` in the database is what the clinic PAYS — already net of the
+     discount, because that is the column statements sum. The technician
+     thinks in gross ("the work is 145, I'll take 15 off"), so this field
+     shows and accepts the gross and the netting happens on save. With no
+     discount the two are identical and this behaves exactly as before. */
+  const discount = Number(c.discount ?? 0) || 0;
+  const gross = c.totalPrice != null ? c.totalPrice + discount : null;
 
   const commit = () => {
     setEditing(false);
     const n = Number(draft);
     if (!Number.isFinite(n) || n < 0) return;
-    if (n !== (c.totalPrice ?? null)) onSave(n);
+    if (n !== gross) onSave(n);
+  };
+
+  const commitDiscount = () => {
+    setEditingDisc(false);
+    const n = Number(discDraft);
+    if (!Number.isFinite(n) || n < 0) return;
+    // Never discount below zero — the payable would go negative.
+    if (gross != null && n > gross) return;
+    if (n !== discount) onSaveDiscount?.(n);
   };
 
   return (
@@ -627,18 +651,18 @@ export function CasePriceField({ c, onSave, onReset }) {
         </span>
       ) : locked ? (
         <span className="font-bold text-slate-700" title="This case is already on a statement — its price is locked">
-          {c.totalPrice != null ? fmt(c.totalPrice) : "—"} 🔒
+          {gross != null ? fmt(gross) : "—"} 🔒
         </span>
       ) : (
         <button
           onClick={() => {
-            setDraft(c.totalPrice != null ? String(c.totalPrice) : "");
+            setDraft(gross != null ? String(gross) : "");
             setEditing(true);
           }}
           className="group flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 font-bold text-slate-800 hover:bg-blue-50"
           title="Tap to set the final price for this case"
         >
-          {c.totalPrice != null ? fmt(c.totalPrice) : <span className="font-semibold text-blue-600">Set price</span>}
+          {gross != null ? fmt(gross) : <span className="font-semibold text-blue-600">Set price</span>}
           <Wrench size={12} className="text-slate-300 group-hover:text-blue-500" />
         </button>
       )}
@@ -655,6 +679,118 @@ export function CasePriceField({ c, onSave, onReset }) {
             </button>
           )}
         </span>
+      )}
+
+      {/* Phase 64 — a flat OMR discount the technician grants on this case. */}
+      {onSaveDiscount && (
+        <span className="flex w-full flex-wrap items-center gap-2">
+          <span className="font-medium text-slate-400">Discount</span>
+          {editingDisc ? (
+            <span className="flex items-center gap-1">
+              <input
+                ref={discRef}
+                type="number"
+                min="0"
+                step="0.001"
+                inputMode="decimal"
+                value={discDraft}
+                onChange={(e) => setDiscDraft(e.target.value)}
+                onBlur={commitDiscount}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitDiscount();
+                  if (e.key === "Escape") setEditingDisc(false);
+                }}
+                className="w-24 rounded-lg border border-blue-300 px-2 py-1 text-sm font-bold text-slate-800 outline-none ring-2 ring-blue-100"
+              />
+              <span className="text-xs font-semibold text-slate-400">OMR</span>
+              <button onMouseDown={(e) => e.preventDefault()} onClick={commitDiscount} className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-50" title="Save discount">
+                <Check size={15} />
+              </button>
+            </span>
+          ) : locked ? (
+            <span className="font-bold text-slate-700">{discount > 0 ? `− ${fmt(discount)}` : "—"} 🔒</span>
+          ) : (
+            <button
+              onClick={() => {
+                setDiscDraft(discount ? String(discount) : "");
+                setEditingDisc(true);
+              }}
+              className="group flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 font-bold text-slate-800 hover:bg-blue-50"
+              title="Amount to take off this case"
+            >
+              {discount > 0 ? `− ${fmt(discount)}` : <span className="font-semibold text-blue-600">Add discount</span>}
+              <Wrench size={12} className="text-slate-300 group-hover:text-blue-500" />
+            </button>
+          )}
+          {discount > 0 && (
+            <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
+              Clinic pays {fmt(c.totalPrice ?? 0)}
+            </span>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* Phase 64 — a short line the technician types, printed under the work
+   items on the receipt and the invoice. Same click-to-edit pattern as the
+   invoice number, price and lab shade. Locked once the case is invoiced or
+   on a statement, so what the clinic was given cannot change underneath it. */
+export function CaseInvoiceNote({ c, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const locked = c.invoiceStatus !== "draft" || !!c.statementId;
+  const note = (c.billingNote ?? "").trim();
+
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next !== note) onSave(next);
+  };
+
+  return (
+    <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm">
+      <span className="font-medium text-slate-400">Invoice note</span>
+      {editing ? (
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          <input
+            ref={inputRef}
+            type="text"
+            maxLength={120}
+            value={draft}
+            placeholder="Printed under the work items"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            className="min-w-0 flex-1 rounded-lg border border-blue-300 px-2 py-1 text-sm text-slate-800 outline-none ring-2 ring-blue-100"
+          />
+          <button onMouseDown={(e) => e.preventDefault()} onClick={commit} className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-50" title="Save note">
+            <Check size={15} />
+          </button>
+        </span>
+      ) : locked ? (
+        <span className="font-semibold text-slate-700">{note || "—"} 🔒</span>
+      ) : (
+        <button
+          onClick={() => {
+            setDraft(note);
+            setEditing(true);
+          }}
+          className="group flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-left font-semibold text-slate-800 hover:bg-blue-50"
+          title="A short line printed under the work items"
+        >
+          <span className="truncate">{note || <span className="font-semibold text-blue-600">Add note</span>}</span>
+          <Wrench size={12} className="shrink-0 text-slate-300 group-hover:text-blue-500" />
+        </button>
       )}
     </div>
   );
@@ -741,7 +877,7 @@ const ACTION_META = {
   remake: { icon: RefreshCcw, tint: "text-rose-600 bg-rose-100" },
 };
 
-export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onPrintInvoice, onSetCasePrice, onResetCasePrice, onSetLabShade, rounds = [], onResolveRound }) {
+export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onPrintInvoice, onPrintReceipt, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, rounds = [], onResolveRound }) {
   return (
     <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
       <div className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -806,6 +942,7 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                       c={caseObj}
                       onSave={(n) => onSetCasePrice(caseObj.id, n)}
                       onReset={() => onResetCasePrice(caseObj)}
+                      onSaveDiscount={onSetCaseDiscount ? (n) => onSetCaseDiscount(caseObj.id, n) : undefined}
                     />
                   ) : (
                     <p className="text-sm font-bold text-slate-800">
@@ -814,6 +951,9 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                         {caseObj.priceOverridden ? "set by the lab" : "estimated from the lab's price list"}
                       </span>
                     </p>
+                  )}
+                  {role === "lab" && onSetCaseBillingNote && (
+                    <CaseInvoiceNote c={caseObj} onSave={(t) => onSetCaseBillingNote(caseObj.id, t)} />
                   )}
                 </section>
               )}
@@ -902,6 +1042,15 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                 {onPrintInvoice && (
                   <button onClick={onPrintInvoice} className="flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
                     <Receipt size={15} /> View/Print Invoice
+                  </button>
+                )}
+                {/* Lab-only: the 80mm slip is the bench's handover docket,
+                    not a clinic document. Gated on role as well as on the
+                    callback so a future wiring mistake cannot leak it to a
+                    dentist the way the first version of this did. */}
+                {onPrintReceipt && role === "lab" && (
+                  <button onClick={onPrintReceipt} title="80mm thermal receipt printer" className="flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                    <ReceiptText size={15} /> Print receipt (80mm)
                   </button>
                 )}
                 {onLogRemake && (

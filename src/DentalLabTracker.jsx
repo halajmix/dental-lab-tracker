@@ -59,6 +59,7 @@ import {
   CaseDrawer,
   isUrgent,
   CasePriceField,
+  CaseInvoiceNote,
   LabShadeField,
   needsLabShade,
   dueUrgency,
@@ -72,6 +73,7 @@ import { BillingPanel, ExpensesPanel } from "./LabFinance.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import PrintInvoice from "./PrintInvoice.jsx";
+import PrintReceipt from "./PrintReceipt.jsx";
 import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
 import {
@@ -103,6 +105,7 @@ import {
   buildLocalCase,
   newCaseId,
   flushBlobUploads,
+  schemaCaps,
 } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 import { SectionBoundary } from "./ErrorBoundary.jsx";
@@ -998,6 +1001,7 @@ export default function DentalLabTracker({ auth }) {
   const [remakeCaseId, setRemakeCaseId] = useState(null);
   const [printCaseId, setPrintCaseId] = useState(null);
   const [invoiceCaseId, setInvoiceCaseId] = useState(null);
+  const [receiptCaseId, setReceiptCaseId] = useState(null);
   const [autoShare, setAutoShare] = useState(false);
   const [contactCaseId, setContactCaseId] = useState(null);
 
@@ -1139,9 +1143,32 @@ export default function DentalLabTracker({ auth }) {
   // Phase 32: the lab's manual final price. Overridden prices are sticky —
   // the DB pricing trigger skips them until reset, which re-sends the
   // unchanged prescription purely to re-fire automatic pricing.
-  const setCasePrice = (caseId, totalPrice) => {
-    logActivity("set case price", `${caseId} → ${totalPrice} OMR (manual)`);
+  /* The price field hands back the GROSS the technician typed; `total_price`
+     stores what the clinic pays, i.e. net of any discount, because that is
+     the column clinic_statements sum. With no discount the two are equal. */
+  const setCasePrice = (caseId, grossPrice) => {
+    const c = cases.find((x) => x.id === caseId);
+    const discount = Number(c?.discount ?? 0) || 0;
+    const totalPrice = Math.max(0, Number((grossPrice - discount).toFixed(3)));
+    logActivity("set case price", `${caseId} → ${grossPrice} OMR gross (manual)`);
     persist(caseId, { totalPrice, priceOverridden: true });
+  };
+
+  /* A flat OMR discount. The gross is held constant and the payable moves,
+     so granting 15 off a 145 case leaves total_price at 130. Marked
+     priceOverridden so the DB pricing trigger cannot silently re-inflate it
+     on the next prescription write. */
+  const setCaseDiscount = (caseId, discount) => {
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    const gross = (c.totalPrice ?? 0) + (Number(c.discount ?? 0) || 0);
+    const totalPrice = Math.max(0, Number((gross - discount).toFixed(3)));
+    logActivity("set case discount", `${caseId} → −${discount} OMR (pays ${totalPrice})`);
+    persist(caseId, { discount, totalPrice, priceOverridden: true });
+  };
+  const setCaseBillingNote = (caseId, billingNote) => {
+    logActivity("set invoice note", `${caseId} → ${billingNote || "(cleared)"}`);
+    persist(caseId, { billingNote });
   };
   const setLabShade = (caseId, labShade) => {
     logActivity("set lab shade", `${caseId} → ${labShade}`);
@@ -1164,9 +1191,19 @@ export default function DentalLabTracker({ auth }) {
     logActivity("opened invoice print sheet", c ? `${c.id} — ${c.patientName}` : id);
     setInvoiceCaseId(id);
   };
+  // Same document, 80mm thermal stock (PrintReceipt.jsx) — never both at once.
+  const openReceiptSheet = (id) => {
+    const c = cases.find((x) => x.id === id);
+    logActivity("opened 80mm receipt sheet", c ? `${c.id} — ${c.patientName}` : id);
+    setInvoiceCaseId(null);
+    setReceiptCaseId(id);
+  };
   const resetCasePrice = (c) => {
     logActivity("reset case price to automatic", c.id);
-    persist(c.id, { priceOverridden: false, prescription: c.prescription });
+    // Clearing the discount in the same write matters: price_case() reads
+    // new.discount when it recomputes, so a stale one would come straight
+    // back off the fresh estimate.
+    persist(c.id, { priceOverridden: false, discount: 0, prescription: c.prescription });
   };
 
   /* ---------------- Cancellation workflow (Phase 27) ----------------
@@ -1396,9 +1433,11 @@ export default function DentalLabTracker({ auth }) {
   const remakeCase = cases.find((c) => c.id === remakeCaseId) || null;
   const printCase = cases.find((c) => c.id === printCaseId) || null;
   const invoiceCase = cases.find((c) => c.id === invoiceCaseId) || null;
+  const receiptCase = cases.find((c) => c.id === receiptCaseId) || null;
   const contactCase = cases.find((c) => c.id === contactCaseId) || null;
   const printClinic = printCase ? clinicsById[printCase.clinicId] ?? clinic : null;
   const invoiceClinic = invoiceCase ? clinicsById[invoiceCase.clinicId] ?? clinic : null;
+  const receiptClinic = receiptCase ? clinicsById[receiptCase.clinicId] ?? clinic : null;
   const contactClinic = contactCase ? clinicsById[contactCase.clinicId] ?? clinic : null;
 
   /* ================================================================ */
@@ -1563,6 +1602,8 @@ export default function DentalLabTracker({ auth }) {
               onSetInvoiceNumber={setInvoiceNumber}
               onSetCasePrice={setCasePrice}
               onResetCasePrice={resetCasePrice}
+              onSetCaseDiscount={schemaCaps.caseDiscount ? setCaseDiscount : undefined}
+              onSetCaseBillingNote={schemaCaps.caseDiscount ? setCaseBillingNote : undefined}
               onSetLabShade={setLabShade}
               onResolveCancellation={resolveCancellation}
               onExportCsv={() => { logActivity("exported cases CSV", `${labQueue.length} cases`); exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`); }}
@@ -1790,8 +1831,11 @@ export default function DentalLabTracker({ auth }) {
         onLogRemake={hasTechRole || hasAdminRole || isDentist ? () => drawerCase && setRemakeCaseId(drawerCase.id) : undefined}
         onPrint={() => drawerCase && openRxSheet(drawerCase.id)}
         onPrintInvoice={() => drawerCase && openInvoiceSheet(drawerCase.id)}
+        onPrintReceipt={!isDentist ? () => drawerCase && openReceiptSheet(drawerCase.id) : undefined}
         onSetCasePrice={!isDentist ? setCasePrice : undefined}
         onResetCasePrice={!isDentist ? resetCasePrice : undefined}
+        onSetCaseDiscount={!isDentist && schemaCaps.caseDiscount ? setCaseDiscount : undefined}
+        onSetCaseBillingNote={!isDentist && schemaCaps.caseDiscount ? setCaseBillingNote : undefined}
         onSetLabShade={!isDentist ? setLabShade : undefined}
         rounds={drawerCase ? caseRounds.filter((r) => r.parentCaseId === drawerCase.id) : []}
         onResolveRound={!isDentist ? resolveFollowup : undefined}
@@ -1818,6 +1862,13 @@ export default function DentalLabTracker({ auth }) {
         clinic={invoiceClinic}
         lab={invoiceCase ? labById[invoiceCase.labId] : null}
         onClose={() => setInvoiceCaseId(null)}
+      />
+      <PrintReceipt
+        open={!!receiptCase}
+        caseObj={receiptCase}
+        clinic={receiptClinic}
+        lab={receiptCase ? labById[receiptCase.labId] : null}
+        onClose={() => setReceiptCaseId(null)}
       />
       {isDentist && (
         <ContactLabModal
@@ -2288,7 +2339,7 @@ function UpcomingDeadlines({ cases, clinicsById, onOpenCase, now }) {
   );
 }
 
-function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation, onExportCsv }) {
+function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, onResolveCancellation, onExportCsv }) {
   // Minute tick so "time remaining" and urgency colors stay honest on a
   // dashboard that sits open on the bench all day.
   const [now, setNow] = useState(() => Date.now());
@@ -2384,6 +2435,8 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
               onSetInvoiceNumber={onSetInvoiceNumber}
               onSetCasePrice={onSetCasePrice}
               onResetCasePrice={onResetCasePrice}
+              onSetCaseDiscount={onSetCaseDiscount}
+              onSetCaseBillingNote={onSetCaseBillingNote}
               onSetLabShade={onSetLabShade}
             />
           ))}
@@ -2706,7 +2759,7 @@ function CancellationRequestBanner({ c, onResolve }) {
   );
 }
 
-function LabCaseCard({ c, clinicName, returningRound, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetLabShade, onResolveCancellation }) {
+function LabCaseCard({ c, clinicName, returningRound, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, onResolveCancellation }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -2847,7 +2900,15 @@ function LabCaseCard({ c, clinicName, returningRound, onAdvance, onRevert, onOpe
 
       {/* The lab's final price — hand-editable any time before invoicing */}
       {onSetCasePrice && (
-        <CasePriceField c={c} onSave={(n) => onSetCasePrice(c.id, n)} onReset={() => onResetCasePrice(c)} />
+        <CasePriceField
+          c={c}
+          onSave={(n) => onSetCasePrice(c.id, n)}
+          onReset={() => onResetCasePrice(c)}
+          onSaveDiscount={onSetCaseDiscount ? (n) => onSetCaseDiscount(c.id, n) : undefined}
+        />
+      )}
+      {onSetCaseBillingNote && (
+        <CaseInvoiceNote c={c} onSave={(t) => onSetCaseBillingNote(c.id, t)} />
       )}
 
       {/* "Shade by Lab" cases: the technician records the shade here */}

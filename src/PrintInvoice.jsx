@@ -1,7 +1,19 @@
 import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Printer, Receipt } from "lucide-react";
-import { toothSummary, includedSummary, SHADE_BY_LAB, ARCH_LABELS } from "./PrescriptionForm.jsx";
+import { toothSummary, includedSummary, ARCH_LABELS } from "./PrescriptionForm.jsx";
+import {
+  fmtMoney,
+  fmtDate,
+  invoiceNumberFor,
+  orderDateFor,
+  invoiceAmount,
+  billedTo,
+  invoiceStatus,
+  workItems,
+  labAddressLines,
+  shadeLine,
+} from "./lib/invoiceDoc.js";
 
 /**
  * View / Print Invoice — a lab billing document for one case, opened from the
@@ -14,27 +26,6 @@ import { toothSummary, includedSummary, SHADE_BY_LAB, ARCH_LABELS } from "./Pres
  * per-line amounts and the money appears once, in the summary block.
  */
 
-// OMR shows up to 3 decimals (baisa) — same formatting as LabFinance/LabAdmin.
-const fmtMoney = (n) =>
-  Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 });
-
-const fmtDate = (d) => {
-  if (!d) return "—";
-  try {
-    const dt = d instanceof Date ? d : new Date(d);
-    if (isNaN(dt.getTime())) return String(d);
-    return dt.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return String(d);
-  }
-};
-
-const shadeLine = (guide, shade, labShade) => {
-  if (guide === SHADE_BY_LAB) return labShade ? `${labShade} (determined by lab)` : "To be determined by lab";
-  if (shade && shade !== "N/A") return guide ? `${shade} — ${guide}` : shade;
-  return null;
-};
-
 // One detail line inside a work-order row; renders nothing when empty.
 function Line({ label, value }) {
   if (!value) return null;
@@ -46,10 +37,12 @@ function Line({ label, value }) {
   );
 }
 
-const PAYMENT_STATUS = {
-  draft: { text: "UNPAID — not yet invoiced", cls: "border-slate-400 text-slate-700" },
-  issued: { text: "INVOICED — payment due", cls: "border-amber-500 text-amber-700" },
-  paid: { text: "PAID", cls: "border-emerald-500 text-emerald-700" },
+// Status TEXT is shared (lib/invoiceDoc.js); only the colour is A4-specific.
+const STATUS_CLS = {
+  draft: "border-slate-400 text-slate-700",
+  issued: "border-amber-500 text-amber-700",
+  paid: "border-emerald-500 text-emerald-700",
+  cancelled: "border-slate-400 text-slate-700",
 };
 
 export default function PrintInvoice({ open, caseObj, clinic, lab, onClose }) {
@@ -70,27 +63,19 @@ export default function PrintInvoice({ open, caseObj, clinic, lab, onClose }) {
   if (!open || !caseObj) return null;
 
   const rx = caseObj.prescription;
-  // Cart and flat prescriptions normalize to one list of work items.
-  const items = rx?.restorations?.length
-    ? rx.restorations.map((r) => ({ ...r, notation: rx.notation }))
-    : rx
-    ? [rx]
-    : [];
+  const items = workItems(rx);
 
-  const invoiceNo = caseObj.invoiceNumber?.trim() || `INV-${caseObj.id.replace(/^C-/, "")}`;
-  const orderDate = caseObj.history?.[0]?.at ?? caseObj.createdDate;
-  const cancelled = caseObj.cancelStatus === "cancelled";
-  const amount = cancelled ? caseObj.cancellationFee ?? null : caseObj.totalPrice ?? null;
-  const status = cancelled && !(caseObj.cancellationFee > 0)
-    ? { text: "CANCELLED — no charge", cls: "border-slate-400 text-slate-700" }
-    : PAYMENT_STATUS[caseObj.invoiceStatus] ?? PAYMENT_STATUS.draft;
+  const invoiceNo = invoiceNumberFor(caseObj);
+  const orderDate = orderDateFor(caseObj);
+  const { cancelled, amount, discount, gross } = invoiceAmount(caseObj);
+  const bill = billedTo(caseObj, clinic);
+  const statusInfo = invoiceStatus(caseObj);
+  const status = { text: statusInfo.text, cls: STATUS_CLS[statusInfo.key] };
 
   const included = includedSummary(rx)
     ? [...(rx?.included ?? []), ...(rx?.includedOther?.trim() ? [rx.includedOther.trim()] : [])].join(", ")
     : null;
-  const labAddress = [lab?.address, [lab?.wilayat, lab?.governorate].filter(Boolean).join(", ")]
-    .map((s) => s?.trim())
-    .filter(Boolean);
+  const labAddress = labAddressLines(lab);
 
   return createPortal(
     <div className="print-portal fixed inset-0 z-[70] overflow-y-auto bg-slate-500/60">
@@ -155,15 +140,18 @@ export default function PrintInvoice({ open, caseObj, clinic, lab, onClose }) {
         <div className="mt-4 grid grid-cols-3 gap-6 break-inside-avoid">
           <div>
             <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Billed To</p>
-            <p className="font-bold text-slate-800">{clinic?.name ?? "—"}</p>
-            {clinic?.dentist && <p className="text-xs text-slate-600">{clinic.dentist}</p>}
-            {clinic?.contact && <p className="text-xs text-slate-500">{clinic.contact}</p>}
+            <p className="font-bold text-slate-800">{bill.name}</p>
+            {bill.lines.map((l) => <p key={l} className="text-xs text-slate-600">{l}</p>)}
           </div>
-          <div>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient</p>
-            <p className="font-bold text-slate-800">{caseObj.patientName}</p>
-            {caseObj.patientId && <p className="text-xs text-slate-500">{caseObj.patientId}</p>}
-          </div>
+          {/* Patient-billed invoices drop the separate Patient cell — it
+              would repeat the bill-to name. */}
+          {!bill.isPatient && (
+            <div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient</p>
+              <p className="font-bold text-slate-800">{caseObj.patientName}</p>
+              {caseObj.patientId && <p className="text-xs text-slate-500">{caseObj.patientId}</p>}
+            </div>
+          )}
           <div>
             <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Scheduled Delivery</p>
             <p className="font-bold text-slate-800">{fmtDate(caseObj.appointmentDate)}</p>
@@ -222,6 +210,11 @@ export default function PrintInvoice({ open, caseObj, clinic, lab, onClose }) {
                   </tr>
                 );
               })}
+              {caseObj.billingNote?.trim() && (
+                <tr className="border-b border-slate-200 break-inside-avoid">
+                  <td colSpan={4} className="py-2 text-[11px] text-slate-700">{caseObj.billingNote.trim()}</td>
+                </tr>
+              )}
               {included && (
                 <tr className="border-b border-slate-200 break-inside-avoid">
                   <td colSpan={4} className="py-2 text-[11px] text-slate-600">
@@ -245,8 +238,14 @@ export default function PrintInvoice({ open, caseObj, clinic, lab, onClose }) {
           <div className="w-64">
             <div className="flex items-center justify-between border-b border-slate-200 py-1.5 text-xs">
               <span className="text-slate-500">{cancelled ? "Cancellation fee" : "Subtotal"}</span>
-              <span className="font-semibold tabular-nums text-slate-700">{amount != null ? `${fmtMoney(amount)} OMR` : "Not yet priced"}</span>
+              <span className="font-semibold tabular-nums text-slate-700">{gross != null ? `${fmtMoney(gross)} OMR` : "Not yet priced"}</span>
             </div>
+            {discount > 0 && (
+              <div className="flex items-center justify-between border-b border-slate-200 py-1.5 text-xs">
+                <span className="text-slate-500">Discount</span>
+                <span className="font-semibold tabular-nums text-slate-700">− {fmtMoney(discount)} OMR</span>
+              </div>
+            )}
             <div className="flex items-center justify-between border-b border-slate-200 py-1.5 text-xs">
               <span className="text-slate-500">Tax / fees</span>
               <span className="font-semibold tabular-nums text-slate-700">—</span>
