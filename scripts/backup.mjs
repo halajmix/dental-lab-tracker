@@ -10,9 +10,9 @@
  * Tables are discovered from PostgREST's OpenAPI root at run time, so new
  * schema phases are picked up automatically — no list to keep in sync.
  *
- * Credentials: reads the service-role key from ~/.drcrown-backup-env
- * (a file OUTSIDE the repo so it can never be committed). Format:
- *   SERVICE_ROLE_KEY=eyJ...
+ * Credentials: the service-role key comes from the macOS Keychain via
+ * scripts/lib/serviceKey.mjs (~/.drcrown-backup-env still works as a
+ * deprecated fallback). The key bypasses RLS — keep it out of plain files.
  *
  * Run manually:  node scripts/backup.mjs
  * Runs weekly via the com.drcrown.backup LaunchAgent (Sunday 20:00, or on
@@ -24,19 +24,17 @@
 import { readFileSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { serviceKey } from "./lib/serviceKey.mjs";
 
 const SUPABASE_URL = "https://mtxkushcxczjwypwoxdh.supabase.co";
 const BUCKETS = ["avatars", "case-photos"];
 const KEEP = 8;
 
-const envPath = join(homedir(), ".drcrown-backup-env");
-if (!existsSync(envPath)) {
-  console.error(`No credentials file at ${envPath} — create it with SERVICE_ROLE_KEY=<key>`);
-  process.exit(1);
-}
-const key = (readFileSync(envPath, "utf8").match(/SERVICE_ROLE_KEY=(\S+)/) ?? [])[1];
-if (!key) {
-  console.error("SERVICE_ROLE_KEY not found in ~/.drcrown-backup-env");
+let key;
+try {
+  key = serviceKey();
+} catch (err) {
+  console.error(err.message);
   process.exit(1);
 }
 const headers = { apikey: key, Authorization: `Bearer ${key}` };

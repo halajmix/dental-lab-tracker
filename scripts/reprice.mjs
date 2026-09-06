@@ -7,9 +7,10 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { serviceKey } from "./lib/serviceKey.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
-const key = readFileSync(`${homedir()}/.drcrown-backup-env`, "utf8").match(/SERVICE_ROLE_KEY=(\S+)/)[1];
+const key = serviceKey();
 const url = readFileSync(join(repo, ".env"), "utf8").match(/VITE_SUPABASE_URL=(\S+)/)[1];
 const H = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
 

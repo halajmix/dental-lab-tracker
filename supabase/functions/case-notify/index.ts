@@ -290,7 +290,13 @@ Deno.serve(async (req) => {
 
       const emailed = await sendEmail(
         recipient,
-        subj(`New case from ${clinic?.name ?? "a clinic"}: ${record.patient_name}${rxData.pickupRequested ? " (pick-up requested)" : ""}`),
+        // Case ID, not the patient's name. A subject line is the most
+        // exposed part of an email — it shows in lock-screen previews and is
+        // indexed by every mail client — and it reaches Resend and the
+        // recipient's provider regardless of what the database stores. The
+        // body still names the patient: the lab needs it, and both parties
+        // are already treating them.
+        subj(`New case from ${clinic?.name ?? "a clinic"}: ${record.id}${rxData.pickupRequested ? " (pick-up requested)" : ""}`),
         emailShell(
           `New case sent to ${lab.name}`,
           `<p style="color:#475569">${esc(clinic?.name ?? "A clinic")} just sent you a new case, case ID <b>${esc(record.id)}</b>.</p>${pickupLine}${caseSummaryRows(record)}`,
@@ -313,7 +319,8 @@ Deno.serve(async (req) => {
 
       const emailed = await sendEmail(
         clinic.email,
-        subj(`${lab?.name ?? "Your lab"} marked ${record.patient_name}'s case complete`),
+        // Case ID rather than the patient's name — see the note above.
+        subj(`${lab?.name ?? "Your lab"} marked case ${record.id} complete`),
         emailShell(
           "Case complete: ready for pickup",
           `<p style="color:#475569">${esc(lab?.name ?? "Your lab")} finished case <b>${esc(record.id)}</b> and it's ready to collect.</p>${caseSummaryRows(record)}`,
