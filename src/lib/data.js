@@ -26,6 +26,9 @@ export const labFromRow = (r) => ({
   // Phase 58: private labs are visible only to clinics mapped in
   // clinic_lab_access. Default true = pre-58 behavior.
   isPublic: r.is_public ?? true,
+  // Advertising/demo org — badged in the super-admin screen so it is never
+  // mistaken for a paying customer.
+  isDemo: r.is_demo ?? false,
   // Who receives new-case emails; "" = the lab's general contact email.
   notifyEmail: r.notify_email ?? "",
   // Monthly unpaid-invoice reminder emails to clinics (Lab Settings toggle).
@@ -102,6 +105,7 @@ export const clinicFromRow = (r) => ({
   status: r.status ?? "active",
   // Phase 58: an exclusive clinic sees only its super-admin-mapped labs.
   isExclusive: r.is_exclusive ?? false,
+  isDemo: r.is_demo ?? false,
 });
 
 export async function fetchClinicsByIds(ids) {

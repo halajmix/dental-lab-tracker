@@ -65,6 +65,21 @@ function StatusBadge({ status }) {
   return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Active</span>;
 }
 
+/* Advertising/demo orgs. Their cases price, invoice and print exactly like
+   real ones — that is the point when filming — so the only thing telling
+   them apart is this badge. Amber rather than red: it is not a fault, it is
+   a "do not read this as revenue" marker. */
+function DemoBadge({ kind }) {
+  return (
+    <span
+      className="ml-2 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700"
+      title="Demo data created for advertising — not a real customer"
+    >
+      Dummy {kind}
+    </span>
+  );
+}
+
 function StatCard({ icon: Icon, label, value, tone, sub }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -508,7 +523,14 @@ export default function AdminDashboard({ auth }) {
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
                 <Building2 size={15} className="text-blue-500" />
-                <h3 className="text-sm font-bold text-slate-800">Clinics ({clinics.length})</h3>
+                <h3 className="text-sm font-bold text-slate-800">
+                  Clinics ({clinics.length})
+                  {clinics.some((c) => c.isDemo) && (
+                    <span className="ml-2 text-xs font-semibold text-amber-600">
+                      incl. {clinics.filter((c) => c.isDemo).length} dummy
+                    </span>
+                  )}
+                </h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -529,7 +551,10 @@ export default function AdminDashboard({ auth }) {
                     )}
                     {clinics.map((c) => (
                       <tr key={c.id} className="hover:bg-slate-50/60">
-                        <td className="px-5 py-2.5 font-semibold text-slate-800">{c.name}</td>
+                        <td className="px-5 py-2.5 font-semibold text-slate-800">
+                          {c.name}
+                          {c.isDemo && <DemoBadge kind="clinic" />}
+                        </td>
                         <td className="px-5 py-2.5 text-slate-600">{c.dentist || "—"}</td>
                         <td className="px-5 py-2.5 text-slate-500">{c.email || "—"}</td>
                         <td className="px-5 py-2.5 tabular-nums text-slate-600">{cases.filter((x) => x.clinicId === c.id).length}</td>
@@ -606,7 +631,14 @@ export default function AdminDashboard({ auth }) {
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
                 <FlaskConical size={15} className="text-violet-500" />
-                <h3 className="text-sm font-bold text-slate-800">Labs ({labs.length})</h3>
+                <h3 className="text-sm font-bold text-slate-800">
+                  Labs ({labs.length})
+                  {labs.some((l) => l.isDemo) && (
+                    <span className="ml-2 text-xs font-semibold text-amber-600">
+                      incl. {labs.filter((l) => l.isDemo).length} dummy
+                    </span>
+                  )}
+                </h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -626,7 +658,10 @@ export default function AdminDashboard({ auth }) {
                     )}
                     {labs.map((l) => (
                       <tr key={l.id} className="hover:bg-slate-50/60">
-                        <td className="px-5 py-2.5 font-semibold text-slate-800">{l.name}</td>
+                        <td className="px-5 py-2.5 font-semibold text-slate-800">
+                          {l.name}
+                          {l.isDemo && <DemoBadge kind="lab" />}
+                        </td>
                         <td className="px-5 py-2.5 text-slate-500">{l.email || "—"}</td>
                         <td className="px-5 py-2.5 tabular-nums text-slate-600">{cases.filter((x) => x.labId === l.id).length}</td>
                         <td className="px-5 py-2.5">
