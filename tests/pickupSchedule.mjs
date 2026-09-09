@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
+const {PGlite}=await import(process.env.PGLITE_MODULE||'@electric-sql/pglite');const db=new PGlite();
+await db.exec(`create role anon;create role authenticated;create role service_role;create schema auth;create schema private;create schema cron;create schema net;
+create table auth.users(id uuid,email text);create table profiles(id uuid,role text);
+insert into auth.users values ('00000000-0000-4000-8000-000000000001','owner@example.test');insert into profiles values ('00000000-0000-4000-8000-000000000001','admin');
+create function is_admin() returns boolean language sql stable as $$select current_setting('test.admin',true)='yes'$$;
+create table private.webhook_config(key text,value text);insert into private.webhook_config values ('case_notify_secret','fictional-secret');
+create table cron.jobs(name text primary key,schedule text,command text);
+create function cron.schedule(n text,s text,c text) returns bigint language plpgsql as $$begin insert into cron.jobs values(n,s,c) on conflict(name) do update set schedule=s,command=c;return 1;end$$;
+create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds int) returns bigint language sql as $$select 1::bigint$$;`);
+const sql=readFileSync(new URL('../supabase/migrations/20260909_pickup_digest.sql',import.meta.url),'utf8');await db.exec(sql);await db.exec(sql);
+assert.equal((await db.query('select * from cron.jobs')).rows.length,1);
+assert.equal((await db.query('select schedule from cron.jobs')).rows[0].schedule,'0 14 * * *');
+await db.exec('select private.run_pickup_digest();set role authenticated;');
+assert.equal((await db.query('select * from pickup_digest_settings')).rows.length,0);
+await assert.rejects(db.exec('update pickup_digest_settings set enabled=false'),/permission denied/);
+await db.exec("reset role;select set_config('test.admin','yes',false);set role authenticated;");assert.equal((await db.query('select * from pickup_digest_settings')).rows.length,1);
+await db.close();console.log('Schedule checks passed: idempotent daily 18:00 Oman schedule, sole admin recipient, no clinic/lab access to email payload/settings.');

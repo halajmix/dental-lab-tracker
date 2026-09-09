@@ -247,3 +247,26 @@ paper bills is covered by the snapshot and must not be added again. Payment
 allocation and mismatched clinic-name reconciliation are still explicit; the
 UI does not infer aliases or deduct unlinked receipts. Tests cover the
 snapshot cutoff and server-side duplicate-collection guard as well as grouping.
+
+## Pickup follow-up and daily summary (2026-09-09)
+
+Super-admin Pickup follow-up uses the existing Still at Clinic / Picked Up by
+Lab stages, across all labs. No acknowledgment state is invented. Collection
+is a recorded lab action, not independent proof of physical pickup. Cancelled
+cases are excluded, waiting cases sort oldest first, and elapsed time includes
+nights/weekends. Cases refresh every minute while the tab is open.
+
+`supabase/functions/pickup-digest/index.ts` shares reporting logic with the UI
+via `_shared/pickupMonitor.js`. Deploy it as pickup-digest, Verify JWT OFF;
+CASE_NOTIFY_SECRET is required and fail-closed. It reuses RESEND_API_KEY.
+Then owner-applied `20260909_pickup_digest.sql` schedules 18:00 Oman daily to
+the sole existing platform admin. No patient fields enter the email. No email
+on empty activity/no waiting work. A saved daily payload plus provider
+idempotency key avoids duplicate delivery on same-day retries. No automatic
+retry cron is added; failed runs can be retried manually that day.
+
+The SQL creates admin-readable, service-writable settings and delivery records.
+Pause using `update pickup_digest_settings set enabled=false where id=true;`.
+Email delivery is NOT active until the new function and migration are deployed.
+Tests: pickupMonitor.test.mjs, pickupDigest.mjs (mocked mail, no real sends),
+and pickupSchedule.mjs (disposable PGlite). Browser checked with fictional cases.

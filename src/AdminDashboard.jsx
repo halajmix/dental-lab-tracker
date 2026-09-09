@@ -1,3 +1,4 @@
+import PickupFollowup from "./PickupFollowup.jsx";
 import React, { useState, useEffect, useMemo } from "react";
 import {
   ShieldCheck,
@@ -272,6 +273,15 @@ export default function AdminDashboard({ auth }) {
     load();
   }, []);
 
+  useEffect(() => {
+    if (view !== "pickup") return;
+    let active = true;
+    const refresh = () => fetchCases().then(cs => { if (active) { setCases(cs); setError(""); } }).catch(() => { if (active) setError("Pickup data could not refresh. Use Refresh to retry."); });
+    refresh();
+    const timer = setInterval(refresh, 60000);
+    return () => { active = false; clearInterval(timer); };
+  }, [view]);
+
   const now = new Date();
   const casesThisMonth = cases.filter((c) => {
     if (!c.createdDate) return false;
@@ -416,7 +426,7 @@ export default function AdminDashboard({ auth }) {
           <>
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-bold text-slate-800">{view === "logs" ? "Staff logs" : "Platform Overview"}</h2>
+                <h2 className="text-lg font-bold text-slate-800">{view === "pickup" ? "Pickup follow-up" : view === "logs" ? "Staff logs" : "Platform Overview"}</h2>
                 <p className="text-sm text-slate-500">
                   {view === "logs"
                     ? "Every sign-in and action across the platform — views, downloads, payments and more."
@@ -426,7 +436,7 @@ export default function AdminDashboard({ auth }) {
                 </p>
               </div>
               <nav className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
-                {[["overview", "Overview"], ["labaccess", "Lab access"], ["logs", "Staff logs"]].map(([id, label]) => (
+                {[["overview", "Overview"], ["pickup", "Pickup follow-up"], ["labaccess", "Lab access"], ["logs", "Staff logs"]].map(([id, label]) => (
                   <button
                     key={id}
                     onClick={() => setView(id)}
@@ -440,7 +450,9 @@ export default function AdminDashboard({ auth }) {
               </nav>
             </div>
 
-            {view === "logs" ? (
+            {view === "pickup" ? (
+              <PickupFollowup cases={cases} clinics={clinics} labs={labs} />
+            ) : view === "logs" ? (
               <StaffLogsPanel />
             ) : view === "labaccess" ? (
               <ClinicLabMatrix clinics={clinics} labs={labs} onFlagsChanged={load} />
