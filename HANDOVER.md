@@ -1,0 +1,170 @@
+# Dr-Crown — handover notes
+
+Everything a new developer (or coding agent) needs that **cannot be inferred
+from the code**. Read this before touching production.
+
+Live at **https://dr-crown.com** · real users: 6 labs, 11 clinics, 18 active
+accounts, ~1,650 statements. This is a production system handling real
+patients and real money. There is no staging environment.
+
+---
+
+## Stack
+
+| | |
+|---|---|
+| Frontend | React 18 + Vite 6 + Tailwind 3, PWA via vite-plugin-pwa. **No router** — `/` is the whole app, views switch on state |
+| Backend | Supabase (Postgres + PostgREST + Storage + Auth + Edge Functions), project `mtxkushcxczjwypwoxdh`, **Pro** plan |
+| Hosting | GitHub Pages from the `gh-pages` branch of `halajmix/dental-lab-tracker` (**public repo**) |
+| Email | Resend, from `Dr-Crown <noreply@dr-crown.com>`, called from Edge Functions |
+| Node | 22+ (developed on 26) |
+
+## Everyday commands
+
+```bash
+npm install
+npm run dev          # vite dev server
+npm run build        # production build
+./deploy.sh          # check + build + publish dist/ to gh-pages
+```
+
+## Key files
+
+| Path | What |
+|---|---|
+| `src/DentalLabTracker.jsx` | The main app — dashboards, case state, most handlers |
+| `src/LifecycleEngine.jsx` | Stages, case drawer, inline editors (price, discount, note, shade) |
+| `src/PrescriptionForm.jsx` | Rx authoring + shared helpers (`toothSummary`, `includedSummary`) |
+| `src/PrintInvoice.jsx` / `src/PrintReceipt.jsx` | A4 invoice and 80 mm thermal receipt |
+| `src/lib/invoiceDoc.js` | Money and work-item derivation **shared by both papers** — change it here or they disagree |
+| `src/lib/data.js` | Every Supabase call + row↔camelCase mapping (`PATCH_KEY_MAP`) |
+| `src/AdminDashboard.jsx` | Super-admin |
+| `supabase/schema.sql` | Full schema, RLS, triggers — the source of truth |
+| `supabase/migrations/` | Incremental SQL, applied **by hand** (see below) |
+| `supabase/functions/` | `admin-actions`, `case-notify`, `mobile-upload`, `payment-reminders` |
+
+## Database changes are manual
+
+There is no migration runner. You write SQL into `supabase/migrations/`, then
+**paste it into the Supabase SQL editor and run it**. The repo does not know
+what has actually been applied — verify with:
+
+```bash
+node scripts/schema-probe.mjs cases     # prints column names only, no data
+```
+
+End every migration with `notify pgrst, 'reload schema';` — see gotcha 6.
+
+## Ops scripts
+
+All read the service-role key from the **macOS Keychain** (`drcrown-service-key`)
+via `scripts/lib/serviceKey.mjs`.
+
+| Script | Purpose |
+|---|---|
+| `backup.mjs` | Full dump — all tables + both storage buckets → `~/DrCrown-Backups`, keeps 8. Weekly LaunchAgent `com.drcrown.backup` |
+| `health-check.mjs` | Row counts, crash reports, edge-function liveness, backup age |
+| `schema-probe.mjs` | One table's column names. Fastest "did that migration land?" |
+| `receipt-proof.mjs` | Renders the real receipt via CDP and asserts page geometry |
+| `check-jsx-undef.mjs` | Runs inside `deploy.sh` |
+| `audit.mjs`, `reprice.mjs` | One-off data tools |
+
+---
+
+## Gotchas — every one of these has already caused a production bug
+
+**1. `guard_lab_financial_columns` silently reverts finance writes.**
+Updates to `total_price`, `discount`, `invoice_status`, `base_fee`,
+`adjustments`, `billing_note` are reverted for any writer that is not the
+case's own lab. The SQL editor runs as `postgres`, not `service_role`, so
+data-fix pastes **appear to succeed and change nothing**. Prefix them with
+`set role service_role;` and end with a proof `SELECT`.
+
+**2. `price_case()` overwrites `total_price`.**
+It fires on any change to `prescription`, `remake` or `lab_id` and recomputes
+from the price list. This is why the lab discount is subtracted *inside* that
+function — otherwise a later Rx edit silently re-inflates the price. `total_price`
+is always the **payable** amount (net of discount); gross is derived, never stored,
+because `clinic_statements` sum that column and nothing recomputes a stored
+statement total afterwards.
+
+**3. `guard_prescription_edits()` strips lab-side Rx writes.**
+The lab cannot edit a prescription — the write succeeds and the change vanishes.
+Clinics get a 30-minute window from `created_at`. The prescription is the
+dentist's clinical order; this is deliberate.
+
+**4. `@page { size: 80mm auto }` is invalid CSS.**
+`size` takes `auto` OR one/two lengths, never both. Browsers drop the whole
+at-rule and print the default paper (US Letter), so a receipt written that way
+looks correct in source and prints completely wrong. `PrintReceipt.jsx`
+therefore **measures** the rendered sheet and injects `@page { size: 72mm <N>mm }`
+before printing.
+
+**5. The thermal printer's imageable width is 72 mm, not 80.**
+The Xprinter POS-80 driver names its papers `80(72mm) * <height>`. In the macOS
+print dialog the user must pick one of those and set **Scaling 100%** — left on
+A4 the 72 mm page is *centred* on a 210 mm sheet and lands ~69 mm to the right,
+off the roll. Also: Chrome's `--print-to-pdf` CLI flag **ignores** `@page` size,
+which is why `receipt-proof.mjs` drives DevTools Protocol with
+`preferCSSPageSize: true`.
+
+**6. PostgREST caches the schema.**
+After `ALTER TABLE`, writes to the new column can fail with PGRST204 even though
+the DDL succeeded — indistinguishable from the value silently vanishing.
+Always `notify pgrst, 'reload schema';`.
+
+**7. `is_admin()` is a single function used by 36 RLS policies** (`schema.sql:246`).
+It is the one chokepoint for all super-admin reads. It is **deliberately not
+gated** and admin accounts cannot be deactivated — see the no-self-lockout note
+at `schema.sql:5204` before changing it.
+
+**8. `client_errors` timestamps rows in `at`, not `created_at`.**
+
+**9. `station-session` returning 404 is correct** — that Edge Function's
+device-OTP step-up was removed 2026-08-13 for causing friction (it fired on IP
+rotation, so lab techs on cellular data hit OTP prompts during normal work).
+Nothing calls it.
+
+**10. `deploy.sh` publishes `dist/` to `gh-pages` and never commits source.**
+Deploying and committing are independent. It is easy to leave the live site
+running code that exists nowhere in git.
+
+**11. THE REPO IS PUBLIC.** Scan every diff for patient data before committing.
+The receipt test fixtures were once built from a real invoice and had to be
+scrubbed to fictional names. `scripts/.proof/` is gitignored for the same reason.
+
+---
+
+## Where security is actually enforced
+
+- **RLS** on all 25 API-exposed tables. Verified: an anonymous request with the
+  public `anon` key returns `[]`, not data.
+- **`admin-actions`** verifies the caller's JWT then re-checks `profiles.role = 'admin'`
+  server-side. The React UI is *not* a boundary.
+- **`case-photos` is a private bucket** (clinical photos, STL scans). `avatars`
+  is public — profile pictures only.
+- Only the `anon` key ships in the browser bundle. The service-role key is in
+  the Keychain and used by local scripts only.
+- Email **subjects** carry the case ID, never the patient's name; bodies do name
+  the patient, since the lab and clinic are both treating them.
+- Every case view is written to `login_events`.
+
+## Known open issues
+
+- **The clinic-invite accept flow looks broken.** Several invitees created
+  confirmed accounts and sign in regularly, yet their invitations stay `pending`
+  and they are attached to no clinic. Suspect the `?clinic_invite=<token>` is
+  lost across the signup / email-confirmation round trip.
+- **No handling for `#error=` / `otp_expired`** fragments — an expired email link
+  dumps the user on a bare login screen with no explanation and files a useless
+  "Script error." alert.
+- **`SUPPORT_PHONE` in `PrintReceipt.jsx` is one constant**, so every lab prints
+  the same number and their own `contact` is not printed at all.
+- **Patient-billed clinics are matched by name** (`PATIENT_BILLED_CLINICS` in
+  `lib/invoiceDoc.js`). Renaming the clinic silently reverts to billing it.
+  `billsPatientDirectly()` already checks `clinic.billsPatient` first, so a
+  `bills_patient` column is a drop-in fix.
+- **No account has MFA.** The `Admin` account can read every lab and impersonate
+  any user.
+- `supabase/migrations/20260908_demo_org_flag.sql` and `supabase/demo/` are
+  written but **not applied** — advertising/demo data, inert until run.
