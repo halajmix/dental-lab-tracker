@@ -188,3 +188,34 @@ End-to-end confirmation and acceptance still need an owner-controlled account;
 no accounts were created and no emails sent during these checks. No SQL changes.
 Production health also returned HTTP 500 for the empty mobile-upload probe; that
 is separate from this fix and has not been diagnosed.
+
+## 2026-09-09 finance organization — requires manual migration
+
+`supabase/migrations/20260909_finance_history.sql` enables a 2026-08-19
+history cutoff for the requested lab. Apply it manually, then probe `labs`
+and verify `finance_history_before` before deploying the frontend.
+
+Billing history includes old statements and expenses; current billing excludes
+old-only work and opening balances. Mixed or undated cutoff-month bills remain
+intact in both date views, labelled Spans cutoff. Pending payments defaults to
+outstanding records and can filter imported balances, imported bills and app
+bills. Its Paid/All statuses filter allows reopening settled opening balances.
+A read-only production classification found 1,629 historical, 2 current,
+5 mixed/undated and 9 opening-balance statements. One clinic has both an opening
+balance and unpaid imported bills; their possible overlap needs reconciliation,
+not automatic deletion or settlement.
+
+For the configured lab, accountants gain full same-lab finance history through
+RLS. Other labs retain the prior accountant window. Clicking Unpaid opens the
+existing payment form; clicking Paid requests a reason and calls the new
+lab-finance-only `reopen_clinic_statement` RPC. Reopening voids linked payments
+without deleting them, stores actor/reason/payment IDs in the append-only
+`statement_payment_corrections` audit table and resets linked paid cases to
+issued. Normal payment reads exclude voids even for older clients. Treasury
+keeps all available expenses in its balances while the ledger is date-filtered.
+
+Validation: `node --test tests/*.test.mjs`, JSX checks, production build,
+fictional browser preview, and disposable PGlite migration/RLS/correction tests
+in `tests/financeDatabase.mjs` (PGLITE_MODULE selects a scratch installation).
+Production records were only read; no live payment status was changed. The
+frontend and database migration must be verified together after owner rollout.

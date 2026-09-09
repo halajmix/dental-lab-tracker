@@ -1,0 +1,78 @@
+// Disposable PostgreSQL-compatible tests. Install @electric-sql/pglite in a
+// scratch directory and pass its module URL as PGLITE_MODULE to run.
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const {PGlite} = await import(process.env.PGLITE_MODULE || '@electric-sql/pglite');
+const db = new PGlite();
+const lab='00000000-0000-4000-8000-000000000001';
+const other='00000000-0000-4000-8000-000000000002';
+const user='00000000-0000-4000-8000-000000000003';
+const bill='00000000-0000-4000-8000-000000000004';
+const payment='00000000-0000-4000-8000-000000000005';
+await db.exec(`
+create role anon; create role authenticated;
+create schema auth;
+create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.user',true),'')::uuid $$;
+create function my_lab_id() returns uuid language sql stable as $$ select nullif(current_setting('test.lab',true),'')::uuid $$;
+create function is_admin() returns boolean language sql stable as $$ select current_setting('test.role',true) = 'superadmin' $$;
+create function is_lab_admin() returns boolean language sql stable as $$ select current_setting('test.role',true) = 'admin' $$;
+create function is_lab_accountant() returns boolean language sql stable as $$ select current_setting('test.role',true) = 'accountant' $$;
+create function is_lab_finance() returns boolean language sql stable as $$ select is_lab_admin() or is_lab_accountant() $$;
+create function accountant_cutoff() returns date language sql stable as $$ select date '2026-07-01' $$;
+create table labs(id uuid primary key);
+create table clinic_statements(id uuid primary key, lab_id uuid, clinic_id uuid, clinic_name text default '', month date, total numeric, status text);
+create table lab_payments(id uuid primary key, lab_id uuid, clinic_id uuid, statement_id uuid, amount numeric check(amount>0), received_date date);
+create table lab_expenses(id uuid primary key, lab_id uuid, expense_date date);
+create table cases(id uuid primary key, statement_id uuid, invoice_status text);
+insert into labs values ('${lab}'),('${other}');
+alter table clinic_statements enable row level security;
+alter table lab_payments enable row level security;
+alter table lab_expenses enable row level security;
+grant usage on schema auth to authenticated,anon;
+grant select,insert,update on clinic_statements,lab_payments,lab_expenses to authenticated;
+grant select on labs to authenticated;
+create policy payment_insert on lab_payments for insert with check (lab_id=my_lab_id() and is_lab_finance());
+create policy payment_update on lab_payments for update using (lab_id=my_lab_id() and is_lab_finance());
+`);
+const schema=readFileSync(new URL('../supabase/schema.sql',import.meta.url),'utf8');
+const triggerStart=schema.indexOf('create or replace function lab_payments_after_change()');
+const triggerEnd=schema.indexOf('-- statement_id joins',triggerStart);
+// The production after-change trigger must call the replacement recomputer.
+await db.exec(schema.slice(triggerStart,triggerEnd));
+const migration=readFileSync(new URL('../supabase/migrations/20260909_finance_history.sql',import.meta.url),'utf8').replaceAll('fb7401df-c26f-4f53-ab5a-a508ec490047',lab);
+await db.exec(migration);
+await db.exec(migration); // manual rerun must be safe
+await db.exec(`
+insert into clinic_statements values ('${bill}','${lab}',null,'',date '2018-01-01',100,'paid');
+insert into cases values ('${bill}','${bill}','paid');
+insert into lab_expenses values ('${bill}','${lab}',date '2018-01-01');
+select set_config('test.user','${user}',false),set_config('test.lab','${lab}',false),set_config('test.role','accountant',false);
+set role authenticated;
+`);
+const scalar=async sql => Object.values((await db.query(sql)).rows[0])[0];
+assert.equal(await scalar('select count(*)::int from clinic_statements'),1,'accountant sees historical paid bill');
+assert.equal(await scalar('select count(*)::int from lab_expenses'),1,'accountant sees historical expense');
+await db.query(`select reopen_clinic_statement($1,'paid','Correct historical settlement')`,[bill]);
+assert.equal(await scalar('select status from clinic_statements'),'unpaid');
+assert.equal(await scalar('select count(*)::int from statement_payment_corrections'),1);
+await assert.rejects(db.query(`select reopen_clinic_statement($1,'paid','Stale second click')`,[bill]),/changed/);
+await db.exec(`insert into lab_payments values ('${payment}','${lab}',null,'${bill}',100,current_date,null)`);
+assert.equal(await scalar('select status from clinic_statements'),'paid','payment settles bill');
+await assert.rejects(db.exec(`update lab_payments set voided_at=now()`),/correction action/);
+await db.query(`select reopen_clinic_statement($1,'paid','Payment entered in error')`,[bill]);
+assert.equal(await scalar('select count(*)::int from lab_payments'),0,'void excluded even for older clients');
+await db.exec('reset role');
+assert.equal(await scalar('select count(*)::int from lab_payments'),1,'original payment retained');
+assert.equal(await scalar('select invoice_status from cases'),'issued','linked case reopened');
+await db.exec(`select set_config('test.role','tech',false); set role authenticated;`);
+assert.equal(await scalar('select count(*)::int from clinic_statements'),0,'technician has no finance access');
+await assert.rejects(db.query(`select reopen_clinic_statement($1,'unpaid','Forbidden technician change')`,[bill]),/Only the lab/);
+await assert.rejects(db.query(`select statement_recompute($1)`,[bill]),/permission denied/);
+await db.exec(`reset role; select set_config('test.role','accountant',false),set_config('test.lab','${other}',false); set role authenticated;`);
+assert.equal(await scalar('select count(*)::int from clinic_statements'),0,'other lab sees nothing');
+await assert.rejects(db.query(`select reopen_clinic_statement($1,'unpaid','Forbidden cross-lab change')`,[bill]),/access denied/);
+await assert.rejects(db.exec(`insert into lab_payments values ('00000000-0000-4000-8000-000000000009','${other}',null,'${bill}',10,current_date,null)`),/same lab/);
+await db.exec('reset role; set role anon;');
+await assert.rejects(db.query(`select reopen_clinic_statement($1,'unpaid','Anonymous change')`,[bill]),/permission denied/);
+await db.close();
+console.log('Database checks passed: migration rerun, accountant history, settlement/reopening, retained audit, case status, stale updates, technician/anonymous/cross-lab denial.');

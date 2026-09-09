@@ -667,6 +667,8 @@ const ADMIN_TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "technicians", label: "Technicians", icon: Users },
   { id: "billing", label: "Billing", icon: FileText },
+  { id: "pending", label: "Pending payments", icon: Wallet },
+  { id: "history", label: "Billing history", icon: HistoryIcon },
   { id: "expenses", label: "Expenses", icon: Wallet },
   { id: "prices", label: "Price Lists", icon: Tags },
   { id: "staff", label: "Staff", icon: UserPlus },
@@ -675,11 +677,11 @@ const ADMIN_TABS = [
 
 // Accountants get the finance surface + Remakes (they set each return's cost
 // estimate and fault). Technicians never reach this workspace at all.
-const ACCOUNTANT_TAB_IDS = ["queue", "remakes", "billing", "expenses", "prices"];
+const ACCOUNTANT_TAB_IDS = ["queue", "remakes", "billing", "pending", "history", "expenses", "prices"];
 
 function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = [], onResolveRound, meId, financeOnly = false, isAdminPreview = false }) {
   const [tab, setTab] = useState("queue");
-  const tabs = financeOnly ? ADMIN_TABS.filter((t) => ACCOUNTANT_TAB_IDS.includes(t.id)) : ADMIN_TABS;
+  const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore));
   // The open-tab state survives switching between the Admin and Accountant
   // views — without this clamp, an admin-only tab (e.g. Staff logs) kept
   // rendering its CONTENT in the accountant view after its nav button was
@@ -691,7 +693,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
       {isAdminPreview && (
         <p className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-medium text-emerald-800">
           Viewing as Accountant — these are the tabs an accountant gets. Note: a real accountant also only
-          sees the last 2 months of bills, payments and expenses (plus any statement a clinic still owes on);
+          sees the lab’s permitted billing history and outstanding balances;
           as an admin you're shown everything.
         </p>
       )}
@@ -718,8 +720,11 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
         <OverviewDashboard cases={cases} clinicsById={clinicsById} lab={lab} />
       ) : activeTab === "technicians" ? (
         <TechniciansPanel lab={lab} cases={cases} />
-      ) : activeTab === "billing" ? (
-        <BillingPanel lab={lab} clinicsById={clinicsById} cases={cases} accountantView={financeOnly && !isAdminPreview} />
+      ) : ["billing", "pending", "history"].includes(activeTab) ? (
+        <div className="space-y-6">
+          <BillingPanel key={activeTab} view={activeTab === "billing" ? "current" : activeTab} lab={lab} clinicsById={clinicsById} cases={cases} accountantView={financeOnly && !isAdminPreview} />
+          {activeTab === "history" && <ExpensesPanel key="history-expenses" lab={lab} view="history" />}
+        </div>
       ) : activeTab === "expenses" ? (
         <ExpensesPanel lab={lab} />
       ) : activeTab === "prices" ? (

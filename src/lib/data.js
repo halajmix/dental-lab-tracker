@@ -29,6 +29,7 @@ export const labFromRow = (r) => ({
   // Advertising/demo org — badged in the super-admin screen so it is never
   // mistaken for a paying customer.
   isDemo: r.is_demo ?? false,
+  financeHistoryBefore: r.finance_history_before ?? null,
   // Who receives new-case emails; "" = the lab's general contact email.
   notifyEmail: r.notify_email ?? "",
   // Monthly unpaid-invoice reminder emails to clinics (Lab Settings toggle).
@@ -1558,7 +1559,7 @@ export async function fetchPayments(labId) {
   const rows = await fetchAllPages(() =>
     supabase.from("lab_payments").select("*").eq("lab_id", labId).order("received_date", { ascending: false }).order("id")
   );
-  return rows.map(paymentFromRow);
+  return rows.filter(r => !r.voided_at).map(paymentFromRow);
 }
 
 export async function fetchExpenses(labId) {
@@ -1598,6 +1599,14 @@ export async function insertPayment(labId, { clinicId, clinicName, statementId, 
     .single();
   if (error) throw error;
   return paymentFromRow(data);
+}
+
+// Atomic correction, with server-side lab/role checks and retained audit records.
+export async function reopenStatement(statementId, expectedStatus, reason) {
+  const { error } = await supabase.rpc("reopen_clinic_statement", {
+    p_statement: statementId, p_expected_status: expectedStatus, p_reason: reason,
+  });
+  if (error) throw error;
 }
 
 export async function markChequeCleared(paymentId) {
