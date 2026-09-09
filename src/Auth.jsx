@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { Mail, Lock, LogIn, UserPlus, Stethoscope, Building2, Loader2, ArrowLeft, CheckCircle2, KeyRound, Users } from "lucide-react";
-import { supabase } from "./lib/supabaseClient.js";
+import { supabase, authLinkError } from "./lib/supabaseClient.js";
 import { useAuth } from "./lib/useAuth.js";
 import { peekClinicInvitation, acceptClinicInvitation } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
 
+import { readClinicInvite, clearClinicInvite, invitationRedirect } from "./lib/authLinks.js";
+
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 
-// window.location.origin alone drops the "/dental-lab-tracker/" sub-path GitHub
-// Pages serves this app from, which 404s ("There isn't a GitHub Pages site
-// here"). import.meta.env.BASE_URL is "/dental-lab-tracker/" in prod builds
-// and "/" in dev (see vite.config.js), so this always lands on a real page.
-const authRedirectUrl = () => window.location.origin + import.meta.env.BASE_URL;
+// Preserve the configured app base and clinic context in email callbacks.
+const authRedirectUrl = () => invitationRedirect(window.location.origin, import.meta.env.BASE_URL, clinicInviteToken);
 
 // Staff-invitation deep link (Phase 21): the invite email links to
 // /?invite_email=<address>, which opens signup with the address pre-filled —
@@ -30,22 +29,11 @@ const inviteEmailParam = (() => {
 // Unlike the lab email-match flow above, the token IS the invitation —
 // peek_clinic_invitation() shows who/what it's for, and once a session
 // exists AuthGate routes through ClinicInviteAccept to bind the account.
-const clinicInviteToken = (() => {
-  try {
-    return new URLSearchParams(window.location.search).get("clinic_invite")?.trim() ?? "";
-  } catch {
-    return "";
-  }
-})();
+let clinicInviteToken = readClinicInvite(window);
 
 const clearClinicInviteParam = () => {
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("clinic_invite");
-    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
-  } catch {
-    /* cosmetic only */
-  }
+  clinicInviteToken = "";
+  try { clearClinicInvite(window); } catch { /* cosmetic only */ }
 };
 
 // One shared peek for the signup banner and the accept screen.
@@ -416,9 +404,50 @@ function SignupScreen({ onSwitch }) {
   );
 }
 
-function AuthScreen() {
+function EmailLinkErrorScreen({ message, onDone }) {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
+  const resend = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setResult("");
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup", email: email.trim(),
+        options: { emailRedirectTo: authRedirectUrl() },
+      });
+      setResult(error ? error.message : "If your account needs confirmation, a new link has been sent. Check your email.");
+    } catch {
+      setResult("Unable to request a link. Check your connection and try again.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <Shell>
+      <h2 className="mb-3 text-lg font-bold text-slate-800">Email link unavailable</h2>
+      <ErrorBanner message={message} />
+      <p className="mb-4 text-sm text-slate-600">
+        For a clinic invitation, ask the clinic to send a new link. For a password
+        reset, continue to log in and choose “Forgot password?”. To confirm your
+        account, request another confirmation email below.
+      </p>
+      <form onSubmit={resend} className="space-y-3">
+        <Field label="Email">
+          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+        </Field>
+        <button disabled={busy} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+          {busy ? "Requesting…" : "Send confirmation link"}
+        </button>
+        {result && <p role="status" className="text-sm text-slate-600">{result}</p>}
+      </form>
+      <button onClick={onDone} className="mt-4 w-full text-sm font-semibold text-blue-600">Continue to log in</button>
+    </Shell>
+  );
+}
+
+function AuthScreen({ initialMode }) {
   // An invitation link drops the visitor straight onto signup.
-  const [mode, setMode] = useState(inviteEmailParam || clinicInviteToken ? "signup" : "login"); // "login" | "signup" | "forgot"
+  const [mode, setMode] = useState(initialMode || (inviteEmailParam || clinicInviteToken ? "signup" : "login")); // "login" | "signup" | "forgot"
   if (mode === "signup") return <SignupScreen onSwitch={() => setMode("login")} />;
   if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
   return <LoginScreen onSwitch={() => setMode("signup")} onForgot={() => setMode("forgot")} />;
@@ -1046,6 +1075,9 @@ export function AuthGate({ children }) {
   // Clinic invite deep link: held in state so accepting (or declining)
   // dismisses the screen for the rest of the session.
   const [pendingClinicInvite, setPendingClinicInvite] = useState(clinicInviteToken);
+  const [linkError, setLinkError] = useState(authLinkError);
+
+  if (linkError) return <EmailLinkErrorScreen message={linkError} onDone={() => setLinkError("")} />;
 
   if (auth.loading || auth.session === undefined) {
     return (
@@ -1055,7 +1087,7 @@ export function AuthGate({ children }) {
     );
   }
 
-  if (!auth.session) return <AuthScreen />;
+  if (!auth.session) return <AuthScreen initialMode={authLinkError ? "login" : undefined} />;
 
   // A password-reset link signs the user in with a temporary session — force
   // the "set new password" screen before letting them into the app itself.

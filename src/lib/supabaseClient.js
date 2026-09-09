@@ -1,5 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
+import { consumeAuthLinkError } from "./authLinks.js";
+
+export const authLinkError = consumeAuthLinkError(window);
+
 const url = import.meta.env.VITE_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 

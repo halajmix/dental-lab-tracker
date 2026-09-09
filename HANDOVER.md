@@ -168,3 +168,23 @@ scrubbed to fictional names. `scripts/.proof/` is gitignored for the same reason
   any user.
 - `supabase/migrations/20260908_demo_org_flag.sql` and `supabase/demo/` are
   written but **not applied** — advertising/demo data, inert until run.
+
+## 2026-09-09 invitation follow-up (source fix)
+
+Read-only production check found one accepted and three pending invitations
+expiring September 16. Acceptance therefore works in at least one path; the
+confirmation redirect was nonetheless dropping the clinic token.
+
+The frontend now includes the token in signup/reset/resend redirects, remembers
+it locally for up to seven days, and clears it when the invitation screen is
+completed or dismissed. The server still validates the invitation and email.
+Failed auth fragments are consumed before Supabase initializes and shown in a
+recovery screen with confirmation resend and login options. No global suppression
+of generic script errors was added.
+
+Validation: `node --test tests/authLinks.test.mjs`, JSX checks, production build,
+and local browser verification of expired-link messaging and return to login.
+End-to-end confirmation and acceptance still need an owner-controlled account;
+no accounts were created and no emails sent during these checks. No SQL changes.
+Production health also returned HTTP 500 for the empty mobile-upload probe; that
+is separate from this fix and has not been diagnosed.
