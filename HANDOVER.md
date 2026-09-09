@@ -219,3 +219,31 @@ fictional browser preview, and disposable PGlite migration/RLS/correction tests
 in `tests/financeDatabase.mjs` (PGLITE_MODULE selects a scratch installation).
 Production records were only read; no live payment status was changed. The
 frontend and database migration must be verified together after owner rollout.
+
+## Clinic balance overview (2026-09-09)
+
+Pending payments is now Clinic balances: read-only grouped balances from
+opening debt, Excel bills and platform bills, minus payments applied to open
+bills. Settled bills remain available in the statement detail. Unallocated
+receipts are displayed separately, never silently deducted; opening cash imports
+can also produce such receipts. Integer thousandths keep OMR sums exact.
+Unique exact normalized clinic names can be grouped with a registered clinic;
+ambiguous matches and spelling variants are not merged or persisted.
+
+The user confirmed the pending sheet covers ALL paper-work debt through
+2026-08-31, including August, excluding digital Dr-Crown prescriptions.
+`20260909_paper_opening_snapshot.sql` records that cutoff for Smile World only.
+After owner application, covered imported bills (clinic_id null, kind work,
+month through August) are supporting history and excluded from receivables.
+The payment trigger rejects a new payment against such a covered bill; payment
+must target the opening balance instead. Digital bills remain collectible at
+any date. Future monthly paper imports after August remain collectible.
+No records are deleted or marked paid by this change. History PDFs identify
+covered bills as supporting history, not new amounts due.
+
+The production read-only rollup with the confirmed rule is 3,173 OMR:
+2,703 opening + 470 digital + 0 post-cutoff paper. The former 4,208 of unpaid
+paper bills is covered by the snapshot and must not be added again. Payment
+allocation and mismatched clinic-name reconciliation are still explicit; the
+UI does not infer aliases or deduct unlinked receipts. Tests cover the
+snapshot cutoff and server-side duplicate-collection guard as well as grouping.

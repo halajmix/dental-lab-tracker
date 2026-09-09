@@ -1,3 +1,5 @@
+import { coveredByOpeningBalance } from "./lib/clinicBalances.js";
+import ClinicBalances from "./ClinicBalances.jsx";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -114,6 +116,8 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
   // Table controls: omni-search, filters, sort, pagination, bulk selection.
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState(view === "pending" ? "outstanding" : "all");
+  const [clinicAccount, setClinicAccount] = useState(null);
+  const [showDetails, setShowDetails] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
@@ -137,7 +141,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     try {
       const [st, pay, lines] = await Promise.all([fetchStatements(lab.id), fetchPayments(lab.id), linesP]);
       if (lab.financeHistoryBefore && !lines) throw new Error("Statement dates could not load. Please retry.");
-      setStatements(st.map(s => ({ ...s, lineItems: lines?.get(s.id) ?? [] })));
+      setStatements(st.map(s => ({ ...s, lineItems: lines?.get(s.id) ?? [], openingHistory: coveredByOpeningBalance(s, lab.paperBalanceAsOf) })));
       setPayments(pay);
 
     } catch (err) {
@@ -213,7 +217,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     const m = new Map();
     const now = Date.now();
     for (const s of statements) {
-      const remaining = s.status === "paid" ? 0 : Math.max(0, s.total - (paidByStatement[s.id] ?? 0));
+      const remaining = s.status === "paid" || s.openingHistory ? 0 : Math.max(0, s.total - (paidByStatement[s.id] ?? 0));
       let bucket = null;
       if (remaining > 0) {
         const end = new Date(s.month + "T00:00:00");
@@ -233,6 +237,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
       "60+ days": { value: 0, count: 0, months: new Set() },
     };
     for (const s of statements) {
+      if (clinicAccount && !clinicAccount.statementIds.includes(s.id)) continue;
       const meta = statementMeta.get(s.id);
       if (meta?.bucket) {
         buckets[meta.bucket].value += meta.remaining;
@@ -241,7 +246,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
       }
     }
     return buckets;
-  }, [statements, statementMeta]);
+  }, [statements, statementMeta, clinicAccount]);
   const outstanding = Object.values(aging).reduce((a, b) => a + b.value, 0);
 
   // Tile headline: the billed month(s) actually sitting in the bucket —
@@ -271,7 +276,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
   const summary = useMemo(() => {
     if (!activeSummaryMonth) return null;
     const monthSts = statements.filter((s) => s.month === activeSummaryMonth);
-    const work = monthSts.reduce((a, s) => a + (s.kind === "opening_balance" ? 0 : s.total), 0);
+    const work = monthSts.reduce((a, s) => a + (s.kind === "opening_balance" || s.openingHistory ? 0 : s.total), 0);
     const opening = monthSts.reduce((a, s) => a + (s.kind === "opening_balance" ? s.total : 0), 0);
     const scopedIds = new Set(statements.map(s => s.id));
     const received = payments
@@ -362,6 +367,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
   const filtered = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     return statements.filter((s) => {
+      if (clinicAccount && !clinicAccount.statementIds.includes(s.id)) return false;
       if (sourceFilter !== "all" && (s.kind === "opening_balance" ? "opening" : s.clinicId ? "system" : "imported") !== sourceFilter) return false;
       if (!["all", "outstanding"].includes(statusFilter) && s.status !== statusFilter) return false;
       if (yearFilter !== "all" && !s.month.startsWith(yearFilter)) return false;
@@ -373,7 +379,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
       }
       return true;
     });
-  }, [statements, query, sourceFilter, statusFilter, yearFilter, monthFilter, agingFilter, statementMeta, searchIndex]);
+  }, [statements, query, clinicAccount, sourceFilter, statusFilter, yearFilter, monthFilter, agingFilter, statementMeta, searchIndex]);
 
   const sorted = useMemo(() => {
     const val = {
@@ -471,8 +477,8 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
           s.month?.slice(0, 7) ?? "",
           Number(s.total ?? 0),
           Number(paidSoFar ?? 0),
-          Math.max(0, Number(s.total ?? 0) - Number(paidSoFar ?? 0)),
-          s.status,
+          s.openingHistory ? 0 : Math.max(0, Number(s.total ?? 0) - Number(paidSoFar ?? 0)),
+          s.openingHistory ? "Included in opening balance" : s.status,
         ]),
       ];
       const detail = [["Clinic", "Month", "Date", "Invoice", "Patient", "Doctor", "Procedure", "Units", "Price", "Amount (OMR)"]];
@@ -528,14 +534,20 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     <div className="space-y-4">
       {error && <ErrorBanner message={error} onRetry={load} />}
 
-      <h2 className="text-lg font-bold text-slate-800">{view === "history" ? "Billing history" : view === "pending" ? "Pending clinic payments" : "Billing"}</h2>
+      <h2 className="text-lg font-bold text-slate-800">{view === "history" ? "Billing history" : view === "pending" ? "Clinic balances" : "Billing"}</h2>
       {lab.financeHistoryBefore && <p className="text-sm text-slate-500">
-        {view === "history" ? `Work before ${lab.financeHistoryBefore}.` : view === "pending" ? "Outstanding statements from imported records and the application. Opening balances are labelled separately." : `Work from ${lab.financeHistoryBefore} onwards. Older work is in Billing history; opening balances are in Pending payments.`}
+        {view === "history" ? (lab.paperBalanceAsOf ? `Paper bills through ${lab.paperBalanceAsOf} are supporting history for the opening balance. Earlier digital records also remain here.` : `Work before ${lab.financeHistoryBefore}.`) : view === "pending" ? "Outstanding statements from imported records and the application. Opening balances are labelled separately." : `Work from ${lab.financeHistoryBefore} onwards. Older work is in Billing history; opening balances are in Clinic balances.`}
         {view !== "pending" && " Bills spanning the cutoff appear in both date views with their full balance. Do not add the two views together."}
       </p>}
-      {view === "pending" && hasOpeningOverlap && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+      {view === "pending" && !lab.paperBalanceAsOf && hasOpeningOverlap && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
         A clinic has both an imported opening balance and unpaid imported bills. Check whether those bills are already included in that balance before collecting both. Use the source filter to review them separately.
       </p>}
+      {view === "pending" && <>
+        <ClinicBalances paperBalanceAsOf={lab.paperBalanceAsOf} statements={allStatements} payments={payments} clinicsById={clinicsById} loading={loading} error={error} unbilled={unbilled}
+          onReview={account=>{setClinicAccount(account);setShowDetails(true);setQuery("");setSourceFilter("all");setStatusFilter("all");setYearFilter("all");setMonthFilter("all");setAgingFilter(null);setSelected(new Set());setPage(1);}} />
+        <button onClick={()=>{setClinicAccount(null);setShowDetails(!showDetails);setSelected(new Set());}} className="rounded-lg border bg-white px-4 py-2 text-sm font-semibold text-slate-600">{showDetails ? "Hide statement details" : "Show statement details and debt age"}</button>
+        {showDetails && clinicAccount && <p className="text-sm font-semibold text-blue-700">Statements for {clinicAccount.name}</p>}
+      </>}
       {/* Generate */}
       {view === "current" && <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
         <FileText size={15} className="shrink-0 text-blue-600" />
@@ -613,6 +625,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
         </div>
       )}
 
+      {(view !== "pending" || showDetails) && <>
       {/* Aging — each card doubles as a quick-filter for the table below */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Object.entries(aging).map(([label, { value, count, months }]) => {
@@ -806,7 +819,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                         <td className="max-w-[180px] py-2.5 pr-3 font-semibold text-slate-700">
                           <span className="flex items-center gap-1.5">
                             <span className="truncate">{clinicLabel(s)}</span>
-                            {view === "pending" && s.kind !== "opening_balance" && <span className="text-[10px] text-slate-500">{s.clinicId ? "Application" : "Imported bill"}</span>}
+                            {s.kind !== "opening_balance" && <span className="text-[10px] text-slate-500">{s.clinicId ? "Application" : "Imported bill"}</span>}
                             {statementPeriod(s, lab.financeHistoryBefore, cases) === "mixed" && <span className="text-[10px] text-amber-700">Spans cutoff</span>}
                             {s.kind === "opening_balance" && (
                               <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
@@ -827,19 +840,19 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                         </td>
                         <td className="py-2.5 pr-3">
                           <button
-                            disabled={reopening || (s.status === "paid" && !lab.financeHistoryBefore)}
+                            disabled={s.openingHistory || reopening || (s.status === "paid" && !lab.financeHistoryBefore)}
                             onClick={e => { e.stopPropagation(); s.status === "paid" ? markUnpaid(s) : setPayFor(s); }}
                             title={s.status === "paid" ? "Correct to unpaid" : "Record payment to mark paid"}
                             className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${STATUS_BADGE[s.status]}`}
-                          >{s.status}</button>
+                          >{s.openingHistory ? "Included in opening balance" : s.status}</button>
                         </td>
                         <td className="py-2.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                          {s.status !== "paid" && (
+                          {!s.openingHistory && s.status !== "paid" && (
                             <button onClick={() => setPayFor(s)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:border-emerald-300 hover:text-emerald-700">
                               Record payment
                             </button>
                           )}
-                          {s.status === "partial" && lab.financeHistoryBefore && <button disabled={reopening} onClick={() => markUnpaid(s)} className="ml-1 rounded-lg border px-2 py-1 text-xs">Mark unpaid</button>}
+                          {!s.openingHistory && s.status === "partial" && lab.financeHistoryBefore && <button disabled={reopening} onClick={() => markUnpaid(s)} className="ml-1 rounded-lg border px-2 py-1 text-xs">Mark unpaid</button>}
                           <button onClick={() => downloadPdf(s)} title="Download PDF" className="ml-1.5 rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:border-blue-300 hover:text-blue-700">
                             <Download size={13} />
                           </button>
@@ -927,6 +940,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
         )}
       </div>
 
+      </>}
       {view !== "pending" && <ImportHistoryCard lab={lab} onImported={load} accountantView={accountantView} />}
 
       <RecordPaymentModal

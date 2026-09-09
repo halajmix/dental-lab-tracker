@@ -30,6 +30,7 @@ export const labFromRow = (r) => ({
   // mistaken for a paying customer.
   isDemo: r.is_demo ?? false,
   financeHistoryBefore: r.finance_history_before ?? null,
+  paperBalanceAsOf: r.paper_balance_as_of ?? null,
   // Who receives new-case emails; "" = the lab's general contact email.
   notifyEmail: r.notify_email ?? "",
   // Monthly unpaid-invoice reminder emails to clinics (Lab Settings toggle).

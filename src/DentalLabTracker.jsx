@@ -667,7 +667,7 @@ const ADMIN_TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "technicians", label: "Technicians", icon: Users },
   { id: "billing", label: "Billing", icon: FileText },
-  { id: "pending", label: "Pending payments", icon: Wallet },
+  { id: "pending", label: "Clinic balances", icon: Wallet },
   { id: "history", label: "Billing history", icon: HistoryIcon },
   { id: "expenses", label: "Expenses", icon: Wallet },
   { id: "prices", label: "Price Lists", icon: Tags },

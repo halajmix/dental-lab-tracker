@@ -74,5 +74,12 @@ await assert.rejects(db.query(`select reopen_clinic_statement($1,'unpaid','Forbi
 await assert.rejects(db.exec(`insert into lab_payments values ('00000000-0000-4000-8000-000000000009','${other}',null,'${bill}',10,current_date,null)`),/same lab/);
 await db.exec('reset role; set role anon;');
 await assert.rejects(db.query(`select reopen_clinic_statement($1,'unpaid','Anonymous change')`,[bill]),/permission denied/);
+await db.exec("reset role; alter table clinic_statements add column kind text default 'work';");
+const snapshot=readFileSync(new URL('../supabase/migrations/20260909_paper_opening_snapshot.sql',import.meta.url),'utf8').replaceAll('fb7401df-c26f-4f53-ab5a-a508ec490047',lab);
+await db.exec(snapshot);
+await db.exec(`select set_config('test.role','accountant',false),set_config('test.lab','${lab}',false); set role authenticated;`);
+await assert.rejects(db.exec(`insert into lab_payments values ('00000000-0000-4000-8000-000000000019','${lab}',null,'${bill}',10,current_date,null)`),/included in the opening balance/);
+await db.exec(`reset role; update clinic_statements set kind='opening_balance' where id='${bill}'; set role authenticated;`);
+await db.exec(`insert into lab_payments values ('00000000-0000-4000-8000-000000000020','${lab}',null,'${bill}',10,current_date,null)`);
 await db.close();
 console.log('Database checks passed: migration rerun, accountant history, settlement/reopening, retained audit, case status, stale updates, technician/anonymous/cross-lab denial.');

@@ -1,5 +1,6 @@
 // Date views never split or duplicate database rows or change money.
 export function statementPeriod(statement, cutoff, cases = []) {
+  if (statement.openingHistory) return 'history';
   if (!cutoff) return 'current';
   if (statement.kind === 'opening_balance') return 'opening';
   const dates = (statement.lineItems ?? []).map(l => l.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d ?? ''));
@@ -18,6 +19,7 @@ export function statementPeriod(statement, cutoff, cases = []) {
 }
 
 export function statementInView(statement, view, cutoff, cases, paid = 0, includeSettled = false) {
+  if (view === 'pending' && statement.openingHistory) return false;
   if (view === 'pending') return includeSettled || statement.status !== 'paid' && statement.total - paid > 0.0005;
   const period = statementPeriod(statement, cutoff, cases);
   if (view === 'history') return period === 'history' || period === 'mixed';

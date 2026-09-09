@@ -14,7 +14,7 @@ export const IMPORT_CATEGORIES = [
   {
     id: "bills",
     label: "Bills per clinic per month",
-    hint: "Columns: clinic, month/date, total — optional: paid. One statement per row.",
+    hint: "Columns: clinic, month/date, total — optional: paid. One statement per row. For monthly paper work, exclude cases already billed through Dr-Crown and do not also upload the Work sheet for the same bills.",
   },
   {
     id: "work",
@@ -34,7 +34,7 @@ export const IMPORT_CATEGORIES = [
   {
     id: "pending",
     label: "Pending payments — all clinics",
-    hint: "Columns: clinic, amount — optional: month/date (defaults to last month). Becomes unpaid opening-balance statements.",
+    hint: "Columns: clinic, amount — optional: month/date (defaults to last month). Becomes unpaid opening-balance statements. Upload the opening debt once with its actual as-of date; do not re-upload a running balance every month. Bills covered by it need reconciliation before collecting both.",
   },
   {
     id: "spending",
