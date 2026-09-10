@@ -102,7 +102,7 @@ const recentMonths = () => {
   return out.map((m) => `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-01`);
 };
 
-export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView = false, view = "current" }) {
+export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView = false, view = "current", initialReview = null }) {
   const [allStatements, setStatements] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -115,9 +115,9 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
   const [openStatementId, setOpenStatementId] = useState(null);
   // Table controls: omni-search, filters, sort, pagination, bulk selection.
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState(view === "pending" ? "outstanding" : "all");
-  const [clinicAccount, setClinicAccount] = useState(null);
-  const [showDetails, setShowDetails] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(view === "pending" && !initialReview ? "outstanding" : "all");
+  const [clinicAccount, setClinicAccount] = useState(initialReview);
+  const [showDetails, setShowDetails] = useState(!!initialReview);
   const [sourceFilter, setSourceFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
@@ -534,9 +534,9 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     <div className="space-y-4">
       {error && <ErrorBanner message={error} onRetry={load} />}
 
-      <h2 className="text-lg font-bold text-slate-800">{view === "history" ? "Billing history" : view === "pending" ? "Clinic balances" : "Billing"}</h2>
+      <h2 className="text-lg font-bold text-slate-800">{view === "history" ? "Billing history" : view === "pending" ? "Outstanding Balances" : "Billing"}</h2>
       {lab.financeHistoryBefore && <p className="text-sm text-slate-500">
-        {view === "history" ? (lab.paperBalanceAsOf ? `Paper bills through ${lab.paperBalanceAsOf} are supporting history for the opening balance. Earlier digital records also remain here.` : `Work before ${lab.financeHistoryBefore}.`) : view === "pending" ? "Outstanding statements from imported records and the application. Opening balances are labelled separately." : `Work from ${lab.financeHistoryBefore} onwards. Older work is in Billing history; opening balances are in Clinic balances.`}
+        {view === "history" ? (lab.paperBalanceAsOf ? `Paper bills through ${lab.paperBalanceAsOf} are supporting history for the opening balance. Earlier digital records also remain here.` : `Work before ${lab.financeHistoryBefore}.`) : view === "pending" ? "Outstanding statements from imported records and the application. Opening balances are labelled separately." : `Work from ${lab.financeHistoryBefore} onwards. Older work is in Billing history; opening balances are in Outstanding Balances.`}
         {view !== "pending" && " Bills spanning the cutoff appear in both date views with their full balance. Do not add the two views together."}
       </p>}
       {view === "pending" && !lab.paperBalanceAsOf && hasOpeningOverlap && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
@@ -547,7 +547,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
         <ClinicBalances paperBalanceAsOf={lab.paperBalanceAsOf} statements={allStatements} payments={payments} clinicsById={clinicsById} loading={loading} error={error} unbilled={unbilled}
           onReview={account=>{setClinicAccount(account);setShowDetails(true);setQuery("");setSourceFilter("all");setStatusFilter("all");setYearFilter("all");setMonthFilter("all");setAgingFilter(null);setSelected(new Set());setPage(1);}} />
         </div>
-        <button onClick={()=>{setClinicAccount(null);setShowDetails(!showDetails);setSelected(new Set());}} className="rounded-lg border bg-white px-4 py-2 text-sm font-semibold text-slate-600">{showDetails ? "← Back to clinic balances" : "Show all statement details and debt age"}</button>
+        <button onClick={()=>{setClinicAccount(null);setShowDetails(!showDetails);setSelected(new Set());}} className="rounded-lg border bg-white px-4 py-2 text-sm font-semibold text-slate-600">{showDetails ? "← Back to outstanding balances" : "Show all statement details and debt age"}</button>
         {showDetails && clinicAccount && <p className="text-sm font-semibold text-blue-700">Statements for {clinicAccount.name}</p>}
       </>}
       {/* Generate */}
@@ -674,7 +674,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                 />
               </label>
               {view === "pending" && <select aria-label="Payment source" value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); setPage(1); }} className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs">
-                <option value="all">All sources</option><option value="opening">Imported pending balances</option><option value="system">Application bills</option><option value="imported">Historical imported bills</option>
+                <option value="all">All sources</option><option value="opening">Imported pending balances</option><option value="system">Application bills</option><option value="imported">Excel / paper bills</option>
               </select>}
               <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600">
                 <option value="all">All years</option>
@@ -822,7 +822,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
                         <td className="max-w-[180px] py-2.5 pr-3 font-semibold text-slate-700">
                           <span className="flex items-center gap-1.5">
                             <span className="truncate">{clinicLabel(s)}</span>
-                            {s.kind !== "opening_balance" && <span className="text-[10px] text-slate-500">{s.clinicId ? "Application" : "Imported bill"}</span>}
+                            {s.kind !== "opening_balance" && <span className="text-[10px] text-slate-500">{s.clinicId ? "Application" : s.lineItems?.some(l=>l.manualWorkId) ? "Paper entry" : "Imported bill"}</span>}
                             {statementPeriod(s, lab.financeHistoryBefore, cases) === "mixed" && <span className="text-[10px] text-amber-700">Spans cutoff</span>}
                             {s.kind === "opening_balance" && (
                               <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
@@ -1415,7 +1415,7 @@ function ImportHistoryCard({ lab, onImported, accountantView = false }) {
   // the lab admin sees all of it. Without this note a successful historical
   // import looks like it "did nothing".
   const accountantNote =
-    "Heads-up for accountant accounts: imported statements that are fully PAID and older than 2 months (and old payments/expenses) won't show in your view — the lab admin sees the full history. Unpaid statements always show.";
+    lab.financeHistoryBefore ? "Your lab’s full billing history is available in Billing history; unpaid debt remains in Outstanding Balances." : "Older settled records may be outside your permitted history window. Unpaid statements always show.";
 
   const pickFile = async (e) => {
     const file = e.target.files?.[0];

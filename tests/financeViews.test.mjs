@@ -20,7 +20,7 @@ test('unknown cutoff-month dates are never silently archived', () => {
   assert.equal(statementPeriod({...bill,month:'2018-02-01'},cutoff),'history');
 });
 test('platform case dates respect Oman midnight', () => {
-  assert.equal(statementPeriod(bill,cutoff,[{statementId:bill.id,createdAt:'2026-08-18T21:00:00Z'}]),'current');
+  assert.equal(statementPeriod(bill,cutoff,[{statementId:bill.id,stageIndex:3,createdAt:'2026-08-01T00:00:00Z',history:[{action:'advance',toStage:3,at:'2026-08-18T21:00:00Z'}]}]),'current');
 });
 test('pending includes opening balances and system bills but excludes settled bills', () => {
   assert.ok(statementInView({...bill,kind:'opening_balance'},'pending',cutoff,[]));

@@ -70,6 +70,7 @@ import {
 import { AnalyticsDashboard, computeAnalytics, caseFee } from "./Analytics.jsx";
 import { PriceListsManager, OverviewDashboard, TechniciansPanel, StaffPanel, LabStaffLogsPanel, RemakesPanel } from "./LabAdmin.jsx";
 import { BillingPanel, ExpensesPanel } from "./LabFinance.jsx";
+import WorkLedger, {TechnicianPaperWork} from "./WorkLedger.jsx";
 import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import PrintInvoice from "./PrintInvoice.jsx";
@@ -667,7 +668,9 @@ const ADMIN_TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "technicians", label: "Technicians", icon: Users },
   { id: "billing", label: "Billing", icon: FileText },
-  { id: "pending", label: "Clinic balances", icon: Wallet },
+  { id: "pending", label: "Outstanding Balances", icon: Wallet },
+  { id: "allwork", label: "All Work", icon: ClipboardCheck },
+  { id: "summary", label: "Summary", icon: LayoutDashboard },
   { id: "history", label: "Billing history", icon: HistoryIcon },
   { id: "expenses", label: "Expenses", icon: Wallet },
   { id: "prices", label: "Price Lists", icon: Tags },
@@ -677,11 +680,12 @@ const ADMIN_TABS = [
 
 // Accountants get the finance surface + Remakes (they set each return's cost
 // estimate and fault). Technicians never reach this workspace at all.
-const ACCOUNTANT_TAB_IDS = ["queue", "remakes", "billing", "pending", "history", "expenses", "prices"];
+const ACCOUNTANT_TAB_IDS = ["queue", "remakes", "billing", "pending", "allwork", "summary", "history", "expenses", "prices"];
 
 function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = [], onResolveRound, meId, financeOnly = false, isAdminPreview = false }) {
   const [tab, setTab] = useState("queue");
-  const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore));
+  const [reviewAccount,setReviewAccount] = useState(null);
+  const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore) && (!["allwork","summary"].includes(t.id) || lab.workLedgerEnabled));
   // The open-tab state survives switching between the Admin and Accountant
   // views — without this clamp, an admin-only tab (e.g. Staff logs) kept
   // rendering its CONTENT in the accountant view after its nav button was
@@ -701,7 +705,7 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setTab(id)}
+            onClick={() => {setTab(id);setReviewAccount(null);}}
             className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
               activeTab === id ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
             }`}
@@ -720,9 +724,12 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
         <OverviewDashboard cases={cases} clinicsById={clinicsById} lab={lab} />
       ) : activeTab === "technicians" ? (
         <TechniciansPanel lab={lab} cases={cases} />
+      ) : ["allwork","summary"].includes(activeTab) ? (
+        <WorkLedger key={activeTab} lab={lab} clinicsById={clinicsById} cases={cases} summary={activeTab==="summary"} onReview={account=>{setReviewAccount(account);setTab("pending");}} />
       ) : ["billing", "pending", "history"].includes(activeTab) ? (
         <div className="space-y-6">
-          <BillingPanel key={activeTab} view={activeTab === "billing" ? "current" : activeTab} lab={lab} clinicsById={clinicsById} cases={cases} accountantView={financeOnly && !isAdminPreview} />
+          <BillingPanel key={`${activeTab}:${reviewAccount?.key || "all"}`} initialReview={activeTab==="pending"?reviewAccount:null} view={activeTab === "billing" ? "current" : activeTab} lab={lab} clinicsById={clinicsById} cases={cases} accountantView={financeOnly && !isAdminPreview} />
+          {activeTab === "history" && lab.workLedgerEnabled && <WorkLedger lab={lab} clinicsById={clinicsById} cases={cases} history />}
           {activeTab === "history" && <ExpensesPanel key="history-expenses" lab={lab} view="history" />}
         </div>
       ) : activeTab === "expenses" ? (
@@ -1595,6 +1602,8 @@ export default function DentalLabTracker({ auth }) {
           <SuspendedScreen labName={lab?.name} onSignOut={signOut} />
         ) : (() => {
           const labDashboard = (
+            <>
+            <TechnicianPaperWork lab={lab} clinicsById={clinicsById} />
             <LabDashboard
               lab={lab}
               queue={labQueue}
@@ -1613,6 +1622,7 @@ export default function DentalLabTracker({ auth }) {
               onResolveCancellation={resolveCancellation}
               onExportCsv={() => { logActivity("exported cases CSV", `${labQueue.length} cases`); exportCasesCSV(labQueue, labs, (c) => clinicsById[c.clinicId]?.dentist ?? "—", `dentatrack-${lab.id}-cases.csv`); }}
             />
+            </>
           );
           return activeWorkspace === "admin" || activeWorkspace === "accountant" ? (
             <LabAdminWorkspace

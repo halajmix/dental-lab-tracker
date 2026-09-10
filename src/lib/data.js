@@ -30,6 +30,7 @@ export const labFromRow = (r) => ({
   // mistaken for a paying customer.
   isDemo: r.is_demo ?? false,
   financeHistoryBefore: r.finance_history_before ?? null,
+  workLedgerEnabled: r.work_ledger_enabled ?? false,
   paperBalanceAsOf: r.paper_balance_as_of ?? null,
   // Who receives new-case emails; "" = the lab's general contact email.
   notifyEmail: r.notify_email ?? "",
@@ -1756,4 +1757,14 @@ export async function importFinanceRows(labId, { statements = [], payments = [],
     );
     if (error) throw error;
   });
+}
+
+// Paper work is written atomically with its bill and audit by a scoped RPC.
+export async function fetchManualLabWork(labId) {
+  return fetchAllPages(() => supabase.from('manual_lab_work').select('*').eq('lab_id',labId).order('id'));
+}
+export async function saveManualLabWork(id, revision, entry) {
+  const {data,error}=await supabase.rpc('save_manual_lab_work',{p_id:id,p_revision:revision,p_entry:entry});
+  if(error)throw error;
+  return data;
 }

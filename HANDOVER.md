@@ -270,3 +270,40 @@ Pause using `update pickup_digest_settings set enabled=false where id=true;`.
 Email delivery is NOT active until the new function and migration are deployed.
 Tests: pickupMonitor.test.mjs, pickupDigest.mjs (mocked mail, no real sends),
 and pickupSchedule.mjs (disposable PGlite). Browser checked with fictional cases.
+
+
+## September finance workspace (2026-09-10)
+
+`20260910_work_ledger.sql` is owner-applied. It sets every lab's history boundary
+to 1 September 2026 (also defaults for new labs), preserves the existing paper
+snapshot configuration, and enables `work_ledger_enabled`. Client tabs and
+paper entry are hidden until this flag is returned. Outstanding Balances is
+the renamed Clinic balances; its receivable formula is unchanged.
+
+All Work groups completed cases and dated imported/manual line items by clinic.
+It uses actual stage-3 completion history in Oman time, never submission date;
+cancelled/in-progress cases are excluded. Missing completion dates or aggregate
+paper bills are flagged rather than inventing dates or patient details. Digital
+statements are not counted again as work. Payment status never hides production.
+Older dated work appears alongside bills and expenses in Billing history.
+
+Summary shows current-period production and applied payments, all-date billed
+receivables, unbilled completed work, and unlinked receipts separately. Work is
+not added a second time to outstanding statements. Unlinked receipts are never
+automatically deducted. No new opening debt is inferred for other labs.
+
+Manual paper work is saved by an active same-lab tech/admin/accountant through
+`save_manual_lab_work`; it atomically creates a separate imported-style statement
+and an append-only audit. Null clinic_id deliberately avoids the digital monthly
+generator overwriting paper amounts. Names use the existing unique exact match
+for grouping; spelling variants need explicit review. Invoice numbers are required
+and cannot reuse existing digital/imported/manual references within the lab.
+Totals-only imports overlapping manual entries are blocked for review. Changes
+require the current revision; paid entries need payment correction first. Techs
+can submit work without gaining access to statements or payments. SQL guards
+protect direct API writes and duplicate paper/digital invoice references.
+
+Tests: workLedger.test.mjs, workLedgerDatabase.mjs (PGlite), existing finance and
+JSX/build checks. Browser verification uses fictional fixtures only. Database
+migration activation must be checked after owner application; no live work or
+payments were entered during implementation.

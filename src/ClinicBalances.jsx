@@ -7,7 +7,7 @@ export default function ClinicBalances({statements, payments, clinicsById, loadi
   const visible=accounts.filter(a=>a.name.toLowerCase().includes(query.trim().toLowerCase()));
   const total=visible.reduce((n,a)=>n+a.remaining,0);
   const receipts=visible.reduce((n,a)=>n+a.unallocated,0);
-  if(loading)return <p className="py-8 text-slate-500">Loading clinic balances…</p>;
+  if(loading)return <p className="py-8 text-slate-500">Loading outstanding balances…</p>;
   if(error)return <p className="text-sm text-slate-500">Balances are unavailable until the billing data reloads successfully.</p>;
   return <section className="space-y-4">
     <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
