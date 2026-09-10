@@ -346,3 +346,10 @@ Tests: monthlyFinance.test.mjs, autoBillingDatabase.mjs (PGlite), existing tests
 JSX/build checks, fictional browser checks of monthly expenses, month selection
 and missing-lab recovery. Activation still requires owner application and a
 read-only verification afterwards.
+
+Automatic billing activation verified after owner application: all six labs
+have auto_completed_billing=true. All four eligible completed priced cases
+from September are linked to bills, with no missing links, lab/clinic mismatch,
+completion-month mismatch, bill-total mismatch or payment-status mismatch.
+The September cutoff and existing paper opening snapshot are preserved.
+Verification was read-only; no test work or payments were created.
