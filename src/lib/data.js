@@ -1769,3 +1769,14 @@ export async function saveManualLabWork(id, revision, entry) {
   if(error)throw error;
   return data;
 }
+
+
+export async function fetchPaperWorkClinics(labId, clinicsById = {}) {
+  const {data,error}=await supabase.rpc('paper_work_clinics');
+  if(!error)return data.map(row=>row.name);
+  // During manual rollout, finance staff can use their existing RLS-scoped
+  // statement access. Techs see no finance data and cannot type a substitute.
+  if(error.code!=='PGRST202')throw error;
+  const statements=await fetchStatements(labId);
+  return [...new Set(statements.map(s=>(clinicsById[s.clinicId]?.name || s.clinicName || '').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+}

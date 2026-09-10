@@ -1,5 +1,5 @@
 import React, {useEffect,useMemo,useState} from 'react';
-import {fetchStatements,fetchStatementLineItems,fetchPayments,fetchManualLabWork,saveManualLabWork} from './lib/data.js';
+import {fetchStatements,fetchStatementLineItems,fetchPayments,fetchManualLabWork,saveManualLabWork,fetchPaperWorkClinics} from './lib/data.js';
 import {workLedger,monthlyFinanceSummary,FINANCE_START,omanDate,workCompletedDate} from './lib/workLedger.js';
 const money=n=>n==null?'—':`${Number(n).toLocaleString('en-GB',{maximumFractionDigits:3})} OMR`;
 const field='w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
@@ -8,13 +8,17 @@ export function PaperWorkForm({lab,clinicsById,onSaved,onClose,existing}) {
   const [id]=useState(()=>existing?.id || crypto.randomUUID());
   const [entry,setEntry]=useState(()=>existing?.entry || {clinicName:'',date:omanDate(new Date()),invoice:'',patient:'',dentist:'',procedure:'',units:'1',price:''});
   const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [clinicNames,setClinicNames]=useState([]),[clinicsLoading,setClinicsLoading]=useState(true),[clinicError,setClinicError]=useState('');
+  useEffect(()=>{let active=true;setClinicsLoading(true);setClinicError('');fetchPaperWorkClinics(lab.id,clinicsById).then(names=>{if(active)setClinicNames(names);}).catch(e=>{if(active)setClinicError('Could not load billing clinics: '+e.message);}).finally(()=>{if(active)setClinicsLoading(false);});return()=>{active=false;};},[lab.id]);
   const update=(key,value)=>setEntry(e=>({...e,[key]:value}));
-  async function save(e){e.preventDefault();if(busy)return;setBusy(true);setError('');try{await saveManualLabWork(id,existing?.revision ?? null,entry);await onSaved?.();onClose();}catch(err){setError(err.message);}finally{setBusy(false);}}
+  async function save(e){e.preventDefault();if(busy)return;if(!clinicNames.includes(entry.clinicName)){setError('Select a clinic from the list.');return;}setBusy(true);setError('');try{await saveManualLabWork(id,existing?.revision ?? null,entry);await onSaved?.();onClose();}catch(err){setError(err.message);}finally{setBusy(false);}}
   return <form onSubmit={save} className="space-y-4 rounded-2xl border border-blue-200 bg-white p-5">
     <h3 className="font-bold text-slate-800">{existing?'Correct paper work':'Add completed paper work'}</h3>
     <p className="text-sm text-slate-600">For physical prescriptions completed by {lab.name}. Saving adds this work and its unpaid bill once. Do not also upload this invoice from Excel or enter it as a Dr-Crown case.</p>
+    {clinicError&&<p role="alert" className="text-sm text-red-700">{clinicError}</p>}
+    {!clinicsLoading&&!clinicError&&!clinicNames.length&&<p className="text-sm text-amber-700">No clinics are available in this lab’s billing history yet.</p>}
     <div className="grid gap-3 sm:grid-cols-2">
-      <label className="text-sm">Clinic<input required maxLength={200} list="paper-work-clinics" className={field} value={entry.clinicName} onChange={e=>update('clinicName',e.target.value)} /><datalist id="paper-work-clinics">{Object.values(clinicsById).map(c=><option key={c.id} value={c.name}/>)}</datalist></label>
+      <label className="text-sm">Clinic<select required disabled={clinicsLoading||!!clinicError} className={field} value={entry.clinicName} onChange={e=>update('clinicName',e.target.value)}><option value="">{clinicsLoading?'Loading billing clinics…':'Select a clinic'}</option>{clinicNames.map(name=><option key={name} value={name}>{name}</option>)}</select></label>
       <label className="text-sm">Completion date<input required type="date" min={FINANCE_START} max={omanDate(new Date())} className={field} value={entry.date} onChange={e=>update('date',e.target.value)}/></label>
       {[['invoice','Invoice number',100],['patient','Patient',200],['dentist','Doctor',200],['procedure','Procedure',500]].map(([key,label,max])=><label key={key} className="text-sm">{label}<input required maxLength={max} className={field} value={entry[key]} onChange={e=>update(key,e.target.value)}/></label>)}
       <label className="text-sm">Units<input required type="number" min="1" max="1000" step="1" className={field} value={entry.units} onChange={e=>update('units',e.target.value)}/></label>
@@ -22,7 +26,7 @@ export function PaperWorkForm({lab,clinicsById,onSaved,onClose,existing}) {
     </div>
     <p className="font-semibold">Total: {money(Math.round(Number(entry.units)*Number(entry.price)*1000)/1000)}</p>
     {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
-    <div className="flex gap-2"><button disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy?'Saving…':'Save completed work'}</button><button type="button" disabled={busy} onClick={onClose} className="rounded-lg border px-4 py-2 text-sm">Cancel</button></div>
+    <div className="flex gap-2"><button disabled={busy||clinicsLoading||!clinicNames.includes(entry.clinicName)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy?'Saving…':'Save completed work'}</button><button type="button" disabled={busy} onClick={onClose} className="rounded-lg border px-4 py-2 text-sm">Cancel</button></div>
   </form>;
 }
 

@@ -70,5 +70,17 @@ await db.exec(`reset role;select set_config('test.lab','',false);set role authen
 await assert.rejects(save(id,2,entry),/Only active lab/);
 await db.exec('reset role;set role anon');
 await assert.rejects(save(id,null,entry),/permission denied/);
+await db.exec(`reset role; create table clinics(id uuid primary key,name text);select set_config('test.lab','${lab}',false),set_config('test.role','accountant',false);`);
+const dropdownSql=readFileSync(new URL('../supabase/migrations/20260910_paper_clinic_dropdown.sql',import.meta.url),'utf8');
+await db.exec(dropdownSql);await db.exec(dropdownSql);
+await db.exec('set role authenticated');
+const choices=(await db.query('select * from paper_work_clinics()')).rows.map(r=>r.name);
+assert.ok(choices.includes('Example Clinic'));
+await assert.rejects(save('00000000-0000-4000-8000-000000000007',null,{...entry,clinicName:'New misspelled clinic',invoice:'PAPER-7'}),/Select an existing clinic/);
+await save('00000000-0000-4000-8000-000000000007',null,{...entry,invoice:'PAPER-7'});
+await db.exec(`reset role;select set_config('test.lab','${other}',false);set role authenticated;`);
+assert.equal((await db.query('select * from paper_work_clinics()')).rows.length,0,'other lab cannot obtain clinic names');
+await db.exec('reset role;set role anon');
+await assert.rejects(db.query('select * from paper_work_clinics()'),/permission denied/);
 await db.close();
 console.log('Work ledger database checks passed: migration rerun, tech save, no finance access, idempotency, amount, audit, stale edit, duplicates, paid edits, cross-lab and anonymous denial.');

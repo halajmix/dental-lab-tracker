@@ -353,3 +353,15 @@ from September are linked to bills, with no missing links, lab/clinic mismatch,
 completion-month mismatch, bill-total mismatch or payment-status mismatch.
 The September cutoff and existing paper opening snapshot are preserved.
 Verification was read-only; no test work or payments were created.
+
+
+Paper-work clinic input is now a required dropdown sourced from same-lab
+billing history (registered display names and imported clinic names). No
+free-text clinic creation is offered. `20260910_paper_clinic_dropdown.sql`
+adds the names-only staff RPC and validates the selected name in the save
+function before any write. Owner application is pending. Until applied,
+finance staff use existing RLS-scoped statement reads for the dropdown;
+technicians without finance read access may have no choices. No finance
+read privileges are granted to technicians by the new RPC. Tested in the
+fictional browser and PGlite for valid choices, unknown-name rejection,
+other-lab isolation and anonymous denial.
