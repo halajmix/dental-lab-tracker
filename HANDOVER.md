@@ -307,3 +307,9 @@ Tests: workLedger.test.mjs, workLedgerDatabase.mjs (PGlite), existing finance an
 JSX/build checks. Browser verification uses fictional fixtures only. Database
 migration activation must be checked after owner application; no live work or
 payments were entered during implementation.
+
+Activation verified after owner application on 2026-09-10: all six labs have
+work_ledger_enabled=true and finance_history_before=2026-09-01. The existing
+Smile World paper snapshot remains 2026-08-31. Both manual-work tables and
+the save RPC are present; a no-user probe is rejected before any write. No
+production work entries or payments were created during verification.
