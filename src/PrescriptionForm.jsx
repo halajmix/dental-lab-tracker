@@ -2187,7 +2187,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     material: "Material",
     implantSystem: "Implant brand",
     abutmentType: "Abutment size",
-    insertionDate: "Deliver to Clinic date",
+    insertionDate: "Next appointment",
     photosUploading: "Files still uploading",
   };
   const missing = Object.entries(errors)
@@ -2748,7 +2748,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           >
           <section>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Deliver to Clinic on" required>
+              <Field label="Next appointment" required>
                 {/* iOS shows no hint text inside an empty date input (and the
                     appearance reset removed even the grey dd/mm/yyyy), so an
                     empty field read as a weird blank bar that was easy to
@@ -2775,7 +2775,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                         err("insertionDate") ? "bg-rose-50 text-rose-600" : "bg-blue-50 text-blue-600"
                       }`}
                     >
-                      <Calendar size={15} /> Tap to pick a delivery date
+                      <Calendar size={15} /> Tap to pick the next appointment date
                     </span>
                   )}
                 </div>
