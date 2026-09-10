@@ -313,3 +313,36 @@ work_ledger_enabled=true and finance_history_before=2026-09-01. The existing
 Smile World paper snapshot remains 2026-08-31. Both manual-work tables and
 the save RPC are present; a no-user probe is rejected before any write. No
 production work entries or payments were created during verification.
+
+
+## Monthly finance simplification and loading guards (2026-09-10)
+
+All Work, Outstanding Balances, Summary lead the lab finance navigation.
+Billing is removed; Billing history now uses the archive view containing all
+statements, with year/month/status filters. Pre-September completed work and
+expenses remain in that history workspace. Expenses group by month and expand
+into category totals and original entries, including existing delete controls.
+
+Summary selects a completion/billing month and reports that month's work,
+settlement and unpaid amount. Payments received later still settle their bill's
+month. Opening debt and unallocated receipts do not alter another month's
+status. Older bills spanning completion months are flagged for review rather
+than inventing a per-case payment allocation. The all-date receivable view
+remains separate. Existing settled imports use their recorded paid status.
+
+Null-lab guards prevent financeHistoryBefore/workLedgerEnabled crashes while
+account data loads, including the technician paper button and finance panels.
+
+`20260910_auto_completed_billing.sql` is NOT applied at source publication.
+Owner runs it manually. It attaches completed priced digital cases to the Oman
+completion-month statement BEFORE the case response, then recomputes the bill
+against saved receipts AFTER the change. Private helper execution is denied to
+anon/authenticated. The new `auto_completed_billing` flag activates this for all
+labs. Backfill includes only unlinked unpaid completed work with a recorded
+completion since September; pre-period work, existing links and payments are
+preserved. There is no manual Generate step for new work after activation.
+
+Tests: monthlyFinance.test.mjs, autoBillingDatabase.mjs (PGlite), existing tests,
+JSX/build checks, fictional browser checks of monthly expenses, month selection
+and missing-lab recovery. Activation still requires owner application and a
+read-only verification afterwards.

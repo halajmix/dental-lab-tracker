@@ -69,3 +69,31 @@ export function financeSummary(cases, statements, payments, clinics, paperAsOf, 
   }
   return [...groups.values()].filter(a=>a.active || a.remaining || a.unallocated).map(a=>({...a,statementIds:a.statementIds||[],status:a.remaining>0 ? (a.paid>0 || a.appliedToOpen>0?'Partially paid':'Unpaid') : a.unbilled>0 || a.unpriced>0 ? 'Needs billing' : 'Paid'})).sort((a,b)=>b.remaining-a.remaining || a.name.localeCompare(b.name));
 }
+
+// Monthly settlement uses the bill's month, with payments applied to those
+// bills at any date. Paying September work in October settles September.
+export function monthlyFinanceSummary(cases, statements, payments, clinics, paperAsOf, month) {
+  const resolve=accountResolver(clinics,statements), groups=new Map();
+  const get=row=>{const a=resolve(row);if(!groups.has(a.key))groups.set(a.key,{...a,work:0,billed:0,paid:0,remaining:0,unbilled:0,unpriced:0,statementIds:[]});return groups.get(a.key);};
+  const received=new Map();
+  for(const p of payments)if(p.statementId&&!p.voidedAt&&!p.voided_at)received.set(p.statementId,(received.get(p.statementId)||0)+Math.round(Number(p.amount||0)*1000));
+  for(const s of statements) {
+    if(s.kind==='opening_balance'||coveredByOpeningBalance(s,paperAsOf)||s.month?.slice(0,7)!==month)continue;
+    const a=get(s),total=Math.round(Number(s.total||0)*1000);
+    const paid=s.status==='paid'?total:Math.min(total,received.get(s.id)||0);
+    a.billed+=total;a.paid+=paid;a.remaining+=Math.max(0,total-paid);a.statementIds.push(s.id);
+  }
+  for(const g of workLedger(cases,statements,clinics)) {
+    for(const r of g.rows.filter(r=>r.date.slice(0,7)===month)) {
+      if(!groups.has(g.key))groups.set(g.key,{key:g.key,name:g.name,work:0,billed:0,paid:0,remaining:0,unbilled:0,unpriced:0,statementIds:[]});
+      const a=groups.get(g.key),amount=Math.round(Number(r.amount||0)*1000);a.work+=amount;
+      if(r.unbilled){a.unbilled+=amount;a.remaining+=amount;if(r.amount==null)a.unpriced++;}
+      if(r.statementId && !a.statementIds.includes(r.statementId)) {
+        // Older generated bills can include work completed in another month.
+        // Don't invent a per-case allocation of a shared statement payment.
+        a.otherMonthBill=true;a.statementIds.push(r.statementId);
+      }
+    }
+  }
+  return [...groups.values()].map(a=>({...a,...Object.fromEntries(['work','billed','paid','remaining','unbilled'].map(k=>[k,a[k]/1000])),status:a.otherMonthBill?'Review billing month':a.unpriced?'Needs pricing':a.remaining>0?(a.paid>0?'Partially paid':'Unpaid'):'Paid'})).sort((a,b)=>b.remaining-a.remaining||a.name.localeCompare(b.name));
+}

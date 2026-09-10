@@ -31,6 +31,7 @@ export const labFromRow = (r) => ({
   isDemo: r.is_demo ?? false,
   financeHistoryBefore: r.finance_history_before ?? null,
   workLedgerEnabled: r.work_ledger_enabled ?? false,
+  autoCompletedBilling: r.auto_completed_billing ?? false,
   paperBalanceAsOf: r.paper_balance_as_of ?? null,
   // Who receives new-case emails; "" = the lab's general contact email.
   notifyEmail: r.notify_email ?? "",

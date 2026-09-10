@@ -21,6 +21,7 @@ export function statementPeriod(statement, cutoff, cases = []) {
 }
 
 export function statementInView(statement, view, cutoff, cases, paid = 0, includeSettled = false) {
+  if (view === 'archive') return true;
   if (view === 'pending' && statement.openingHistory) return false;
   if (view === 'pending') return includeSettled || statement.status !== 'paid' && statement.total - paid > 0.0005;
   const period = statementPeriod(statement, cutoff, cases);

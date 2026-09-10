@@ -1,3 +1,4 @@
+import {expenseMonths} from './lib/expenseMonths.js';
 import { coveredByOpeningBalance } from "./lib/clinicBalances.js";
 import ClinicBalances from "./ClinicBalances.jsx";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -102,7 +103,11 @@ const recentMonths = () => {
   return out.map((m) => `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-01`);
 };
 
-export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView = false, view = "current", initialReview = null }) {
+export function BillingPanel(props) {
+  return props.lab ? <BillingPanelContent {...props} /> : <p role="status" className="p-4 text-sm text-slate-500">Loading lab account…</p>;
+}
+
+function BillingPanelContent({ lab, clinicsById = {}, cases = [], accountantView = false, view = "current", initialReview = null }) {
   const [allStatements, setStatements] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -534,10 +539,10 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
     <div className="space-y-4">
       {error && <ErrorBanner message={error} onRetry={load} />}
 
-      <h2 className="text-lg font-bold text-slate-800">{view === "history" ? "Billing history" : view === "pending" ? "Outstanding Balances" : "Billing"}</h2>
+      <h2 className="text-lg font-bold text-slate-800">{["history","archive"].includes(view) ? "Billing history" : view === "pending" ? "Outstanding Balances" : "Billing"}</h2>
       {lab.financeHistoryBefore && <p className="text-sm text-slate-500">
-        {view === "history" ? (lab.paperBalanceAsOf ? `Paper bills through ${lab.paperBalanceAsOf} are supporting history for the opening balance. Earlier digital records also remain here.` : `Work before ${lab.financeHistoryBefore}.`) : view === "pending" ? "Outstanding statements from imported records and the application. Opening balances are labelled separately." : `Work from ${lab.financeHistoryBefore} onwards. Older work is in Billing history; opening balances are in Outstanding Balances.`}
-        {view !== "pending" && " Bills spanning the cutoff appear in both date views with their full balance. Do not add the two views together."}
+        {view === "archive" ? "All bills, old and new, in one place. Use the year, month and status filters to find a bill. Outstanding Balances shows what is still owed." : view === "history" ? (lab.paperBalanceAsOf ? `Paper bills through ${lab.paperBalanceAsOf} are supporting history for the opening balance. Earlier digital records also remain here.` : `Work before ${lab.financeHistoryBefore}.`) : view === "pending" ? "Outstanding statements from imported records and the application. Opening balances are labelled separately." : `Work from ${lab.financeHistoryBefore} onwards. Older work is in Billing history; opening balances are in Outstanding Balances.`}
+        {!["pending","archive"].includes(view) && " Bills spanning the cutoff appear in both date views with their full balance. Do not add the two views together."}
       </p>}
       {view === "pending" && !lab.paperBalanceAsOf && hasOpeningOverlap && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
         A clinic has both an imported opening balance and unpaid imported bills. Check whether those bills are already included in that balance before collecting both. Use the source filter to review them separately.
@@ -551,7 +556,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
         {showDetails && clinicAccount && <p className="text-sm font-semibold text-blue-700">Statements for {clinicAccount.name}</p>}
       </>}
       {/* Generate */}
-      {view === "current" && <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      {(view === "current" || view === "archive" && unbilled.count > 0 && !lab.autoCompletedBilling) && <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
         <FileText size={15} className="shrink-0 text-blue-600" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-slate-700">Generate monthly statements</p>
@@ -590,7 +595,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
       </div>}
 
       {/* Monthly summary — work done vs fees received vs still pending */}
-      {summary && view !== "pending" && (
+      {summary && !["pending","archive"].includes(view) && (
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-slate-800">Monthly summary</h3>
@@ -629,7 +634,7 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
 
       {(view !== "pending" || showDetails) && <>
       {/* Aging is secondary to the selected clinic’s bills. */}
-      {!(view === "pending" && clinicAccount) && <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {view !== "archive" && !(view === "pending" && clinicAccount) && <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Object.entries(aging).map(([label, { value, count, months }]) => {
           const active = agingFilter === label;
           return (
@@ -1169,7 +1174,11 @@ function RecordPaymentModal({ open, statement, clinic, remaining, labId, onClose
 
 const EXPENSE_CATEGORIES = ["Materials", "Salaries", "Rent", "Utilities", "Maintenance", "Other"];
 
-export function ExpensesPanel({ lab, view = "current" }) {
+export function ExpensesPanel(props) {
+  return props.lab ? <ExpensesPanelContent {...props} /> : <p role="status" className="p-4 text-sm text-slate-500">Loading lab account…</p>;
+}
+
+function ExpensesPanelContent({ lab, view = "current" }) {
   const [allExpenses, setExpenses] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1177,6 +1186,7 @@ export function ExpensesPanel({ lab, view = "current" }) {
   const [form, setForm] = useState({ category: "Materials", amount: "", method: "cash", description: "", invoiceNumber: "", date: new Date().toISOString().slice(0, 10) });
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [openExpenseMonth,setOpenExpenseMonth] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -1197,6 +1207,8 @@ export function ExpensesPanel({ lab, view = "current" }) {
   }, [lab.id]);
 
   const expenses = useMemo(() => allExpenses.filter(e => expenseInView(e, view, lab.financeHistoryBefore)), [allExpenses, view, lab.financeHistoryBefore]);
+
+  const monthlyExpenses = useMemo(()=>expenseMonths(expenses),[expenses]);
 
   const treasury = useMemo(() => {
     let cashIn = 0, bankIn = 0, pendingCheques = 0, cashOut = 0, bankOut = 0;
@@ -1337,6 +1349,11 @@ export function ExpensesPanel({ lab, view = "current" }) {
         ) : expenses.length === 0 ? (
           <p className="py-8 text-center text-sm text-slate-400">No expenses recorded yet.</p>
         ) : (
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-xs text-slate-500"><th className="p-3">Month</th><th className="p-3">Entries</th><th className="p-3 text-right">Total expenses</th><th className="p-3">Details</th></tr></thead><tbody>
+            {monthlyExpenses.map(group=><React.Fragment key={group.month}>
+              <tr onClick={()=>setOpenExpenseMonth(openExpenseMonth===group.month?null:group.month)} className="cursor-pointer border-t hover:bg-slate-50"><td className="p-3 font-semibold">{group.month==='Undated'?'Undated':monthLabel(group.month+'-01')}</td><td className="p-3">{group.rows.length}</td><td className="p-3 text-right font-bold">{fmtOMR(group.total)}</td><td className="p-3"><button aria-expanded={openExpenseMonth===group.month} className="font-semibold text-blue-700">{openExpenseMonth===group.month?'Hide breakdown':'View breakdown'}</button></td></tr>
+              {openExpenseMonth===group.month&&<tr><td colSpan={4} className="p-3">
+                <div className="mb-4 flex flex-wrap gap-3">{Object.entries(group.categories).map(([category,total])=><div key={category} className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">{category}</p><p className="font-semibold">{fmtOMR(total)}</p></div>)}</div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[600px] text-sm">
               <thead>
@@ -1351,7 +1368,7 @@ export function ExpensesPanel({ lab, view = "current" }) {
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((e) => (
+                {group.rows.map((e) => (
                   <tr key={e.id} className="border-t border-slate-100">
                     <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">{e.expenseDate}</td>
                     <td className="py-2.5 pr-3 whitespace-nowrap text-slate-500">{e.invoiceNumber || "—"}</td>
@@ -1376,6 +1393,9 @@ export function ExpensesPanel({ lab, view = "current" }) {
               </tbody>
             </table>
           </div>
+              </td></tr>}
+            </React.Fragment>)}
+          </tbody></table></div>
         )}
       </div>
     </div>
