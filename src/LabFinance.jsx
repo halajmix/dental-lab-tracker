@@ -543,9 +543,11 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
         A clinic has both an imported opening balance and unpaid imported bills. Check whether those bills are already included in that balance before collecting both. Use the source filter to review them separately.
       </p>}
       {view === "pending" && <>
+        <div hidden={showDetails}>
         <ClinicBalances paperBalanceAsOf={lab.paperBalanceAsOf} statements={allStatements} payments={payments} clinicsById={clinicsById} loading={loading} error={error} unbilled={unbilled}
           onReview={account=>{setClinicAccount(account);setShowDetails(true);setQuery("");setSourceFilter("all");setStatusFilter("all");setYearFilter("all");setMonthFilter("all");setAgingFilter(null);setSelected(new Set());setPage(1);}} />
-        <button onClick={()=>{setClinicAccount(null);setShowDetails(!showDetails);setSelected(new Set());}} className="rounded-lg border bg-white px-4 py-2 text-sm font-semibold text-slate-600">{showDetails ? "Hide statement details" : "Show statement details and debt age"}</button>
+        </div>
+        <button onClick={()=>{setClinicAccount(null);setShowDetails(!showDetails);setSelected(new Set());}} className="rounded-lg border bg-white px-4 py-2 text-sm font-semibold text-slate-600">{showDetails ? "← Back to clinic balances" : "Show all statement details and debt age"}</button>
         {showDetails && clinicAccount && <p className="text-sm font-semibold text-blue-700">Statements for {clinicAccount.name}</p>}
       </>}
       {/* Generate */}
@@ -626,8 +628,8 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
       )}
 
       {(view !== "pending" || showDetails) && <>
-      {/* Aging — each card doubles as a quick-filter for the table below */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {/* Aging is secondary to the selected clinic’s bills. */}
+      {!(view === "pending" && clinicAccount) && <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Object.entries(aging).map(([label, { value, count, months }]) => {
           const active = agingFilter === label;
           return (
@@ -648,12 +650,13 @@ export function BillingPanel({ lab, clinicsById = {}, cases = [], accountantView
             </button>
           );
         })}
-      </div>
+      </div>}
 
+      {view === "pending" && clinicAccount && <p className="text-sm text-slate-600">These are the statements behind this clinic’s balance. An imported opening balance is a single carried-forward amount; its older itemized bills remain in Billing history.</p>}
       {/* Statements */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-bold text-slate-800">Statements</h3>
+          <h3 className="text-sm font-bold text-slate-800">{clinicAccount ? `Bills — ${clinicAccount.name}` : "Statements"}</h3>
           <span className="text-xs font-semibold text-slate-500">{fmtOMR(outstanding)} outstanding</span>
         </div>
 
