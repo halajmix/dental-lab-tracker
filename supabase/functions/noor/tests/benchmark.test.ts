@@ -30,6 +30,11 @@ test("stale: 7 idle days at picked-up", () => {
   const b = benchmark({ row: row() as never, ...base, now: new Date("2026-09-09T10:00:00Z") });
   assert.equal(b.stale, true); assert.equal(b.days_idle, 7);
 });
+test("work complete + need-by passed → done for the lab, not overdue (collection is the clinic's action)", () => {
+  const b = benchmark({ row: row({ stage_index: 3, appointment_date: "2026-09-08" }) as never, ...base, now: new Date("2026-09-11T10:00:00Z") });
+  assert.equal(b.verdict, "done"); assert.equal(b.overdue_confirmed, false);
+  assert.equal(b.per_stage[4].status, "overdue"); // still reported per stage, for the clinic-facing view
+});
 test("not stale once work complete", () => {
   const b = benchmark({ row: row({ stage_index: 3 }) as never, ...base, now: new Date("2026-09-30T10:00:00Z") });
   assert.equal(b.stale, false);

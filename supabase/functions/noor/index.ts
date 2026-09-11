@@ -112,15 +112,20 @@ Deno.serve(async (req) => {
   const tid = traceId();
   const audit = makeAudit(admin, tid);
   await audit.start({ trigger, labId, clinicId: (rec as Partial<CaseRow>).clinic_id ?? caller.clinicIds?.[0] ?? null, userId: caller.userId ?? null, caseId: caseId ?? null, shadow: env.shadow });
+  // Every context created for this run shares one would_have list, so a
+  // scheduled job that fans out per lab still lands its evidence on the run.
+  const wouldHave: ToolContext["wouldHave"] = [];
   const makeCtx = (jobLabId?: string): ToolContext => ({
-    caller: jobLabId ? { ...caller, kind: "system", jobLabId } : caller, db: userDb, admin, shadow: env.shadow, now, traceId: tid, resendKey: env.resendKey, wouldHave: [],
+    caller: jobLabId ? { ...caller, kind: "system", jobLabId } : caller, db: userDb, admin, shadow: env.shadow, now, traceId: tid, resendKey: env.resendKey, wouldHave,
   });
   const llm: LlmClient | null = env.anthropicKey ? createLlm({ apiKey: env.anthropicKey, modelAnswer: env.modelAnswer, modelPhrase: env.modelPhrase, effort: env.effort, timeoutMs: env.runTimeoutMs }) : null;
   const limits = { maxToolCalls: env.maxToolCalls, toolTimeoutMs: env.toolTimeoutMs, maxTokens: env.maxTokens };
   const system = (lang: Language, trg: Trigger, org?: { labName?: string; clinicName?: string }) =>
     buildSystemPrompt({ caller_block: callerBlock({ kind: caller.kind, role: caller.role, name: caller.name, language: lang, timezone: caller.timezone, trigger: trg, ...org }), recipient_language: lang, stale_days: env.staleDays, max_tool_calls: env.maxToolCalls });
-  const finish = async (outcome: string, extra: Record<string, unknown> = {}, ctx?: ToolContext) => {
-    await audit.finish({ outcome, model: (extra.model as string) ?? null, inputTokens: extra.inputTokens as number, outputTokens: extra.outputTokens as number, error: (extra.error as string) ?? null, wouldHave: ctx?.wouldHave.length ? ctx.wouldHave : undefined });
+  const finish = async (outcome: string, extra: Record<string, unknown> = {}, _ctx?: ToolContext) => {
+    const { model, inputTokens, outputTokens, error, text, answer, ...summary } = extra;
+    const evidence = [...(Object.keys(summary).length ? [{ tool: "summary", input: summary }] : []), ...wouldHave];
+    await audit.finish({ outcome, model: (model as string) ?? null, inputTokens: inputTokens as number, outputTokens: outputTokens as number, error: (error as string) ?? null, wouldHave: evidence.length ? evidence : undefined });
     return json({ ok: true, trace_id: tid, trigger, outcome, shadow: env.shadow, ...extra });
   };
 

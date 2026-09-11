@@ -63,7 +63,10 @@ export function benchmark(i: BenchmarkInput): BenchmarkResult {
     else status = "on_track";
     return { stage: s, expected_by: exp, status };
   });
-  const next = per_stage.find((p) => p.status !== "done");
+  // The verdict is about the LAB's work. Stages 0 and 4 belong to the dentist
+  // (submitting, collecting), so a finished case waiting for pick-up is "done"
+  // here, never "overdue" — that would flag the lab for the clinic's delay.
+  const next = per_stage.find((p, idx) => p.status !== "done" && idx >= 1 && idx <= 3);
   const verdict: BenchmarkResult["verdict"] = !next ? "done" : next.status === "on_track" ? "on_track" : next.status;
   const needBy = i.row.appointment_date;
   const overdue_confirmed = !!needBy && today > needBy && i.row.stage_index < 3;
