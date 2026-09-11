@@ -191,7 +191,7 @@ Deno.serve(async (req) => {
         const ctx = makeCtx();
         if (!llm) return finish("failed", { error: "no model configured", answer: "Noor is not available right now." }, ctx);
         const orgName = caller.labId ? (await admin.from("labs").select("name").eq("id", caller.labId).maybeSingle()).data?.name : caller.clinicIds?.[0] ? (await admin.from("clinics").select("name").eq("id", caller.clinicIds[0]).maybeSingle()).data?.name : undefined;
-        const r = await runAgent({ trigger, caller, systemPrompt: system(caller.language, trigger, caller.labId ? { labName: orgName } : { clinicName: orgName }), userMessage: questionContext(String(body.question)), toolNames: ["get_case", "list_cases", "get_turnaround_benchmark", "escalate_to_human", "add_case_note"], executor: liveExecutor, llm, ctx, audit: audit.sink, limits, purpose: "answer" });
+        const r = await runAgent({ trigger, caller, systemPrompt: system(caller.language, trigger, caller.labId ? { labName: orgName } : { clinicName: orgName }), userMessage: questionContext(String(body.question), typeof body.case_id === "string" && /^C-[A-Z0-9]{6,16}$/.test(body.case_id) ? body.case_id : null), toolNames: ["get_case", "list_cases", "get_turnaround_benchmark", "escalate_to_human", "add_case_note"], executor: liveExecutor, llm, ctx, audit: audit.sink, limits, purpose: "answer" });
         return finish(r.outcome, { answer: r.text, model: r.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, ctx);
       }
     }

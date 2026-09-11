@@ -29,6 +29,10 @@ export const labFromRow = (r) => ({
   // Advertising/demo org — badged in the super-admin screen so it is never
   // mistaken for a paying customer.
   isDemo: r.is_demo ?? false,
+  // Noor (AI case coordinator) is switched on per lab by the platform admin.
+  // The client only ever uses this to show or hide Noor's surfaces; every
+  // real decision is made server-side by the noor Edge Function.
+  noorEnabled: r.noor_enabled ?? false,
   financeHistoryBefore: r.finance_history_before ?? null,
   workLedgerEnabled: r.work_ledger_enabled ?? false,
   autoCompletedBilling: r.auto_completed_billing ?? false,
@@ -1006,6 +1010,114 @@ export async function flushBlobUploads() {
 /*  role='admin' server-side on every call; this client code is not the */
 /*  security boundary.                                                  */
 /* ------------------------------------------------------------------ */
+/*  Noor — AI case coordinator (supabase/functions/noor)                */
+/*                                                                     */
+/*  Reads go straight to the new tables under RLS: the lab sees every  */
+/*  flag on its cases, the clinic only clinic-visible ones. All reads  */
+/*  are fail-soft — before the Noor migration is applied the tables    */
+/*  don't exist (42P01) and the app must behave exactly as before.     */
+/* ------------------------------------------------------------------ */
+
+const isMissingRelation = (error) => error && (error.code === "42P01" || /does not exist|schema cache/i.test(error.message || ""));
+
+export const noorFlagFromRow = (r) => ({
+  id: r.id, caseId: r.case_id, kind: r.kind, reason: r.reason ?? "", visibleTo: r.visible_to,
+  daysOver: r.days_over ?? null, createdAt: r.created_at, resolvedAt: r.resolved_at ?? null,
+});
+export const noorClarificationFromRow = (r) => ({
+  id: r.id, caseId: r.case_id, issue: r.issue ?? {}, question: r.question, language: r.language ?? "en",
+  askedAt: r.asked_at, answer: r.answer ?? "", answeredAt: r.answered_at ?? null, status: r.status,
+});
+export const noorEscalationFromRow = (r) => ({
+  id: r.id, caseId: r.case_id ?? null, labId: r.lab_id, category: r.category, summary: r.summary,
+  context: r.context ?? {}, assignedTo: r.assigned_to ?? null, assignedToName: r.assigned_to_name ?? "",
+  status: r.status, createdAt: r.created_at, acknowledgedAt: r.acknowledged_at ?? null, resolvedAt: r.resolved_at ?? null,
+});
+
+/** Open flags + open clarifications for every case the caller can see. */
+export async function fetchNoorState() {
+  const [flags, clars] = await Promise.all([
+    supabase.from("case_flags").select("*").is("resolved_at", null),
+    supabase.from("case_clarifications").select("*").eq("status", "open"),
+  ]);
+  if (flags.error && !isMissingRelation(flags.error)) throw flags.error;
+  if (clars.error && !isMissingRelation(clars.error)) throw clars.error;
+  return {
+    flags: (flags.data ?? []).map(noorFlagFromRow),
+    clarifications: (clars.data ?? []).map(noorClarificationFromRow),
+  };
+}
+
+/** The dentist answers Noor's one question. RLS only lets the case's clinic do this. */
+export async function answerNoorClarification(id, answer) {
+  const text = String(answer ?? "").trim();
+  if (!text) throw new Error("Please type an answer.");
+  const { data, error } = await supabase
+    .from("case_clarifications")
+    .update({ answer: text.slice(0, 1000), answered_at: new Date().toISOString(), status: "answered" })
+    .eq("id", id).eq("status", "open").select();
+  if (error) throw error;
+  if (!data?.length) throw new Error("Couldn't send the answer — the question may already be answered. Refresh and try again.");
+  return noorClarificationFromRow(data[0]);
+}
+
+/** Escalations for the caller's lab (lab admins) — open first, newest first. */
+export async function fetchNoorEscalations({ includeResolved = false } = {}) {
+  let q = supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(200);
+  if (!includeResolved) q = q.neq("status", "resolved");
+  const { data, error } = await q;
+  if (error) { if (isMissingRelation(error)) return []; throw error; }
+  return (data ?? []).map(noorEscalationFromRow);
+}
+
+export async function setNoorEscalationStatus(id, status) {
+  if (!["acknowledged", "resolved"].includes(status)) throw new Error("Invalid status");
+  const patch = { status, [status === "acknowledged" ? "acknowledged_at" : "resolved_at"]: new Date().toISOString() };
+  const { data, error } = await supabase.from("escalations").update(patch).eq("id", id).select();
+  if (error) throw error;
+  if (!data?.length) throw new Error("Couldn't update the escalation — refresh and try again.");
+  return noorEscalationFromRow(data[0]);
+}
+
+/** Today's brief for the lab dashboard: the same sections the morning email carries,
+    computed client-side from data the lab already has, so no extra round trip. */
+export function composeNoorBriefClient({ cases, flags, clarifications, escalations, today }) {
+  const open = cases.filter((c) => c.stageIndex < 4 && c.cancelStatus !== "cancelled");
+  const flagsByCase = new Map();
+  for (const f of flags) flagsByCase.set(f.caseId, [...(flagsByCase.get(f.caseId) ?? []), f]);
+  const clarByCase = new Set(clarifications.map((c) => c.caseId));
+  const promise = (c) => c.prescription?.estReady ?? null;
+  const dueToday = open.filter((c) => c.appointmentDate === today || promise(c) === today);
+  const overdue = open.filter((c) => !dueToday.includes(c) && ((flagsByCase.get(c.id) ?? []).some((f) => f.kind === "overdue") || (c.appointmentDate && c.appointmentDate < today && c.stageIndex < 3)));
+  const awaiting = open.filter((c) => clarByCase.has(c.id));
+  const stale = open.filter((c) => (flagsByCase.get(c.id) ?? []).some((f) => f.kind === "stale"));
+  const decisions = [
+    ...escalations.filter((e) => e.status === "open").map((e) => ({ caseId: e.caseId, what: `open escalation — ${e.category.replace(/_/g, " ")}` })),
+    ...open.filter((c) => c.cancelStatus === "requested").map((c) => ({ caseId: c.id, what: "cancellation requested" })),
+  ];
+  return { dueToday, overdue, awaiting, stale, decisions, isEmpty: !dueToday.length && !overdue.length && !awaiting.length && !stale.length && !decisions.length };
+}
+
+/** Ask Noor a question. Sends the user's own session token; the function
+    answers only from what that user is allowed to see. */
+export async function askNoor(question, { caseId = null } = {}) {
+  const q = String(question ?? "").trim();
+  if (!q) throw new Error("Type a question first.");
+  const { data: sess } = await supabase.auth.getSession();
+  const token = sess?.session?.access_token;
+  if (!token) throw new Error("You're signed out. Sign in and try again.");
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/noor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY },
+    body: JSON.stringify({ question: q.slice(0, 2000), ...(caseId ? { case_id: caseId } : {}) }),
+  });
+  let body = {};
+  try { body = await res.json(); } catch { /* non-JSON error page */ }
+  if (res.status === 429) throw new Error(body.error || "Too many questions for now — try again in a while.");
+  if (!res.ok) throw new Error(body.error || `Noor couldn't answer (HTTP ${res.status}).`);
+  if (body.skipped) return { answer: "Noor isn't switched on for this lab yet.", traceId: null, outcome: "skipped" };
+  return { answer: body.answer ?? "Noor didn't return an answer.", traceId: body.trace_id ?? null, outcome: body.outcome ?? "completed" };
+}
 
 async function callAdminAction(action, payload = {}) {
   const { data, error } = await supabase.functions.invoke("admin-actions", { body: { action, ...payload } });

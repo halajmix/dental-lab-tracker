@@ -46,6 +46,7 @@ import {
   Users,
   Tags,
   UserPlus,
+  Inbox,
 } from "lucide-react";
 import PrescriptionForm, { toothSummary, includedSummary, CATEGORY_NAMES, SHADE_BY_LAB, ARCH_LABELS } from "./PrescriptionForm.jsx";
 import DeviceManagement from "./DeviceManagement.jsx";
@@ -75,11 +76,14 @@ import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import PrintInvoice from "./PrintInvoice.jsx";
 import PrintReceipt from "./PrintReceipt.jsx";
+import { NoorFlagChips, NoorClarificationBanner, AskNoorPanel, NoorBriefCard, NoorEscalationInbox, NoorStatusPill } from "./Noor.jsx";
 import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
 import {
   fetchLabs,
   fetchCases,
+  fetchNoorState,
+  fetchNoorEscalations,
   insertCase,
   updateCase,
   subscribeCases,
@@ -675,17 +679,18 @@ const ADMIN_TABS = [
   { id: "prices", label: "Price Lists", icon: Tags },
   { id: "staff", label: "Staff", icon: UserPlus },
   { id: "logs", label: "Staff logs", icon: HistoryIcon },
+  { id: "noor", label: "Escalations", icon: Inbox },
 ];
 
 // Accountants get the finance surface + Remakes (they set each return's cost
 // estimate and fault). Technicians never reach this workspace at all.
 const ACCOUNTANT_TAB_IDS = ["queue", "remakes", "allwork", "pending", "summary", "history", "expenses", "prices"];
 
-function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = [], onResolveRound, meId, financeOnly = false, isAdminPreview = false }) {
+function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = [], onResolveRound, meId, financeOnly = false, isAdminPreview = false, noor = null, onOpenCase }) {
   const [tab, setTab] = useState("queue");
   const [reviewAccount,setReviewAccount] = useState(null);
   if (!lab) return <p role="status" className="p-4 text-sm text-slate-500">Loading lab account…</p>;
-  const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore) && (!["allwork","summary"].includes(t.id) || lab.workLedgerEnabled));
+  const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore) && (!["allwork","summary"].includes(t.id) || lab.workLedgerEnabled) && (t.id !== "noor" || noor));
   // The open-tab state survives switching between the Admin and Accountant
   // views — without this clamp, an admin-only tab (e.g. Staff logs) kept
   // rendering its CONTENT in the accountant view after its nav button was
@@ -738,6 +743,8 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
         <PriceListsManager lab={lab} clinicsById={clinicsById} cases={cases} />
       ) : activeTab === "logs" ? (
         <LabStaffLogsPanel />
+      ) : activeTab === "noor" ? (
+        <NoorEscalationInbox escalations={noor?.escalations ?? []} loading={noor?.escalationsLoading} onChanged={noor?.onEscalationChanged} onOpenCase={onOpenCase} />
       ) : (
         <StaffPanel lab={lab} meId={meId} />
       )}
@@ -885,6 +892,14 @@ export default function DentalLabTracker({ auth }) {
   const [myClinics, setMyClinics] = useState([]); // multi-clinic: every clinic this dentist owns
   const [loadingData, setLoadingData] = useState(true);
   const [loadError, setLoadError] = useState("");
+  // Noor: open flags + open clarifications for every visible case. Fail-soft
+  // like rounds — an un-migrated DB just shows no Noor surfaces.
+  const [noorState, setNoorState] = useState({ flags: [], clarifications: [] });
+  const [noorEscalations, setNoorEscalations] = useState([]);
+  const [noorEscalationsLoading, setNoorEscalationsLoading] = useState(false);
+  const refreshNoor = useCallback(() => {
+    fetchNoorState().then(setNoorState).catch(() => setNoorState({ flags: [], clarifications: [] }));
+  }, []);
 
   // Initial load, re-run if the signed-in org changes. Rounds fail-soft: an
   // old client / un-migrated DB just shows no follow-ups rather than erroring.
@@ -903,6 +918,9 @@ export default function DentalLabTracker({ auth }) {
     fetchCaseRounds()
       .then((r) => !cancelled && setCaseRounds(r))
       .catch(() => !cancelled && setCaseRounds([]));
+    fetchNoorState()
+      .then((n) => !cancelled && setNoorState(n))
+      .catch(() => !cancelled && setNoorState({ flags: [], clarifications: [] }));
     return () => {
       cancelled = true;
     };
@@ -1445,6 +1463,31 @@ export default function DentalLabTracker({ auth }) {
   const remakeCase = cases.find((c) => c.id === remakeCaseId) || null;
   const printCase = cases.find((c) => c.id === printCaseId) || null;
   const invoiceCase = cases.find((c) => c.id === invoiceCaseId) || null;
+  // Noor lookups. The lab's flag gates every Noor surface; RLS already scoped the rows.
+  const noorOn = !isDentist ? !!lab?.noorEnabled : cases.some((c) => labById[c.labId]?.noorEnabled);
+  const noorFlagsByCase = useMemo(() => {
+    const m = {};
+    for (const f of noorState.flags) (m[f.caseId] ??= []).push(f);
+    return m;
+  }, [noorState.flags]);
+  const noorClarByCase = useMemo(() => Object.fromEntries(noorState.clarifications.map((c) => [c.caseId, c])), [noorState.clarifications]);
+  // Poll Noor state every 2 minutes while on — flags change on the watcher's
+  // 30-minute tick, so anything faster is wasted requests.
+  useEffect(() => {
+    if (!noorOn) return;
+    const t = setInterval(refreshNoor, 120_000);
+    return () => clearInterval(t);
+  }, [noorOn, refreshNoor]);
+  useEffect(() => {
+    if (!noorOn || isDentist) return;
+    let cancelled = false;
+    setNoorEscalationsLoading(true);
+    fetchNoorEscalations({ includeResolved: true })
+      .then((e) => !cancelled && setNoorEscalations(e))
+      .catch(() => !cancelled && setNoorEscalations([]))
+      .finally(() => !cancelled && setNoorEscalationsLoading(false));
+    return () => { cancelled = true; };
+  }, [noorOn, isDentist]);
   const receiptCase = cases.find((c) => c.id === receiptCaseId) || null;
   const contactCase = cases.find((c) => c.id === contactCaseId) || null;
   const printClinic = printCase ? clinicsById[printCase.clinicId] ?? clinic : null;
@@ -1609,6 +1652,7 @@ export default function DentalLabTracker({ auth }) {
             <LabDashboard
               lab={lab}
               queue={labQueue}
+              noor={noorOn ? { flags: noorState.flags, clarifications: noorState.clarifications, escalations: noorEscalations, flagsByCase: noorFlagsByCase } : null}
               rounds={caseRounds}
               clinicsById={clinicsById}
               onAdvance={(id) => advanceStage(id, `${lab.name} — ${currentUser}`, "lab")}
@@ -1638,6 +1682,8 @@ export default function DentalLabTracker({ auth }) {
               meId={profile.id}
               financeOnly={activeWorkspace === "accountant" || !hasAdminRole}
               isAdminPreview={activeWorkspace === "accountant" && hasAdminRole}
+              noor={noorOn ? { escalations: noorEscalations, escalationsLoading: noorEscalationsLoading, onEscalationChanged: (u) => setNoorEscalations((prev) => prev.map((e) => (e.id === u.id ? u : e))) } : null}
+              onOpenCase={openCaseDrawer}
             />
           ) : (
             labDashboard
@@ -1853,6 +1899,11 @@ export default function DentalLabTracker({ auth }) {
         onResetCasePrice={!isDentist ? resetCasePrice : undefined}
         onSetCaseDiscount={!isDentist && schemaCaps.caseDiscount ? setCaseDiscount : undefined}
         onSetCaseBillingNote={!isDentist && schemaCaps.caseDiscount ? setCaseBillingNote : undefined}
+        noor={drawerCase && noorOn ? {
+          flags: noorFlagsByCase[drawerCase.id] ?? [],
+          clarification: noorClarByCase[drawerCase.id] ?? null,
+          onClarificationAnswered: () => { logActivity("answered Noor clarification", drawerCase.id); refreshNoor(); },
+        } : null}
         onSetLabShade={!isDentist ? setLabShade : undefined}
         rounds={drawerCase ? caseRounds.filter((r) => r.parentCaseId === drawerCase.id) : []}
         onResolveRound={!isDentist ? resolveFollowup : undefined}
@@ -2042,8 +2093,9 @@ function DentistDashboard({
                     {fmtLogDate(c.createdAt ?? c.history?.[0]?.at ?? c.createdDate)}
                   </td>
                   <td className="px-4 py-3.5 align-top">
-                    <div className="flex flex-wrap items-baseline gap-x-1.5">
+                    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
                       <span className="font-semibold text-slate-800">{c.patientName}</span>
+                      <NoorFlagChips flags={noorFlagsByCase[c.id] ?? []} compact />
                       {c.remake && (
                         <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
                           <RefreshCcw size={9} /> Remake
@@ -2356,7 +2408,7 @@ function UpcomingDeadlines({ cases, clinicsById, onOpenCase, now }) {
   );
 }
 
-function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, onResolveCancellation, onExportCsv }) {
+function LabDashboard({ lab, queue, rounds = [], clinicsById, noor = null, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, onResolveCancellation, onExportCsv }) {
   // Minute tick so "time remaining" and urgency colors stay honest on a
   // dashboard that sits open on the bench all day.
   const [now, setNow] = useState(() => Date.now());
@@ -2403,13 +2455,21 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
       <div>
         <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
           <Building2 size={18} className="text-blue-600" /> {lab.name}
+          {noor && <NoorStatusPill />}
         </h2>
         <p className="text-sm text-slate-500">Production Queue</p>
       </div>
 
+      {/* Noor's brief — the same sections as the morning email, live */}
+      {noor && (
+        <NoorBriefCard cases={queue} flags={noor.flags} clarifications={noor.clarifications} escalations={noor.escalations} clinicsById={clinicsById} onOpenCase={onOpenCase} />
+      )}
+
       {/* Delivery pressure first: everything due within 72h (or overdue),
           most urgent on top, before any cards or lists */}
       <UpcomingDeadlines cases={queue} clinicsById={clinicsById} onOpenCase={onOpenCase} now={now} />
+
+      {noor && <AskNoorPanel />}
 
       {/* Active section header + Export, in one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2445,6 +2505,7 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, onAdvance, onRever
               c={c}
               clinicName={clinicsById?.[c.clinicId]?.name}
               returningRound={openRoundByCase.get(c.id)}
+              noorFlags={noor?.flagsByCase?.[c.id] ?? []}
               onAdvance={onAdvance}
               onRevert={onRevert}
               onOpenCase={onOpenCase}
@@ -2776,7 +2837,7 @@ function CancellationRequestBanner({ c, onResolve }) {
   );
 }
 
-function LabCaseCard({ c, clinicName, returningRound, onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, onResolveCancellation }) {
+function LabCaseCard({ c, clinicName, returningRound, noorFlags = [], onAdvance, onRevert, onOpenCase, onLogRemake, onSetInvoiceNumber, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, onResolveCancellation }) {
   const idx = c.stageIndex;
   const cur = STAGES[idx];
   const next = STAGES[idx + 1];
@@ -2831,8 +2892,9 @@ function LabCaseCard({ c, clinicName, returningRound, onAdvance, onRevert, onOpe
             {clinicName && <span className="font-normal text-slate-400"> · {clinicName}</span>}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           {urgent && <AppointmentBadge caseObj={c} />}
+          <NoorFlagChips flags={noorFlags} />
           {c.remake && (
             <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">
               <RefreshCcw size={11} /> Remake

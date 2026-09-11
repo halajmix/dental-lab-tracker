@@ -10,3 +10,4 @@ dist
 
 # receipt print proofs (regenerate: node scripts/receipt-proof.mjs)
 scripts/.proof/
+supabase/.temp/

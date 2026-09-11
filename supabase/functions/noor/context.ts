@@ -10,8 +10,11 @@ export function intakeContext(summary: CaseSummary, issues: Issue[]): string {
     wrapData("issues", issues) + "\nWrite ONE question for the dentist about the first blocking issue and call request_clarification. If issues is empty output PASS.";
 }
 
-export function questionContext(question: string): string {
-  return wrapData("question", question.slice(0, 2000)) + "\nAnswer from tool results only.";
+export function questionContext(question: string, caseId?: string | null): string {
+  // A question asked from inside a case drawer carries that case id so "where
+  // is it?" needs no id in the text. The id is data, not instruction.
+  const focus = caseId ? wrapData("case_in_view", caseId) + "\n" : "";
+  return focus + wrapData("question", question.slice(0, 2000)) + "\nAnswer from tool results only." + (caseId ? " If the question is about the case in view, start with get_case for it." : "");
 }
 
 export function remakeContext(caseId: string, roundId: string | undefined, instructions: string): string {

@@ -10,7 +10,8 @@
     "deploy": "./deploy.sh",
     "noor:test": "node --test 'supabase/functions/noor/tests/*.test.ts'",
     "noor:check": "node scripts/noor-check-schemas.mjs",
-    "noor:evals": "node scripts/noor-evals.mjs"
+    "noor:evals": "node scripts/noor-evals.mjs",
+    "noor:ui": "node --test tests/noorUi.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.2",

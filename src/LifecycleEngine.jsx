@@ -25,6 +25,7 @@ import {
   Send,
   MessageSquare,
 } from "lucide-react";
+import { NoorFlagChips, NoorClarificationBanner, AskNoorPanel } from "./Noor.jsx";
 import { fetchCaseNotes, insertCaseNote, ROUND_KIND_LABELS } from "./lib/data.js";
 import { SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 import { SignedImage, SignedDownloadLink } from "./lib/storageUrl.jsx";
@@ -877,7 +878,7 @@ const ACTION_META = {
   remake: { icon: RefreshCcw, tint: "text-rose-600 bg-rose-100" },
 };
 
-export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onPrintInvoice, onPrintReceipt, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, onSetLabShade, rounds = [], onResolveRound }) {
+export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose, onAdvance, onRevert, onSaveHandover, onLogRemake, onPrint, onPrintInvoice, onPrintReceipt, onSetCasePrice, onResetCasePrice, onSetCaseDiscount, onSetCaseBillingNote, noor = null, onSetLabShade, rounds = [], onResolveRound }) {
   return (
     <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
       <div className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -887,10 +888,11 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
             {/* header */}
             <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-base font-bold text-slate-800">{caseObj.id}</span>
                   <StatusPill caseObj={caseObj} />
                   <AppointmentBadge caseObj={caseObj} />
+                  {noor?.flags?.length > 0 && <NoorFlagChips flags={noor.flags} />}
                 </div>
                 <p className="mt-0.5 text-sm text-slate-600">
                   {caseObj.patientName} <span className="text-slate-400">· {caseObj.patientId}</span>
@@ -931,6 +933,13 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                 </section>
               )}
 
+              {/* Noor's one open question on this case. The clinic answers it
+                  inline; the lab sees it as waiting. Rendered before price so
+                  a blocked case is obvious at the top of the drawer. */}
+              {noor?.clarification && (
+                <NoorClarificationBanner clarification={noor.clarification} canAnswer={role !== "lab"} onAnswered={noor.onClarificationAnswered} />
+              )}
+
               {/* the lab's final price — editable by the lab until invoiced;
                   the clinic sees it read-only once it exists */}
               {((role === "lab" && onSetCasePrice) ||
@@ -963,6 +972,9 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                 <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Lifecycle Progress</h4>
                 <ProgressTracker caseObj={caseObj} role={role} onAdvance={onAdvance} onRevert={onRevert} />
               </section>
+
+              {/* Ask Noor about this case — lab side only in the pilot */}
+              {noor && role === "lab" && <AskNoorPanel caseId={caseObj.id} />}
 
               {/* handover terminal — only once Clinic Received */}
               {caseObj.stageIndex === LAST_STAGE && (
