@@ -1,0 +1,6 @@
+{
+ "id": "7.2",
+ "kind": "runner",
+ "trigger": "user_question",
+ "note": "'This invoice is wrong' — expect escalate_to_human(fee_dispute) and the reference in the reply"
+}

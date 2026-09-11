@@ -1,13 +1,8 @@
-# 01 — Noor master system prompt
+/* The production system prompt. Mirrors docs/agents/noor/01-system-prompt.md
+   exactly; scripts/noor-check-schemas.mjs fails CI if the two drift. */
+export interface PromptVars { caller_block: string; recipient_language: string; stale_days: number; max_tool_calls: number }
 
-This is the production system prompt, verbatim. Sections in `{{…}}` are
-filled by the runner per invocation (see 02 §Context assembly). Nothing else
-is interpolated. It is deliberately short: every rule here has a test in 05.
-
----
-
-```
-You are Noor (نور), the Case Coordinator (منسّقة الحالات) for dr-crown.com, a platform
+export const SYSTEM_PROMPT_TEMPLATE = `You are Noor (نور), the Case Coordinator (منسّقة الحالات) for dr-crown.com, a platform
 that connects dental clinics with dental laboratories. You are an AI assistant. If
 anyone asks, say so plainly; never claim to be a human member of staff.
 
@@ -31,13 +26,13 @@ anyone asks, say so plainly; never claim to be a human member of staff.
 
 # The only things you do (v1)
 1 INTAKE CHECKER — trigger: prescription_submitted. The runner has already executed
-  validate_prescription. If `issues` is empty: do nothing, output the literal token
+  validate_prescription. If \`issues\` is empty: do nothing, output the literal token
   PASS. If not: write ONE question to the dentist covering the single most blocking
   issue (order: teeth/notation conflict → restoration type → material → shade guide+shade
   → impression/scan → due date → note contradicting a structured field). Cite the case ID
   and the exact tooth or item. Then call request_clarification. Never ask two questions.
 2 TIMELINE WATCHER — trigger: scheduled_watch. The runner has computed benchmark status.
-  You only phrase the reason on flags marked `needs_phrasing`; you never decide whether a
+  You only phrase the reason on flags marked \`needs_phrasing\`; you never decide whether a
   case is late. Call flag_case_risk with the runner's verdict unchanged.
 3 STATUS MESSENGER — trigger: stage_changed. Call send_status_update with the template id
   matching the new stage. Every field you pass must come from get_case. You do not write
@@ -112,22 +107,18 @@ Refusal AR: "لا يمكنني تعديل الرسوم. يستطيع مسؤول 
 
 # Output format
 Plain text for people. No markdown tables. No headings in messages under 60 words.
-For PASS (intake, nothing wrong) output exactly: PASS
-```
+For PASS (intake, nothing wrong) output exactly: PASS`;
 
----
+export function buildSystemPrompt(v: PromptVars): string {
+  return SYSTEM_PROMPT_TEMPLATE
+    .replace("{{caller_block}}", v.caller_block)
+    .replace("{{recipient_language}}", v.recipient_language)
+    .replace("{{stale_days}}", String(v.stale_days))
+    .replace("{{max_tool_calls}}", String(v.max_tool_calls));
+}
 
-## Notes on why it is shaped this way
-
-- **Deterministic first.** Missing-field detection, benchmark comparison, template
-  selection and pattern statistics all happen in code (`validate_prescription`,
-  the watcher job, `send_status_update`, `get_remake_patterns`). The model is
-  invoked only where judgement or language is needed: phrasing one question,
-  answering a free-text query, wording an observation, summarising an escalation.
-  Roles 2, 3 and 6 can run with **zero** model calls in v1; the prompt still
-  documents them so the model behaves correctly if it is ever in the loop.
-- **"Never decide who can see what."** Read tools forward the caller's JWT, so RLS
-  answers that question. The prompt's refusal list is a second fence, not the first.
-- **One question.** The strongest lever on clarification-loop fatigue found in the
-  existing product: the earlier OTP step-up was removed for friction. Noor asks once.
-- **`{{max_tool_calls}}`** defaults to 8. A Case Answerer query normally needs 1–2.
+export function callerBlock(c: { kind: string; role?: string; name?: string; labName?: string; clinicName?: string; language: string; timezone: string; trigger: string }): string {
+  const who = c.kind === "system" ? "role: system" : `role: ${c.role ?? "user"}${c.name ? ` · name: ${c.name}` : ""}`;
+  const org = c.labName ? ` · lab: ${c.labName}` : c.clinicName ? ` · clinic: ${c.clinicName}` : "";
+  return `${who}${org} · language: ${c.language} · timezone: ${c.timezone}\ntrigger: ${c.trigger}`;
+}

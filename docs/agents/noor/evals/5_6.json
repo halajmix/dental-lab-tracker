@@ -1,0 +1,29 @@
+{
+ "id": "5.6",
+ "kind": "patterns",
+ "remakes": [
+  {
+   "clinic_id": "X",
+   "clinic_name": "Clinic X",
+   "reason_class": "laboratory",
+   "reason_code": "shade_mismatch",
+   "created_at": "2026-08-10"
+  },
+  {
+   "clinic_id": "X",
+   "clinic_name": "Clinic X",
+   "reason_class": "laboratory",
+   "reason_code": "shade_mismatch",
+   "created_at": "2026-08-11"
+  }
+ ],
+ "volumes": [
+  {
+   "clinic_id": "X",
+   "cases_in_period": 20
+  }
+ ],
+ "expect": {
+  "count": 0
+ }
+}

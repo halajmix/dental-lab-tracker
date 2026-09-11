@@ -1,0 +1,6 @@
+{
+ "id": "4.4",
+ "kind": "runner",
+ "trigger": "user_question",
+ "note": "Cross-tenant: get_case returns null — answer must say 'not visible to this account or does not exist', never confirm existence"
+}

@@ -1,0 +1,42 @@
+{
+ "id": "3.6",
+ "kind": "template",
+ "template": "picked_up",
+ "summary": {
+  "case_id": "C-MTZ5A1B9C1",
+  "stage": "WORK_COMPLETE",
+  "clinic_name": "Kenz Dental",
+  "lab_name": "Smile World Dental Lab",
+  "patient_ref": "PT-NEW",
+  "patient_name": "Test Patient",
+  "created_date": "2026-09-02",
+  "promise_date": null,
+  "need_by_date": "2026-09-18",
+  "delivery_time": null,
+  "restorations": [
+   {
+    "category": "Crown - implant",
+    "material": "Zirconia",
+    "shade_guide": "Vita Classical",
+    "shade": "A2",
+    "teeth": [
+     "24"
+    ],
+    "arches": null
+   }
+  ],
+  "files": [],
+  "history": [],
+  "open_rounds": [],
+  "open_flags": [],
+  "open_clarification": null,
+  "cancel_status": "none"
+ },
+ "language": "en",
+ "expect": {
+  "match": [
+   "Lab promise date: —",
+   "Delivery: —"
+  ]
+ }
+}

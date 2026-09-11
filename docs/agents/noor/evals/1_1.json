@@ -1,0 +1,41 @@
+{
+ "id": "1.1",
+ "kind": "validate",
+ "input": {
+  "prescription": {
+   "caseMode": "restorations",
+   "notation": "FDI",
+   "included": [
+    "Upper impression"
+   ],
+   "files": [
+    {
+     "name": "a.stl",
+     "kind": "scan"
+    }
+   ],
+   "restorations": [
+    {
+     "id": "r1",
+     "category": "Crown - implant",
+     "material": "Zirconia",
+     "shadeGuide": "Vita Classical",
+     "vitaShade": "A2",
+     "teeth": [
+      {
+       "fdi": 24
+      },
+      {
+       "fdi": 25
+      }
+     ]
+    }
+   ]
+  },
+  "appointment_date": "2026-09-18",
+  "lab_shade": null
+ },
+ "expect": {
+  "fields": []
+ }
+}

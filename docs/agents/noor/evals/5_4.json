@@ -1,0 +1,47 @@
+{
+ "id": "5.4",
+ "kind": "patterns",
+ "remakes": [
+  {
+   "clinic_id": "X",
+   "clinic_name": "Clinic X",
+   "reason_class": "laboratory",
+   "reason_code": "shade_mismatch",
+   "created_at": "2026-08-10"
+  },
+  {
+   "clinic_id": "X",
+   "clinic_name": "Clinic X",
+   "reason_class": "laboratory",
+   "reason_code": "shade_mismatch",
+   "created_at": "2026-08-11"
+  },
+  {
+   "clinic_id": "X",
+   "clinic_name": "Clinic X",
+   "reason_class": "laboratory",
+   "reason_code": "shade_mismatch",
+   "created_at": "2026-08-12"
+  },
+  {
+   "clinic_id": "X",
+   "clinic_name": "Clinic X",
+   "reason_class": "laboratory",
+   "reason_code": "shade_mismatch",
+   "created_at": "2026-08-13"
+  }
+ ],
+ "volumes": [
+  {
+   "clinic_id": "X",
+   "cases_in_period": 20
+  }
+ ],
+ "expect": {
+  "count": 1,
+  "noMatch": [
+   "fault",
+   "blame"
+  ]
+ }
+}
