@@ -59,17 +59,19 @@ Deno.serve(async (req) => {
   const env = readEnv();
   const admin = createClient(env.supabaseUrl, env.serviceKey);
   const now = new Date();
-  let body: Body;
-  try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
-  const trigger = classify(body);
-  if (!trigger) return json({ ok: true, skipped: "no-op event" });
-
-  // ---- authenticate the caller ----
+  // ---- authenticate FIRST, by credential type, before the body decides anything ----
+  // A shared secret marks a database/cron caller; a Bearer JWT marks a user.
+  // Neither present → 401 before a single byte of the body is interpreted.
+  const secretHeader = req.headers.get("x-webhook-secret");
+  const auth = req.headers.get("Authorization") ?? "";
   let caller: Caller;
   let userDb = admin;
-  if (trigger === "user_question") {
-    const auth = req.headers.get("Authorization") ?? "";
-    if (!auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+  let body: Body;
+  if (secretHeader !== null) {
+    if (!env.webhookSecret) return json({ error: "Server misconfigured" }, 500);
+    if (secretHeader !== env.webhookSecret) return json({ error: "Unauthorized" }, 401);
+    caller = { kind: "system", language: "en", timezone: "Asia/Muscat" };
+  } else if (auth.startsWith("Bearer ")) {
     userDb = createClient(env.supabaseUrl, env.anonKey, { global: { headers: { Authorization: auth } } });
     const { data: u, error } = await userDb.auth.getUser();
     if (error || !u.user) return json({ error: "Unauthorized" }, 401);
@@ -82,10 +84,14 @@ Deno.serve(async (req) => {
     const { data: lab } = p.lab_id ? await admin.from("labs").select("timezone").eq("id", p.lab_id).maybeSingle() : { data: null };
     caller = { kind: "user", userId: u.user.id, role: p.role, labId: p.lab_id ?? null, clinicIds, name: p.name ?? undefined, language: (p.language as Language) ?? "en", timezone: lab?.timezone ?? "Asia/Muscat" };
   } else {
-    if (!env.webhookSecret) return json({ error: "Server misconfigured" }, 500);
-    if (req.headers.get("x-webhook-secret") !== env.webhookSecret) return json({ error: "Unauthorized" }, 401);
-    caller = { kind: "system", language: "en", timezone: "Asia/Muscat" };
+    return json({ error: "Unauthorized" }, 401);
   }
+  try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
+  const trigger = classify(body);
+  if (!trigger) return json({ ok: true, skipped: "no-op event" });
+  // A user token may only ask questions; a secret may do anything but that.
+  if (caller.kind === "user" && trigger !== "user_question") return json({ error: "Forbidden" }, 403);
+  if (caller.kind === "system" && trigger === "user_question") return json({ error: "Forbidden" }, 403);
 
   // ---- gate ----
   const rec = (body.record ?? {}) as Partial<CaseRow> & { parent_case_id?: string; case_id?: string; kind?: string; instructions?: string; id?: string };
