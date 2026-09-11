@@ -16,7 +16,7 @@ const URL_BASE = "https://mtxkushcxczjwypwoxdh.supabase.co";
 // station-session is deliberately absent: the device-OTP step-up was removed
 // 2026-08-13 and nothing in the client calls it. Listing it would report a
 // 404 as breakage every run.
-const FUNCTIONS = ["case-notify", "payment-reminders", "mobile-upload", "admin-actions"];
+const FUNCTIONS = ["case-notify", "payment-reminders", "mobile-upload", "admin-actions", "noor"];
 const key = serviceKey();
 const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
@@ -69,6 +69,28 @@ for (const fn of FUNCTIONS) {
   } catch (e) {
     console.log(`  ${fn.padEnd(20)} unreachable: ${e.message}`);
   }
+}
+
+console.log("\n=== noor (AI case coordinator) ===");
+{
+  const flag = await fetch(`${URL_BASE}/rest/v1/feature_flags?select=enabled&key=eq.noor.global`, { headers }).then((r) => r.json()).catch(() => []);
+  const labs = await fetch(`${URL_BASE}/rest/v1/labs?select=name&noor_enabled=eq.true`, { headers }).then((r) => r.json()).catch(() => []);
+  console.log(`  global flag        ${flag?.[0]?.enabled ? "ON" : "off"} · labs enabled: ${labs.map((l) => l.name).join(", ") || "none"}`);
+  const day = new Date(Date.now() - 86400000).toISOString();
+  const runs = await fetch(`${URL_BASE}/rest/v1/agent_runs?select=trigger,outcome,shadow,would_have,error,started_at&started_at=gte.${day}&order=started_at.desc`, { headers }).then((r) => r.json()).catch(() => []);
+  const tally = {};
+  for (const r of runs) tally[`${r.trigger}/${r.outcome ?? "unfinished"}`] = (tally[`${r.trigger}/${r.outcome ?? "unfinished"}`] ?? 0) + 1;
+  console.log(`  runs last 24h      ${runs.length}${runs.length ? "  " + Object.entries(tally).map(([k, v]) => `${k}×${v}`).join(", ") : ""}`);
+  const last = runs[0];
+  if (last) {
+    const wh = Array.isArray(last.would_have) ? last.would_have : [];
+    const sum = wh.find((w) => w.tool === "summary")?.input;
+    const acts = wh.filter((w) => w.tool !== "summary" && w.tool !== "resolve_flag");
+    console.log(`  newest run         ${ago(last.started_at)}  ${last.shadow ? "SHADOW" : "LIVE"}${sum ? `  cases=${sum.cases} flagged=${sum.flagged} escalated=${sum.escalated}` : ""}${last.error ? `  ERROR ${last.error}` : ""}`);
+    if (acts.length) console.log(`  would have         ${acts.map((w) => `${w.tool}(${w.input?.case_id ?? ""}${w.input?.kind ? " " + w.input.kind : ""}${w.input?.category ? " " + w.input.category : ""})`).join(", ").slice(0, 300)}`);
+  }
+  const fails = runs.filter((r) => r.outcome === "failed" || r.error).length;
+  if (fails) console.log(`  failed runs        ${fails}  ← read agent_runs.error`);
 }
 
 console.log("\n=== backups ===");
