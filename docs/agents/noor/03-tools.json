@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Noor tool contract. Every tool: strict input schema, fixed output shape, an explicit authz rule the runner enforces before the query, and a 'never' list the model is told. No tool accepts SQL, filter strings, table names, or tenant ids the model invented.",
+  "$defs": {
+    "case_id": { "type": "string", "pattern": "^C-[A-Z0-9]{6,16}$", "description": "App-generated case id, e.g. C-MTX2A9K1Q3" },
+    "language": { "type": "string", "enum": ["en", "ar"] },
+    "stage": { "type": "string", "enum": ["STILL_AT_CLINIC", "PICKED_UP_BY_LAB", "WORK_IN_PROGRESS", "WORK_COMPLETE", "CLINIC_RECEIVED"] },
+    "notation": { "type": "string", "enum": ["FDI", "Universal"] },
+    "category": { "type": "string", "enum": [
+      "Crown - tooth", "Crown - implant", "Bridge - tooth (conventional)", "Bridge - tooth (Resin Bonded)", "Bridge - implant", "Veneer",
+      "Removable partial denture", "Complete denture", "Orthodontics splint", "Single layer splint - soft", "Double layer splint - soft",
+      "Double layer splint - outer hard, inner soft", "Michigan splint", "Clear retainer", "Night guard", "Fixed retainer", "Study model",
+      "Special tray", "Others - refer to notes"
+    ] },
+    "shade_guide": { "type": "string", "enum": ["Vita Classical", "Vita 3D-Master", "Ivoclar Chromascop", "Bleach/Whitening", "Custom/Photo", "Shade by Lab"] },
+    "scan_kind": { "type": "string", "enum": ["scan", "photo"], "description": "scan = .stl or .pdf; photo = image" },
+    "round_kind": { "type": "string", "enum": ["stage", "update", "remake", "adjustment", "refit"] },
+    "reason_class": { "type": "string", "enum": ["clinical", "laboratory"] },
+    "reason_code": { "type": "string", "enum": [
+      "margin_distortion_unclear_prep", "insufficient_occlusal_clearance", "impression_drag", "incorrect_shade_selection",
+      "open_margin_on_die", "proximal_contacts", "shade_mismatch", "framework_fitting_error", "porcelain_fracture", "other"
+    ], "description": "Codes map 1:1 to REMAKE_REASONS in src/Remake.jsx plus 'other'" },
+    "flag_kind": { "type": "string", "enum": ["at_risk", "overdue", "stale", "needs_clarification"] },
+    "visibility": { "type": "string", "enum": ["lab", "clinic", "both"] },
+    "template_id": { "type": "string", "enum": ["picked_up", "in_progress", "work_complete", "clinic_received", "clarification_request", "overdue_confirmed"] },
+    "escalation_category": { "type": "string", "enum": ["fee_dispute", "complaint", "clinical_question", "clarification_failed", "stale_case", "tool_failure", "user_requested", "pattern_observation"] },
+    "issue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["field", "severity", "detail"],
+      "properties": {
+        "field": { "type": "string", "enum": ["teeth", "notation", "category", "material", "shade_guide", "shade", "impression_or_scan", "due_date", "notes_conflict"] },
+        "restoration_index": { "type": "integer", "minimum": 0 },
+        "severity": { "type": "string", "enum": ["blocking", "warning"] },
+        "detail": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "case_summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["case_id", "stage", "clinic_name", "lab_name", "created_date", "promise_date", "need_by_date", "restorations", "open_flags", "open_clarification"],
+      "properties": {
+        "case_id": { "$ref": "#/$defs/case_id" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "stage_since": { "type": "string", "format": "date-time" },
+        "clinic_name": { "type": "string" },
+        "lab_name": { "type": "string" },
+        "patient_ref": { "type": "string", "description": "The clinic's own patient reference (patient_id). Name and phone are omitted unless caller is the case's clinic and requested them." },
+        "created_date": { "type": "string", "format": "date" },
+        "promise_date": { "type": ["string", "null"], "format": "date", "description": "prescription.estReady — the lab's promise" },
+        "need_by_date": { "type": ["string", "null"], "format": "date", "description": "appointment_date — the clinic's next appointment" },
+        "delivery_time": { "type": "string" },
+        "restorations": { "type": "array", "items": { "type": "object", "additionalProperties": false, "properties": {
+          "category": { "$ref": "#/$defs/category" }, "material": { "type": "string" }, "shade_guide": { "$ref": "#/$defs/shade_guide" },
+          "shade": { "type": ["string", "null"] }, "teeth": { "type": "array", "items": { "type": "string" } }, "arches": { "type": ["string", "null"] }
+        } } },
+        "lab_shade": { "type": ["string", "null"] },
+        "files": { "type": "array", "items": { "type": "object", "properties": { "kind": { "$ref": "#/$defs/scan_kind" }, "name": { "type": "string" } } } },
+        "history": { "type": "array", "items": { "type": "object", "properties": { "at": { "type": "string" }, "action": { "type": "string" }, "to_stage": { "$ref": "#/$defs/stage" }, "by_role": { "type": "string" } } } },
+        "open_rounds": { "type": "array", "items": { "type": "object", "properties": { "kind": { "$ref": "#/$defs/round_kind" }, "created_at": { "type": "string" }, "instructions": { "type": "string", "maxLength": 500 } } } },
+        "open_flags": { "type": "array", "items": { "type": "object", "properties": { "kind": { "$ref": "#/$defs/flag_kind" }, "reason": { "type": "string" } } } },
+        "open_clarification": { "type": ["object", "null"], "properties": { "question": { "type": "string" }, "asked_at": { "type": "string" } } },
+        "cancel_status": { "type": "string", "enum": ["none", "requested", "cancelled", "declined"] }
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "get_case",
+      "description": "Fetch one case the caller is authorised to see, redacted for the model. Use before any note, flag, update or escalation. NEVER use to look up a case for a different clinic or lab; if RLS returns nothing, report 'not visible or does not exist' without distinguishing.",
+      "authz": "Runs as the caller (JWT → RLS). Scheduled runs: service role scoped by lab_id of the current job.",
+      "side_effects": "none",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id"], "properties": { "case_id": { "$ref": "#/$defs/case_id" }, "include_patient": { "type": "boolean", "default": false, "description": "Only honoured when caller belongs to the case's clinic." } } },
+      "output_schema": { "oneOf": [ { "$ref": "#/$defs/case_summary" }, { "type": "null" } ] }
+    },
+    {
+      "name": "list_cases",
+      "description": "List cases the caller can see, filtered and paginated. Use for 'what is outstanding / due / late / awaiting'. NEVER pass a clinic_id or lab_id the caller did not receive from a tool result; NEVER use to enumerate other tenants.",
+      "authz": "Runs as the caller (JWT → RLS). Tenant filters are validated against the caller's memberships before the query.",
+      "side_effects": "none",
+      "input_schema": { "type": "object", "additionalProperties": false, "properties": {
+        "stage": { "type": "array", "items": { "$ref": "#/$defs/stage" } },
+        "due_from": { "type": "string", "format": "date" }, "due_to": { "type": "string", "format": "date" },
+        "due_field": { "type": "string", "enum": ["promise_date", "need_by_date"], "default": "need_by_date" },
+        "flag_kind": { "$ref": "#/$defs/flag_kind" },
+        "has_open_clarification": { "type": "boolean" },
+        "search": { "type": "string", "maxLength": 40, "description": "Substring of case id or patient_ref only." },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+        "cursor": { "type": "string" }
+      } },
+      "output_schema": { "type": "object", "required": ["items", "next_cursor", "total"], "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/case_summary" } }, "next_cursor": { "type": ["string", "null"] }, "total": { "type": "integer" } } }
+    },
+    {
+      "name": "validate_prescription",
+      "description": "Deterministic completeness and consistency check of a prescription. Pure code, no model. Checks: teeth present and consistent with notation; category present; material present where the category has materials; shade guide and shade present for shaded restorations (or 'Shade by Lab'); at least one scan or the relevant impression items included; need_by_date present and not before promise_date; notes that contradict structured fields (tooth numbers, shade, material named in notes but different in fields). NEVER use to 'approve' a case or to alter it.",
+      "authz": "Service role read of the single case identified by the trigger.",
+      "side_effects": "none",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id"], "properties": { "case_id": { "$ref": "#/$defs/case_id" } } },
+      "output_schema": { "type": "object", "required": ["issues"], "properties": { "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } } } }
+    },
+    {
+      "name": "request_clarification",
+      "description": "Record ONE question to the submitting dentist and put the case in 'needs clarification'. Exactly one open clarification per case; a second call while one is open fails. The question must name the case id and the specific item. NEVER use for anything other than an intake issue returned by validate_prescription; NEVER use to ask the lab.",
+      "authz": "Service role; precondition: case has no open clarification and stage is STILL_AT_CLINIC or PICKED_UP_BY_LAB.",
+      "side_effects": "insert case_clarifications; insert case_flags(needs_clarification, visible_to=both); templated email to clinic in clinics.language",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id", "issue", "question", "language"], "properties": { "case_id": { "$ref": "#/$defs/case_id" }, "issue": { "$ref": "#/$defs/issue" }, "question": { "type": "string", "minLength": 20, "maxLength": 400 }, "language": { "$ref": "#/$defs/language" } } },
+      "output_schema": { "type": "object", "required": ["clarification_id", "asked_at"], "properties": { "clarification_id": { "type": "string" }, "asked_at": { "type": "string" } } }
+    },
+    {
+      "name": "get_turnaround_benchmark",
+      "description": "Return the lab's benchmark for a restoration type and the per-stage expectations for a case (from labs.procedure_tats / labs.tat and the G5 defaults). NEVER estimate a benchmark yourself; if none exists the tool says so.",
+      "authz": "Runs as the caller; lab_id must be the case's lab.",
+      "side_effects": "none",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id"], "properties": { "case_id": { "$ref": "#/$defs/case_id" } } },
+      "output_schema": { "type": "object", "required": ["effective_tat_days", "promise_date", "per_stage"], "properties": {
+        "effective_tat_days": { "type": "integer" }, "promise_date": { "type": ["string", "null"], "format": "date" },
+        "per_stage": { "type": "array", "items": { "type": "object", "properties": { "stage": { "$ref": "#/$defs/stage" }, "expected_by": { "type": "string", "format": "date" }, "status": { "type": "string", "enum": ["on_track", "at_risk", "overdue", "done"] } } } },
+        "source": { "type": "string", "enum": ["procedure_tats", "lab_default", "none"] }
+      } }
+    },
+    {
+      "name": "flag_case_risk",
+      "description": "Create or update a risk flag on a case with a reason, and choose who sees it. The verdict (at_risk / overdue / stale) comes from the watcher job; the model only supplies wording. NEVER flag from a hunch; NEVER make an overdue flag clinic-visible before the watcher marks it confirmed.",
+      "authz": "Service role; scoped by the job's lab_id or assertCanAct for user-triggered runs.",
+      "side_effects": "upsert case_flags",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id", "kind", "reason", "visible_to"], "properties": { "case_id": { "$ref": "#/$defs/case_id" }, "kind": { "$ref": "#/$defs/flag_kind" }, "reason": { "type": "string", "minLength": 10, "maxLength": 240 }, "visible_to": { "$ref": "#/$defs/visibility" }, "days_over": { "type": "integer", "minimum": 0 } } },
+      "output_schema": { "type": "object", "required": ["flag_id"], "properties": { "flag_id": { "type": "string" }, "created": { "type": "boolean" } } }
+    },
+    {
+      "name": "send_status_update",
+      "description": "Send a templated, localized stage update to the case's clinic. The body is rendered by a fixed template from get_case data; the model passes only ids. NEVER pass free text; NEVER send to any address; NEVER send twice for the same stage transition.",
+      "authz": "Service role; precondition: an idempotency key (case_id, from_stage, to_stage) has not been used.",
+      "side_effects": "email via Resend to clinics.email; record resend_id on the run",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id", "template_id"], "properties": { "case_id": { "$ref": "#/$defs/case_id" }, "template_id": { "$ref": "#/$defs/template_id" }, "language": { "$ref": "#/$defs/language", "description": "Defaults to clinics.language" } } },
+      "output_schema": { "type": "object", "required": ["sent"], "properties": { "sent": { "type": "boolean" }, "skipped_reason": { "type": ["string", "null"] }, "resend_id": { "type": ["string", "null"] } } }
+    },
+    {
+      "name": "record_remake_reason",
+      "description": "Attach a structured reason to a remake (a case_rounds row of kind=remake, or cases.remake). Maps free text to reason_class + reason_code; keeps the original text. NEVER approve, reject, price or cost a remake; NEVER change the round's status.",
+      "authz": "Service role; assertCanAct: the caller (or trigger) belongs to the case's lab or clinic.",
+      "side_effects": "update case_rounds.reason_class/reason_code (or cases.remake fields)",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id", "reason_class", "reason_code"], "properties": { "case_id": { "$ref": "#/$defs/case_id" }, "round_id": { "type": "string", "description": "Omit for the case-level cases.remake slot." }, "reason_class": { "$ref": "#/$defs/reason_class" }, "reason_code": { "$ref": "#/$defs/reason_code" }, "stated_text": { "type": "string", "maxLength": 500 } } },
+      "output_schema": { "type": "object", "required": ["recorded"], "properties": { "recorded": { "type": "boolean" } } }
+    },
+    {
+      "name": "get_remake_patterns",
+      "description": "Aggregated remake counts by clinic×lab×reason_code over a period, with the lab's median for comparison. Returns only patterns above the configured thresholds. Pure code. NEVER returns patient data or individual case ids; NEVER use for a clinic other than the job's lab's own clinics.",
+      "authz": "Service role scoped to one lab_id.",
+      "side_effects": "none",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["lab_id", "period_days"], "properties": { "lab_id": { "type": "string", "format": "uuid" }, "period_days": { "type": "integer", "enum": [30, 90, 180] } } },
+      "output_schema": { "type": "object", "required": ["patterns"], "properties": { "patterns": { "type": "array", "items": { "type": "object", "required": ["clinic_name", "reason_class", "reason_code", "count", "cases_in_period", "lab_median_rate"], "properties": { "clinic_name": { "type": "string" }, "reason_class": { "$ref": "#/$defs/reason_class" }, "reason_code": { "$ref": "#/$defs/reason_code" }, "count": { "type": "integer" }, "cases_in_period": { "type": "integer" }, "lab_median_rate": { "type": "number" } } } } } }
+    },
+    {
+      "name": "compose_daily_brief",
+      "description": "Return the four brief sections for one lab for today in its timezone: due today, overdue, awaiting clarification, needs a decision (open escalations, open remake rounds, cancellation requests). Pure code; the model only orders and trims. NEVER add items not returned; NEVER send.",
+      "authz": "Service role scoped to lab_id.",
+      "side_effects": "none",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["lab_id", "date"], "properties": { "lab_id": { "type": "string", "format": "uuid" }, "date": { "type": "string", "format": "date" } } },
+      "output_schema": { "type": "object", "required": ["due_today", "overdue", "awaiting_clarification", "needs_decision"], "properties": {
+        "due_today": { "type": "array", "items": { "$ref": "#/$defs/case_summary" } },
+        "overdue": { "type": "array", "items": { "$ref": "#/$defs/case_summary" } },
+        "awaiting_clarification": { "type": "array", "items": { "$ref": "#/$defs/case_summary" } },
+        "needs_decision": { "type": "array", "items": { "type": "object", "properties": { "case_id": { "$ref": "#/$defs/case_id" }, "what": { "type": "string" } } } }
+      } }
+    },
+    {
+      "name": "escalate_to_human",
+      "description": "Create an escalation for the named manager of the case's lab (or clinic) with a structured context log, and email them. Use for disputes, complaints, clinical questions, repeated failed clarifications, stale cases, tool failures, or when the user asks for a person. NEVER use to send a message to the other party; NEVER include patient name or phone in the log.",
+      "authz": "Service role; manager resolved by the G6 rule server-side; caller identity recorded.",
+      "side_effects": "insert escalations; email to manager; insert case_notes 'Noor: escalated (ref)' when a case is involved",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["category", "summary", "context"], "properties": {
+        "case_id": { "$ref": "#/$defs/case_id" },
+        "category": { "$ref": "#/$defs/escalation_category" },
+        "summary": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "context": { "type": "object", "additionalProperties": false, "required": ["stage", "timeline", "parties", "attempted", "stop_reason"], "properties": {
+          "stage": { "$ref": "#/$defs/stage" },
+          "timeline": { "type": "array", "items": { "type": "string", "maxLength": 120 } },
+          "parties": { "type": "array", "items": { "type": "string", "enum": ["clinic", "lab", "dentist", "lab_admin", "lab_tech", "receptionist"] } },
+          "attempted": { "type": "array", "items": { "type": "string" }, "description": "Tool names in order" },
+          "stop_reason": { "type": "string", "maxLength": 200 }
+        } },
+        "language": { "$ref": "#/$defs/language" }
+      } },
+      "output_schema": { "type": "object", "required": ["escalation_id", "assigned_to_name"], "properties": { "escalation_id": { "type": "string" }, "assigned_to_name": { "type": "string" } } }
+    },
+    {
+      "name": "add_case_note",
+      "description": "Append a short factual note to a case as author 'Noor'. Notes record actions or facts ('Noor: clarification requested for shade on 24'), never opinions or advice. NEVER note patient data; NEVER use as a substitute for a tool that exists (e.g. do not 'note' a fee change).",
+      "authz": "Service role; assertCanAct: trigger or caller belongs to the case's lab or clinic.",
+      "side_effects": "insert case_notes (author_role='agent')",
+      "input_schema": { "type": "object", "additionalProperties": false, "required": ["case_id", "body"], "properties": { "case_id": { "$ref": "#/$defs/case_id" }, "body": { "type": "string", "minLength": 8, "maxLength": 300, "pattern": "^Noor: " } } },
+      "output_schema": { "type": "object", "required": ["note_id"], "properties": { "note_id": { "type": "string" } } }
+    }
+  ]
+}
