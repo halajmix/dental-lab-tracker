@@ -58,6 +58,9 @@ import {
   StatusPill,
   AppointmentBadge,
   CaseDrawer,
+  openRoundsByCase,
+  isReturningCase,
+  roundMeta,
   isUrgent,
   CasePriceField,
   CaseInvoiceNote,
@@ -1445,15 +1448,23 @@ export default function DentalLabTracker({ auth }) {
     );
   }, [cases, query]);
 
+  // Open follow-up rounds, newest per case. On the clinic side a case with an
+  // open round is "with the lab" whatever its stage says — the same rule the
+  // lab queue already applies when it pulls a returned case back into work.
+  const openRoundByCase = useMemo(() => openRoundsByCase(caseRounds), [caseRounds]);
+  const hasOpenRound = (c) => openRoundByCase.has(c.id);
+
   const filteredDentistCases = useMemo(() => {
     if (statusFilter === "all") return searchedDentistCases;
     return searchedDentistCases.filter((c) => {
-      if (statusFilter === "in_lab") return c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex <= STAGE_INDEX.WORK_COMPLETE;
-      if (statusFilter === "received") return c.stageIndex === STAGE_INDEX.CLINIC_RECEIVED;
+      if (statusFilter === "follow_up") return hasOpenRound(c);
+      if (statusFilter === "in_lab") return hasOpenRound(c) || (c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex <= STAGE_INDEX.WORK_COMPLETE);
+      if (statusFilter === "received") return c.stageIndex === STAGE_INDEX.CLINIC_RECEIVED && !hasOpenRound(c);
       if (statusFilter === "urgent") return isUrgent(c);
       return true;
     });
-  }, [searchedDentistCases, statusFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchedDentistCases, statusFilter, openRoundByCase]);
 
   // RLS already scopes `cases` to this lab's own queue when role === "lab".
   const labQueue = useMemo(() => (!isDentist && lab ? cases.filter((c) => c.labId === lab.id) : []), [cases, isDentist, lab]);
@@ -1621,6 +1632,7 @@ export default function DentalLabTracker({ auth }) {
             cases={filteredDentistCases}
             allCases={cases}
             noorFlagsByCase={noorFlagsByCase}
+            openRoundByCase={openRoundByCase}
             countBase={searchedDentistCases}
             totalCases={cases.length}
             statusFilter={statusFilter}
@@ -1991,6 +2003,7 @@ function DentistDashboard({
   cases,
   allCases,
   noorFlagsByCase = {},
+  openRoundByCase = new Map(),
   countBase,
   totalCases,
   statusFilter,
@@ -2009,8 +2022,10 @@ function DentistDashboard({
 }) {
   // Counts for the filter pills always reflect the searched-but-unfiltered set,
   // so switching pills never has to fight the currently active one.
-  const inLabCount = countBase.filter((c) => c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex <= STAGE_INDEX.WORK_COMPLETE).length;
-  const receivedCount = countBase.filter((c) => c.stageIndex === STAGE_INDEX.CLINIC_RECEIVED).length;
+  const followUpCases = countBase.filter((c) => openRoundByCase.has(c.id));
+  const sentBackCases = followUpCases.filter((c) => roundMeta(openRoundByCase.get(c.id).kind).sentBack);
+  const inLabCount = countBase.filter((c) => openRoundByCase.has(c.id) || (c.stageIndex >= STAGE_INDEX.PICKED_UP_BY_LAB && c.stageIndex <= STAGE_INDEX.WORK_COMPLETE)).length;
+  const receivedCount = countBase.filter((c) => c.stageIndex === STAGE_INDEX.CLINIC_RECEIVED && !openRoundByCase.has(c.id)).length;
   const urgentCases = countBase.filter(isUrgent);
 
   return (
@@ -2035,10 +2050,29 @@ function DentistDashboard({
         </div>
       )}
 
+      {/* Follow-ups the clinic has sent — the lab has these again. Loudest
+          when work was sent BACK (remake / re-fit / adjustment). */}
+      {followUpCases.length > 0 && (
+        <div className={`flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-sm ${sentBackCases.length ? "border-rose-200 bg-rose-50" : "border-blue-200 bg-blue-50"}`}>
+          <RefreshCcw size={16} className={`shrink-0 ${sentBackCases.length ? "text-rose-600" : "text-blue-600"}`} />
+          <span className={`font-semibold ${sentBackCases.length ? "text-rose-700" : "text-blue-700"}`}>
+            {followUpCases.length} follow-up{followUpCases.length > 1 ? "s" : ""} with the lab
+          </span>
+          {sentBackCases.length > 0 && <span className="text-rose-600">— {sentBackCases.length} sent back for rework:</span>}
+          <span className={`font-medium ${sentBackCases.length ? "text-rose-700" : "text-blue-700"}`}>
+            {followUpCases.map((c) => `${c.patientName} (${roundMeta(openRoundByCase.get(c.id).kind).label})`).join(", ")}
+          </span>
+          <button onClick={() => setStatusFilter("follow_up")} className={`ml-auto text-xs font-bold underline underline-offset-2 ${sentBackCases.length ? "text-rose-700" : "text-blue-700"}`}>Show only these</button>
+        </div>
+      )}
+
       {/* Toolbar: filter pills (left) + search & export (right), directly above the table */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <FilterPill active={statusFilter === "all"} onClick={() => setStatusFilter("all")} label="All Cases" count={countBase.length} />
+          {followUpCases.length > 0 && (
+            <FilterPill active={statusFilter === "follow_up"} onClick={() => setStatusFilter("follow_up")} label="Follow-ups" count={followUpCases.length} tone="alert" />
+          )}
           <FilterPill active={statusFilter === "in_lab"} onClick={() => setStatusFilter("in_lab")} label="In Lab" count={inLabCount} />
           <FilterPill active={statusFilter === "received"} onClick={() => setStatusFilter("received")} label="Clinic Received" count={receivedCount} />
           <FilterPill active={statusFilter === "urgent"} onClick={() => setStatusFilter("urgent")} label="Appt. Alerts" count={urgentCases.length} tone="alert" />
@@ -2087,7 +2121,7 @@ function DentistDashboard({
                   </td>
                 </tr>
               )}
-              {cases.map((c) => (
+              {[...cases].sort((a, b) => { const rk = (c) => { const r = openRoundByCase.get(c.id); return !r ? 2 : roundMeta(r.kind).sentBack ? 0 : 1; }; return rk(a) - rk(b); }).map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50/60">
                   {/* Case id lives in the details drawer only — the full id is
                       still on this cell's tooltip for quick cross-reference. */}
@@ -2097,6 +2131,11 @@ function DentistDashboard({
                   <td className="px-4 py-3.5 align-top">
                     <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
                       <span className="font-semibold text-slate-800">{c.patientName}</span>
+                      {openRoundByCase.has(c.id) && (() => { const r = openRoundByCase.get(c.id); const m = roundMeta(r.kind); return (
+                        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${m.cls}`} title={r.instructions || m.label}>
+                          <RefreshCcw size={10} /> {m.sentBack ? "Sent back" : "Follow-up"} · {m.label} · {fmtLogDate(r.createdAt)}
+                        </span>
+                      ); })()}
                       <NoorFlagChips flags={noorFlagsByCase[c.id] ?? []} compact />
                       {c.remake && (
                         <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
@@ -2137,7 +2176,7 @@ function DentistDashboard({
                     <AppointmentBadge caseObj={c} className="mt-1" />
                   </td>
                   <td className="px-4 py-3.5 align-top">
-                    <StatusPill caseObj={c} />
+                    <StatusPill caseObj={c} returningRound={openRoundByCase.get(c.id) ?? null} />
                     {/* Lab's invoice number — appears once the lab enters one */}
                     {c.invoiceNumber && (
                       <div className="mt-1">
@@ -2221,6 +2260,7 @@ function DentistDashboard({
         otherPartyLabel="Lab"
         otherPartyName={(c) => labById[c.labId]?.name}
         onOpenCase={onOpenCase}
+        openRoundByCase={openRoundByCase}
       />
     </div>
   );
@@ -2252,8 +2292,11 @@ const lastActivityAt = (c) => (c.history?.length ? c.history[c.history.length - 
 const completedOnAt = (c) =>
   c.history?.find((e) => e.toStage >= STAGE_INDEX.WORK_COMPLETE)?.at ?? lastActivityAt(c);
 
-function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
-  const sorted = [...cases].sort((a, b) => new Date(lastActivityAt(b)) - new Date(lastActivityAt(a)));
+function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase, openRoundByCase = new Map() }) {
+  // Open follow-ups first — sent-back work above informational ones — then
+  // everything else by last activity, as before.
+  const rank = (c) => { const r = openRoundByCase.get(c.id); return !r ? 2 : roundMeta(r.kind).sentBack ? 0 : 1; };
+  const sorted = [...cases].sort((a, b) => rank(a) - rank(b) || new Date(lastActivityAt(b)) - new Date(lastActivityAt(a)));
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
@@ -2285,7 +2328,7 @@ function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase }) {
                   <td className="whitespace-nowrap px-4 py-2 font-mono text-[11px] text-slate-500">{c.id}</td>
                   <td className="px-4 py-2 font-semibold text-slate-800">{c.patientName}</td>
                   <td className="px-4 py-2 text-slate-600">{otherPartyName(c) ?? "—"}</td>
-                  <td className="whitespace-nowrap px-4 py-2"><StatusPill caseObj={c} /></td>
+                  <td className="whitespace-nowrap px-4 py-2"><StatusPill caseObj={c} returningRound={openRoundByCase.get(c.id) ?? null} /></td>
                   <td className="whitespace-nowrap px-4 py-2 text-slate-400">{fmtLogDate(lastActivityAt(c))}</td>
                 </tr>
               ))}
@@ -2559,6 +2602,7 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, noor = null, onAdv
           compact, log-style, click a row for the full case drawer. */}
       <CaseLogTable
         cases={queue}
+        openRoundByCase={openRoundByCase}
         otherPartyLabel="Clinic"
         otherPartyName={(c) => clinicsById?.[c.clinicId]?.name}
         onOpenCase={onOpenCase}

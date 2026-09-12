@@ -236,13 +236,46 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 /*  Status pill                                                        */
 /* ================================================================== */
 
-export function StatusPill({ caseObj }) {
+/* An open follow-up round from the clinic. "Sent back" kinds mean something
+   is wrong with the work and the lab has it again; the other two are
+   information for the lab (extra files, move to the next stage). Shared by
+   the status pill, the clinic table and the drawer so the wording never
+   diverges between screens. */
+export const ROUND_KIND_META = {
+  remake:     { label: "Remake",     sentBack: true,  cls: "bg-rose-100 text-rose-700 ring-rose-200" },
+  refit:      { label: "Re-fit",     sentBack: true,  cls: "bg-rose-100 text-rose-700 ring-rose-200" },
+  adjustment: { label: "Adjustment", sentBack: true,  cls: "bg-rose-100 text-rose-700 ring-rose-200" },
+  stage:      { label: "Next stage", sentBack: false, cls: "bg-blue-100 text-blue-700 ring-blue-200" },
+  update:     { label: "Update",     sentBack: false, cls: "bg-sky-100 text-sky-700 ring-sky-200" },
+};
+export const roundMeta = (kind) => ROUND_KIND_META[kind] ?? { label: "Follow-up", sentBack: true, cls: "bg-rose-100 text-rose-700 ring-rose-200" };
+/** Newest open round per case id. Rounds arrive newest-first from the API. */
+export function openRoundsByCase(rounds = []) {
+  const m = new Map();
+  for (const r of rounds) if (r.status === "open" && !m.has(r.parentCaseId)) m.set(r.parentCaseId, r);
+  return m;
+}
+/** A finished case with an open round is back with the lab — "returning". */
+export const isReturningCase = (c, round) => !!round && c.stageIndex >= STAGE_INDEX.WORK_COMPLETE;
+
+export function StatusPill({ caseObj, returningRound = null }) {
   // Approved cancellations override the lifecycle stage everywhere the
   // pill appears — the case is terminal regardless of where it stopped.
   if (caseObj.cancelStatus === "cancelled") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-200">
         <Ban size={12} className="shrink-0" /> Cancelled
+      </span>
+    );
+  }
+  // A completed case the clinic sent back is NOT complete: say so in the
+  // pill itself, not just in a chip beside it, so no screen can read a
+  // returned crown as finished work.
+  if (isReturningCase(caseObj, returningRound)) {
+    const m = roundMeta(returningRound.kind);
+    return (
+      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${m.cls}`} title={returningRound.instructions || undefined}>
+        <RotateCcw size={12} className="shrink-0" /> {m.sentBack ? "Sent back" : "Follow-up"} · {m.label}
       </span>
     );
   }
@@ -890,7 +923,7 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-base font-bold text-slate-800">{caseObj.id}</span>
-                  <StatusPill caseObj={caseObj} />
+                  <StatusPill caseObj={caseObj} returningRound={rounds.find((r) => r.status === "open") ?? null} />
                   <AppointmentBadge caseObj={caseObj} />
                   {noor?.flags?.length > 0 && <NoorFlagChips flags={noor.flags} />}
                 </div>

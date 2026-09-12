@@ -35,6 +35,14 @@ test("work complete + need-by passed → done for the lab, not overdue (collecti
   assert.equal(b.verdict, "done"); assert.equal(b.overdue_confirmed, false);
   assert.equal(b.per_stage[4].status, "overdue"); // still reported per stage, for the clinic-facing view
 });
+test("returning: work complete + open round → live again, clock restarts at the round", () => {
+  // Real shape from the pilot: completed 10 Sep, adjustment round opened 11 Sep 09:57, tat 5.
+  const r = row({ stage_index: 3, appointment_date: "2026-09-09", history: [{ at: "2026-09-10T06:09:00Z", action: "advance", toStage: 3 }] });
+  const soon = benchmark({ row: r as never, ...base, lastActivityAt: "2026-09-11T09:57:00Z", openRoundAt: "2026-09-11T09:57:00Z", now: new Date("2026-09-12T10:00:00Z") });
+  assert.equal(soon.returning, true); assert.equal(soon.promise_date, "2026-09-16"); assert.notEqual(soon.verdict, "done"); assert.equal(soon.stale, false);
+  const later = benchmark({ row: r as never, ...base, lastActivityAt: "2026-09-11T09:57:00Z", openRoundAt: "2026-09-11T09:57:00Z", now: new Date("2026-09-17T10:00:00Z") });
+  assert.equal(later.verdict, "overdue"); assert.equal(later.stale, true); // 6 idle days at rework
+});
 test("not stale once work complete", () => {
   const b = benchmark({ row: row({ stage_index: 3 }) as never, ...base, now: new Date("2026-09-30T10:00:00Z") });
   assert.equal(b.stale, false);

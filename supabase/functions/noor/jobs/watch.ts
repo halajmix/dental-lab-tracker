@@ -2,7 +2,7 @@ import type { CaseRow, Db, ToolContext } from "../lib/types.ts";
 import { benchmark } from "../lib/benchmark.ts";
 import { stageOf } from "../lib/types.ts";
 import { flagCaseRisk, resolveFlag } from "../tools/flag_case_risk.ts";
-import { lastActivity } from "../tools/get_turnaround_benchmark.ts";
+import { activity } from "../tools/get_turnaround_benchmark.ts";
 import { escalateToHuman } from "../tools/escalate_to_human.ts";
 import { claimIdempotency } from "../gate.ts";
 import { fmtDate } from "../lib/templates.ts";
@@ -16,8 +16,8 @@ export async function runWatch(admin: Db, makeCtx: (labId: string) => ToolContex
     const { data: open } = await admin.from("cases").select("*").eq("lab_id", lab.id).lt("stage_index", 4).neq("cancel_status", "cancelled").limit(500);
     for (const row of (open ?? []) as CaseRow[]) {
       cases++;
-      const last = await lastActivity(ctx, row.id, row.history);
-      const b = benchmark({ row, procedureTats: lab.procedure_tats ?? {}, labTat: lab.tat ?? 0, lastActivityAt: last, now: ctx.now, staleDays });
+      const { last, openRoundAt } = await activity(ctx, row.id, row.history);
+      const b = benchmark({ row, procedureTats: lab.procedure_tats ?? {}, labTat: lab.tat ?? 0, lastActivityAt: last, openRoundAt, now: ctx.now, staleDays });
       const next = b.per_stage.find((p) => p.status !== "done");
       if (b.verdict === "at_risk" && next) { await flagCaseRisk({ case_id: row.id, kind: "at_risk", reason: `${next.stage.replace(/_/g, " ").toLowerCase()} expected by ${fmtDate(next.expected_by, "en")}`, visible_to: "lab" }, ctx); flagged++; }
       else await resolveFlag(ctx, row.id, "at_risk");
@@ -32,7 +32,7 @@ export async function runWatch(admin: Db, makeCtx: (labId: string) => ToolContex
           timeline.push(`${fmtDate(ctx.now.toISOString().slice(0, 10), "en")} — no activity for ${b.days_idle} days (stale threshold ${staleDays})`);
           await escalateToHuman({
             case_id: row.id, category: "stale_case", language: lab.language ?? "en",
-            summary: `Case ${row.id} has been at ${stageOf(row.stage_index).replace(/_/g, " ").toLowerCase()} for ${b.days_idle} days with no stage change, note or follow-up.${b.promise_date ? ` The lab's promise date is ${fmtDate(b.promise_date, "en")}.` : ""}${row.appointment_date ? ` The clinic's next appointment is ${fmtDate(row.appointment_date, "en")}.` : ""}`,
+            summary: `Case ${row.id} ${b.returning ? "was sent back by the clinic and" : ""} has been at ${b.returning ? "rework" : stageOf(row.stage_index).replace(/_/g, " ").toLowerCase()} for ${b.days_idle} days with no stage change, note or follow-up.${b.promise_date ? ` The lab's promise date is ${fmtDate(b.promise_date, "en")}.` : ""}${row.appointment_date ? ` The clinic's next appointment is ${fmtDate(row.appointment_date, "en")}.` : ""}`,
             context: { stage: stageOf(row.stage_index), timeline, parties: ["clinic", "lab"], attempted: ["get_case", "get_turnaround_benchmark", "flag_case_risk"], stop_reason: `Stale ≥ ${staleDays} days; requires a human decision on scheduling or contacting the clinic.` },
           }, ctx);
           escalated++;

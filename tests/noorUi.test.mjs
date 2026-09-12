@@ -113,3 +113,45 @@ test("escalation inbox: open shows both buttons, acknowledged only resolve, reso
   assert.equal((html.match(/Resolve</g) || []).length, 2);                // open + acknowledged
   assert.match(r(h(N.NoorEscalationInbox, { escalations: [], loading: false })), /Nothing escalated/);
 });
+
+// ---- follow-up visibility on the clinic side (a returned case must never read as complete) ----
+const out2 = join(mkdtempSync(join(tmpdir(), "noor-ui2-")), "b.cjs");
+await build({
+  stdin: { contents: `
+      import { renderToStaticMarkup } from "react-dom/server";
+      import React from "react";
+      import { StatusPill, openRoundsByCase, isReturningCase, roundMeta } from ${JSON.stringify(join(root, "src/LifecycleEngine.jsx"))};
+      export const r = (el) => renderToStaticMarkup(el);
+      export { StatusPill, openRoundsByCase, isReturningCase, roundMeta, React };
+    `, resolveDir: root, loader: "js" },
+  bundle: true, platform: "node", format: "cjs", outfile: out2, jsx: "automatic", logLevel: "error",
+  plugins: [{ name: "stub", setup(b) {
+    b.onResolve({ filter: /(^|\/)supabaseClient\.js$/ }, (a) => ({ path: a.path, namespace: "stub" }));
+    b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "module.exports = { supabase: new Proxy({}, { get: () => () => new Proxy({}, { get: () => () => ({}) }) }) };", loader: "js" }));
+  } }],
+  define: { "import.meta.env.VITE_SUPABASE_URL": '"https://x.supabase.co"', "import.meta.env.VITE_SUPABASE_ANON_KEY": '"anon"' },
+});
+const L = await import(`file://${out2}`);
+const hh = L.React.createElement;
+
+test("open follow-up: newest per case wins; kinds split into sent-back vs informational", () => {
+  const m = L.openRoundsByCase([
+    { parentCaseId: "C-H", status: "open", kind: "adjustment", createdAt: "2026-09-11T09:57:00Z" },
+    { parentCaseId: "C-H", status: "resolved", kind: "update", createdAt: "2026-08-29T11:18:00Z" },
+    { parentCaseId: "C-X", status: "open", kind: "update", createdAt: "2026-09-10T00:00:00Z" },
+  ]);
+  assert.equal(m.get("C-H").kind, "adjustment"); assert.equal(m.size, 2);
+  assert.equal(L.roundMeta("remake").sentBack, true); assert.equal(L.roundMeta("refit").sentBack, true); assert.equal(L.roundMeta("adjustment").sentBack, true);
+  assert.equal(L.roundMeta("stage").sentBack, false); assert.equal(L.roundMeta("update").sentBack, false);
+});
+
+test("status pill: a completed case with an open adjustment reads 'Sent back · Adjustment', never 'Work Complete'", () => {
+  const c = { stageIndex: 3, cancelStatus: "none" };
+  const round = { kind: "adjustment", status: "open", instructions: "UR4 out of occlusion" };
+  const html = L.r(hh(L.StatusPill, { caseObj: c, returningRound: round }));
+  assert.match(html, /Sent back · Adjustment/); assert.doesNotMatch(html, /Work Complete/); assert.match(html, /title="UR4 out of occlusion"/);
+  assert.match(L.r(hh(L.StatusPill, { caseObj: c, returningRound: null })), /Work Complete/);           // no round → unchanged
+  assert.match(L.r(hh(L.StatusPill, { caseObj: { ...c, stageIndex: 2 }, returningRound: round })), /Work in Progress/); // round on live work → stage still shown
+  assert.match(L.r(hh(L.StatusPill, { caseObj: { ...c, cancelStatus: "cancelled" }, returningRound: round })), /Cancelled/); // cancellation still wins
+  assert.equal(L.isReturningCase({ stageIndex: 4 }, round), true);
+});
