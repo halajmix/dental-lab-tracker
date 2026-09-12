@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Mail, Lock, LogIn, UserPlus, Stethoscope, Building2, Loader2, ArrowLeft, CheckCircle2, KeyRound, Users } from "lucide-react";
 import { supabase, authLinkError } from "./lib/supabaseClient.js";
+import { createLoginMethods } from "./lib/loginMethods.js";
 import { useAuth } from "./lib/useAuth.js";
 import { peekClinicInvitation, acceptClinicInvitation } from "./lib/data.js";
 import { OmanLocationFields } from "./lib/omanRegions.jsx";
@@ -129,7 +130,7 @@ function LoginScreen({ onSwitch, onForgot }) {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const { error } = await createLoginMethods(supabase.auth).password({ email, password });
     setBusy(false);
     if (error) setError(error.message);
   };

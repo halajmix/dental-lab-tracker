@@ -1,0 +1,14 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import PrintRx from '../../src/PrintRx.jsx';
+import { buildRxPdf } from '../../src/lib/rxPdf.js';
+import FirstCaseGuide from '../../src/FirstCaseGuide.jsx';
+import '../../src/index.css';
+const params=new URLSearchParams(location.search);
+window.calls=[];
+const client={rpc:async name=>{window.calls.push(name);return params.has('missing')?{error:{code:'PGRST202'}}:{data:params.has('new')};}};
+const clinic={name:'Fictional Clinic',dentist:'Dr Legacy Example',contact:'',address:''};
+const lab={name:'Fictional Lab',contact:'',address:''};
+const caseObj={id:'FIXTURE-1',patientName:'Fictional Patient',prescription:{restorations:[],files:[],included:[]},...(params.has('legacy')?{}:{treatingDentistName:'Dr Treating Example',submittedByName:'Example Receptionist'})};
+window.fixturePdf=async()=>{const file=await buildRxPdf(document.querySelector('.print-sheet'),caseObj,clinic,lab,'fixture.pdf');return new TextDecoder('latin1').decode(await file.arrayBuffer());};
+createRoot(document.getElementById('root')).render(params.has('print')?<PrintRx open caseObj={caseObj} clinic={clinic} lab={lab} onClose={()=>{}}/>:<main className="p-4"><FirstCaseGuide userId={params.get('user')||'fictional-new-user'} role={params.get('role')||'doctor'} client={client} onStart={()=>{document.getElementById('started').textContent='Prescription opened';}}/><p id="started">Dashboard available</p></main>);

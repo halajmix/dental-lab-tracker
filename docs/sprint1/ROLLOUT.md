@@ -1,0 +1,55 @@
+# Sprint 1 — staged rollout and recovery
+
+Status: local implementation and isolated synthetic tests complete; production rollout blocked on a verified staging/restore environment. No production migration, deployment, account creation, invitation email or clinical write has been performed for this sprint.
+
+## Baseline and inspection
+
+Source baseline: 4bb6d3c (main). Development branch: feature/sprint1-safe-onboarding, separate worktree. Inspected HANDOVER.md, authentication/session setup, profile onboarding, clinic membership helpers and policies, invitation creation/acceptance, dentist delegation migrations, prescription mappings/rendering, and backup tooling.
+
+Read-only production probes on 2026-09-12 verified the case attribution columns, profiles and membership column shapes. Metadata-only inspection found 11 clinics; all 11 owners have existing profiles and admin memberships. Both the legacy clinic_invitations endpoint and add_clinic_dentist RPC are present. The new submitted_by_name column and onboarding table are not present. These API probes do not verify the complete live function bodies, policies, grants or triggers; export and compare the live database catalog in staging before rollout. No production row values or credentials are included in this report. The earlier “Continue dr-crown.com development” task was reviewed, including confirmation that the earlier outage recovery work was completed. Its existing Add and Invite behavior and immediate pending-dentist selection are preserved. A fresh git pull confirmed the newer 4bb6d3c baseline; the supplied older handover commit is superseded.
+
+## Exact implementation delta
+
+- Existing treating_dentist_id/name and JWT-stamped created_by remain authoritative. No historical case attribution is inferred or backfilled. Add nullable cases.submitted_by_name, populated from the authenticated profile only on new inserts and protected against later alteration. Show it when present in the drawer, prescription print view, shared text and generated PDF. Older rows retain their previous display. Non-Latin submitter names use the existing raster PDF fallback.
+- Keep stored clinic roles admin/doctor/receptionist and existing permission checks. Display Owner/Admin, Dentist, Receptionist in Team. Existing owner mapping is already complete; no membership update or re-registration is needed. An owner who is also a dentist retains the existing selectable roster identity.
+- Retain the existing receptionist selector, pending-dentist roster, JWT submitter attribution, tenant validation, submission, draft handling and invitation reuse.
+- Preserve both invitation paths. Replace sync_invited_dentist with the existing body plus an early return for unnamed doctor invitations from old clients. Those requests continue through existing email/acceptance; no dentist name is guessed from the email. Named invitations retain roster behavior. No existing tokens, expiration dates, rows or email configuration are changed by the migration.
+- Add private sprint1_onboarding and sprint1_onboarding_settings tables, an auth.users AFTER INSERT enrollment trigger and two caller-scoped RPCs. There is no existing-user backfill. The switch defaults off. New accounts are eligible even if created by an old client; existing accounts with incomplete profiles or zero cases remain excluded. Enrollment failures do not block signup. Role guidance is optional and skippable; dismissal persists server-side, with a per-account browser fallback if the request fails. Missing backend support hides guidance. If dismissal fails and the user changes browser, the guide may appear again; work remains accessible.
+- Preserve password login, reset, signup, confirmation callbacks, invitation redirects, sessions and credentials. Introduce createLoginMethods as the password-provider boundary. No OTP or magic-link method is enabled or sent.
+
+## Backup requirements before any production rollout
+
+1. Identify the current production source commit AND the deployed gh-pages commit/bundle. Retain both without overwriting earlier artifacts.
+2. Verify a provider-managed database restore point and its timestamp/retention. Do not assume Pro automatically means point-in-time recovery is enabled. Obtain an isolated restorable database backup covering public schema/data, auth users and password hashes/identities, grants, RLS, triggers, functions, extensions and storage metadata. Keep secrets encrypted outside git and public outputs.
+3. Independently copy every storage object in every bucket, with pagination at every folder, object paths, sizes and checksums. A database backup alone does not preserve file bytes. Preserve signed-link configuration, edge-function versions/secrets, Auth redirect/provider settings and scheduled jobs through secure platform configuration backup.
+4. Restore into an isolated staging project with distinct credentials. Disable outgoing email, SMS, payment integrations, production webhooks, cron and Noor before exercising writes. Staging must not reference production storage or production callback URLs. If sanitizing data, sanitize only the restored copy, preserving keys and relationships.
+5. Verify restore by table counts, stable row digests, foreign-key/orphan checks, full storage inventory/checksums and an owner-controlled authentication check. Record timestamps and evidence privately. Do not claim credential recovery from an auth admin API export: it does not contain recoverable password hashes.
+
+The existing scripts/backup.mjs is NOT a sufficient recovery proof: it exports API-exposed rows but not auth credentials or complete database definitions, lists only the first 1,000 objects per folder, is not a transactional snapshot, and deletes older backups under its retention policy. It was inspected, not executed or modified for this task. No complete backup or restore drill has yet been performed.
+
+## Staging validation and rollout sequence
+
+1. Compare the actual live catalog against the source, especially sync_invited_dentist, stamp_case_creator, guard_case_dentist, owner role fallback, case/file RLS and authentication triggers. Resolve drift before applying this patch.
+2. Apply ONLY supabase/migrations/20260912_sprint1_safe_onboarding.sql to the isolated restored baseline. It uses one transaction, a five-second lock timeout and a 30-second statement timeout. It has no row backfill, DROP, DELETE, column rename or credential write. Existing objects keep their names. The one existing function replacement restores legacy invitation compatibility. Do not replay schema.sql: it includes historical destructive/backfill statements. The new delta is intended for one application; repeated application rejects existing new objects and rolls back the transaction.
+3. Compare every pre-existing row and object checksum after migration, ignoring only the new null case column. Check unchanged users, password hashes, profiles, clinic memberships, case/prescription JSON, files and links. Measure locks/duration on representative data.
+4. Deploy this branch to staging only. Test existing owner/dentist/receptionist/lab accounts and historical cases, old-client invitation requests, named/new and reused invitations, acceptance and expiry, selected-dentist visibility, notes/files, queued submissions, financial/stage writes, profile edits and password reset/login. Use controlled recipients for email delivery testing.
+5. In staging only, enable the guide with UPDATE public.sprint1_onboarding_settings SET enabled=true WHERE id=true. Test a genuinely new account for each role, Skip across login/device, an existing account with zero cases, existing account without a profile, and an account accepting an older invitation. Test frontend rollback with all newly created cases still present.
+6. Require a successful restore drill, production-clone regression evidence, controlled email/auth acceptance, and owner approval of the concrete migration and rollout. Only then apply the same delta in production, with the guide initially off. Deploy the reviewed client and validate controlled non-patient flows. Enabling guidance is a separate recorded rollout decision.
+
+## Rollback without data loss
+
+- Disable guidance by setting sprint1_onboarding_settings.enabled=false. This retains all enrollments and dismissals.
+- Re-publish the saved previous client artifact if needed. Leave added columns, tables, functions and recorded identities in place. The previous client ignores the nullable submitter-name field; old invitations now remain compatible.
+- If a new trigger causes a write failure, use a reviewed forward repair targeting that new trigger after diagnosis. Never drop the new identity/state tables or clear new rows as a rollback.
+- Do not restore an old database over active production as a routine rollback: it would erase intervening user work. Restore to another project, reconcile post-backup writes and objects, and obtain explicit owner approval before any emergency cutover.
+
+## Verification already performed
+
+- 42 Node client tests passed, including unchanged password payload/result/error behavior and role-specific guide selection.
+- tests/sprint1Database.mjs: disposable PGlite fixture, prior delegation migrations plus new delta; deep comparison of all pre-existing fixture rows in cases, profiles, memberships, invitations, dentist roster and auth.users; no old-user enrollment; authenticated identity snapshot; spoof/edit rejection; old unnamed invitations; new-user enrollment; repeat dismissal; anonymous/table-write denial. It also runs the existing delegation suite: invitations, acceptance/linking, role/tenant restrictions, notes/photos/Noor visibility, disabled accounts, old submissions and pending-invitation reuse.
+- tests/sprint1Browser.mjs: actual guide component in headless Chrome at mobile width; three roles, no guide for old users, absent backend, Skip, persisted dismissal and start action. No runtime errors. Mobile rendering visually inspected. Actual PrintRx rendering and generated PDF text verified for new submitter identity and unchanged legacy fallback; print preview visually inspected.
+- tests/clinicDentistBrowser.mjs: actual prescription/team components; receptionist/admin selection, immediate pending dentist selection, invitation reuse, clinic switch, preserved draft after failed save, dentist gating and mobile layout. All external requests mocked, no email sent.
+- 44 Noor tests, schema/prompt check and 14 code-path evals passed; 3 model scenarios skipped because no model key was used. Noor code and settings are unchanged.
+- Both undefined-identifier checks and Vite production build passed. Build reports existing mixed static/dynamic import and large-bundle warnings.
+
+Synthetic fixture tests are not a production-data clone or full Supabase Auth/Storage staging test. Production catalog verification, complete backup/restore, real staging regression, email delivery and controlled end-to-end authentication remain rollout blockers.

@@ -55,6 +55,7 @@ function buildRxMessage(caseObj, clinic, lab) {
     if (shade) lines.push(`Shade: ${shade}`);
     if (rx.notes) lines.push(`Notes: ${rx.notes}`);
   }
+  if (caseObj.submittedByName) lines.push(`Submitted by: ${caseObj.submittedByName}`);
   lines.push("", `Dentist: ${caseObj.treatingDentistName || clinic?.dentist || "—"}`, `The detailed prescription PDF is attached.`);
   return lines.join("\n");
 }
@@ -335,6 +336,7 @@ export default function PrintRx({ open, caseObj, clinic, lab, onClose, autoShare
             <p className="text-sm font-bold text-slate-800">Laboratory Prescription</p>
             <p className="text-slate-500">Date: {new Date().toISOString().slice(0, 10)}</p>
             <p className="mt-1 font-semibold text-slate-700">{caseObj.treatingDentistName || clinic.dentist}</p>
+            {caseObj.submittedByName && <p className="text-xs text-slate-500">Submitted by: {caseObj.submittedByName}</p>}
           </div>
         </div>
 

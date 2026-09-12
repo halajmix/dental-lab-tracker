@@ -1,3 +1,4 @@
+import FirstCaseGuide from "./FirstCaseGuide.jsx";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -1573,6 +1574,9 @@ export default function DentalLabTracker({ auth }) {
             Couldn't load your data: {loadError}
           </div>
         )}
+        {!loadingData && !orgBlocked && isDentist && <FirstCaseGuide key={profile.id} userId={profile.id}
+          role={myClinics.find(c => c.id === clinic?.id)?.myRole ?? clinicRole}
+          onStart={() => setShowCaseModal(true)} />}
         {/* Location nudge: orgs registered before onboarding asked for a
             governorate can't join the Rx form's "Near you" lab grouping.
             One button opens the right editor directly. Lab side gates on

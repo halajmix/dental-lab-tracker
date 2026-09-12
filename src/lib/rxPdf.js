@@ -41,7 +41,7 @@ function vectorSafe(caseObj, clinic, lab) {
   const strings = [
     clinic?.name, clinic?.address, clinic?.contact, caseObj.treatingDentistName || clinic?.dentist, clinic?.governorate, clinic?.wilayat,
     lab?.name, lab?.address, lab?.contact, lab?.governorate, lab?.wilayat,
-    caseObj.patientName, caseObj.patientId, caseObj.deliveryTime, rx.notes, rx.includedOther,
+    caseObj.submittedByName, caseObj.patientName, caseObj.patientId, caseObj.deliveryTime, rx.notes, rx.includedOther,
     ...(rx.included ?? []),
     ...(rx.files ?? []).map((f) => f.name),
     ...restorations.flatMap((r) => [r.category, r.material, r.shadeGuide, r.vitaShade, r.stumpShade, r.implantSystem, r.abutmentType, r.abutmentColor]),
@@ -215,6 +215,12 @@ async function vectorPdf(caseObj, clinic, lab, photos) {
   if (caseObj.treatingDentistName || clinic?.dentist) {
     font(9, "bold", INK);
     pdf.text(caseObj.treatingDentistName || clinic.dentist, A4W - M, y + 26, { baseline: "top", align: "right" });
+  }
+  if (caseObj.submittedByName) {
+    font(8, "normal", MUTED);
+    const submitterLines = pdf.splitTextToSize(`Submitted by: ${caseObj.submittedByName}`, 220);
+    pdf.text(submitterLines, M, leftY, { baseline: "top" });
+    leftY += submitterLines.length * 10 + 4;
   }
   y = Math.max(leftY, y + 40) + 4;
   pdf.setDrawColor(...INK);

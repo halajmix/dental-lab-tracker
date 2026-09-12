@@ -95,6 +95,7 @@ export const caseFromRow = (r) => (noteSchema(r), {
   labShade: r.lab_shade ?? "",
   // Phase 56: which clinic user authored the case (stamped server-side).
   createdBy: r.created_by ?? null,
+  submittedByName: r.submitted_by_name ?? "",
   treatingDentistId: r.treating_dentist_id ?? null,
   treatingDentistName: r.treating_dentist_name ?? "",
 });

@@ -9,7 +9,7 @@ import {
   logActivity,
 } from "./lib/data.js";
 
-const ROLE_LABEL = { admin: "Admin", receptionist: "Receptionist", doctor: "Doctor" };
+const ROLE_LABEL = { admin: "Owner/Admin", receptionist: "Receptionist", doctor: "Dentist" };
 const ROLE_BADGE = {
   admin: "bg-blue-50 text-blue-700 ring-blue-200",
   receptionist: "bg-amber-50 text-amber-700 ring-amber-200",
@@ -157,9 +157,9 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
                             onChange={(e) => changeRole(m, e.target.value)}
                             className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700"
                           >
-                            <option value="admin">Admin</option>
+                            <option value="admin">Owner/Admin</option>
                             <option value="receptionist">Receptionist</option>
-                            <option value="doctor">Doctor</option>
+                            <option value="doctor">Dentist</option>
                           </select>
                           <button
                             onClick={() => setConfirmRemove(m)}
@@ -206,10 +206,10 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
                 onChange={(e) => setInviteRole(e.target.value)}
                 className="rounded-lg border border-slate-200 px-2 py-2 text-sm font-semibold text-slate-700"
               >
-                <option value="doctor">Doctor</option>
+                <option value="doctor">Dentist</option>
                 <option value="receptionist">Receptionist</option>
                 {/* Receptionists never mint admins — clinic_invitations RLS enforces it */}
-                {isAdmin && <option value="admin">Admin</option>}
+                {isAdmin && <option value="admin">Owner/Admin</option>}
               </select>
               <button
                 type="submit"
