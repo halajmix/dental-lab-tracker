@@ -495,3 +495,10 @@ confirmed clinic_dentists, invitation dentist_name and both case attribution
 columns. The roster contains 13 active linked dentists. Latest 10 Noor runs
 remain shadow. Frontend rollout follows this verification; real invitation
 delivery and delegated case submission still require an owner-controlled flow.
+
+Frontend published and live bundle `index-BLJ4sWTS.js` verified on 2026-09-12.
+Live clinic-admin view loaded the treating-dentist roster, Add a Dentist dialog
+and Settings team name/email invitation fields. The existing saved draft was
+preserved; no invitation or case was submitted. Real email delivery/acceptance
+remains an owner-controlled verification. Latest health check has no new client
+crashes and Noor remains shadow. Existing mobile-upload empty-probe 500 persists.
