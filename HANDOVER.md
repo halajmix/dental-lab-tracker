@@ -431,7 +431,7 @@ follow-up round on completed work) is live work again — for the lab queue,
 the clinic dashboard and the watcher alike.
 
 
-## Clinic dentist delegation (2026-09-12 — prepared, not activated)
+## Clinic dentist delegation (2026-09-12)
 
 Clinic admins (including owners) and receptionists can select a treating dentist
 when submitting a new prescription. Settings → My Clinics → Team now asks for
@@ -489,3 +489,9 @@ requests are mocked. Set `PLAYWRIGHT_MODULE` if installed outside the repo.
 It covers both staff roles, doctor gating, immediate selection, duplicate
 invitations, clinic switching, preserving the form after a failed save, and
 mobile layout. Screenshots go into ignored `work/`.
+
+Owner reported migration applied on 2026-09-12. Read-only production probes
+confirmed clinic_dentists, invitation dentist_name and both case attribution
+columns. The roster contains 13 active linked dentists. Latest 10 Noor runs
+remain shadow. Frontend rollout follows this verification; real invitation
+delivery and delegated case submission still require an owner-controlled flow.
