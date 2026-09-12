@@ -5,7 +5,7 @@ const page=await browser.newPage({viewport:{width:1280,height:1000}});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const clinic='11111111-1111-4111-8111-111111111111';
 const rows=[{id:'66666666-6666-4666-8666-666666666666',name:'Dr. Example One',user_id:'77777777-7777-4777-8777-777777777777',clinic_id:clinic},{id:'88888888-8888-4888-8888-888888888888',name:'Dr. Example Two',user_id:null,clinic_id:clinic}];
-let invites=[];
+let invites=[{id:'99999999-9999-4999-8999-999999999999',email:'new@example.test',role:'doctor',status:'pending',clinic_id:clinic}];
 await page.route('**/*',async route=>{
  const url=new URL(route.request().url());
  if(url.hostname==='127.0.0.1')return route.continue();
@@ -13,10 +13,14 @@ await page.route('**/*',async route=>{
  const table=url.pathname.split('/').pop();
  let body=[];let status=200;
  if(table==='clinic_dentists')body=rows.filter(x=>`eq.${x.clinic_id}`===url.searchParams.get('clinic_id'));
- if(table==='clinic_invitations' && route.request().method()==='POST'){
+ if(table==='add_clinic_dentist'){
   const input=route.request().postDataJSON();
-  if(invites.some(x=>x.email===input.email)){status=409;body={code:'23505',message:'duplicate'};}
-  else {body={...input,id:'99999999-9999-4999-8999-999999999999',status:'pending'};invites.push(body);rows.push({id:crypto.randomUUID(),name:input.dentist_name,user_id:null,invitation_id:body.id,clinic_id:input.clinic_id});}
+  let inv=invites.find(x=>x.email===input.p_email && x.clinic_id===input.p_clinic);
+  const reused=!!inv;
+  if(!inv){inv={id:crypto.randomUUID(),email:input.p_email,clinic_id:input.p_clinic,dentist_name:input.p_name,role:'doctor',status:'pending'};invites.push(inv);}
+  let dentist=rows.find(x=>x.invitation_id===inv.id);
+  if(!dentist){dentist={id:crypto.randomUUID(),name:input.p_name,user_id:null,invitation_id:inv.id,clinic_id:input.p_clinic};rows.push(dentist);}
+  body={id:inv.id,dentist_id:dentist.id,reused};
  }
  if(table==='clinic_invitations' && route.request().method()==='GET')body=invites;
  if(table==='rx_drafts')body=page.url().includes('failSave') ? {payload:{patientName:'Fictional Draft Patient',selectedClinicId:clinic,treatingDentistId:rows[0].id,treatingDentistName:rows[0].name,labId:'55555555-5555-4555-8555-555555555555',caseMode:'appliance',category:'Study model',material:'',arches:'upper',insertionDate:'2026-10-01',selection:{}}} : null;
@@ -36,13 +40,14 @@ assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),
 assert.equal(await page.getByLabel('Treating dentist').inputValue(),rows.at(-1).id);
 assert.equal(invites.length,1);assert.equal(invites[0].role,'doctor');
 await page.screenshot({path:'work/dentist-selected.png'});
-// Failed duplicate keeps the modal and prescription intact.
+// Repeated Add selects the existing dentist without another invitation.
 await page.getByRole('button',{name:'Add a Dentist',exact:true}).click();
 await page.getByLabel('Dentist name',{exact:true}).fill('Dr. Example New');
 await page.getByLabel('Dentist email',{exact:true}).fill('new@example.test');
 await page.getByRole('button',{name:'Add and Invite',exact:true}).click();
-await page.getByRole('alert').filter({hasText:'pending invitation'}).waitFor();
-await page.getByRole('dialog').getByRole('button',{name:'Cancel',exact:true}).click();
+await page.getByRole('dialog').waitFor({state:'hidden'});
+assert.equal(invites.length,1);
+assert.equal(await page.getByLabel('Treating dentist').inputValue(),rows.at(-1).id);
 await page.locator('select').filter({has:page.locator('option',{hasText:'Second Example Clinic'})}).selectOption('22222222-2222-4222-8222-222222222222');
 assert.equal(await page.getByLabel('Treating dentist').inputValue(),'');
 await page.getByText('Add and invite a dentist to send this prescription on their behalf.').waitFor();
@@ -69,5 +74,5 @@ await page.getByRole('alert').filter({hasText:'Simulated save failure'}).waitFor
 assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'Fictional Draft Patient');
 assert.equal((await page.evaluate(()=>window.savedPrescription)).treatingDentistId,rows[0].id);
 assert.deepEqual(errors,[]);
-console.log('PASS: receptionist and admin picker, immediate invited selection, settings invitation, duplicate handling, clinic reset, failed-save draft preservation, doctor gating, mobile layout, no runtime errors. All external requests mocked.');
+console.log('PASS: receptionist and admin picker, immediate invited selection, settings invitation, legacy pending invitation reuse, clinic reset, failed-save draft preservation, doctor gating, mobile layout, no runtime errors. All external requests mocked.');
 await browser.close();

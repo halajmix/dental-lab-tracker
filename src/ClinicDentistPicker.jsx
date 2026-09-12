@@ -53,13 +53,13 @@ export default function ClinicDentistPicker({ clinicId, userId, value, onChange,
       if (activeClinic.current !== target) return;
       // The roster row and invitation commit in one database transaction.
       // Keep the saved invite visible even if the subsequent list refresh fails.
-      setNotice("Dentist added and invitation requested. They'll receive a link to join the clinic.");
+      setNotice(invitation.reused ? "Dentist ready to select. They do not need to accept the invitation for you to submit on their behalf." : "Dentist added and invitation requested. You can submit on their behalf immediately.");
       setAdding(false); setName(""); setEmail("");
       try {
         const data = await fetchClinicDentists(target);
         if (activeClinic.current !== target) return;
         setRows(data); setError("");
-        const dentist = data.find((d) => d.invitation_id === invitation.id);
+        const dentist = data.find((d) => invitation.dentist_id ? d.id === invitation.dentist_id : d.invitation_id === invitation.id);
         if (dentist) onChange(dentist.id, dentist.name);
         else setError("The invitation was saved. Refresh the list to select the dentist.");
       } catch {

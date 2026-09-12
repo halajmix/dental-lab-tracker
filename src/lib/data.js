@@ -224,6 +224,11 @@ export async function fetchClinicDentists(clinicId) {
 }
 
 export async function createClinicInvitation(clinicId, invitedBy, { email, role, name = "" }) {
+  if (role === "doctor") {
+    const { data, error } = await supabase.rpc("add_clinic_dentist", { p_clinic: clinicId, p_name: name.trim(), p_email: email.trim().toLowerCase() });
+    if (error) throw error;
+    return data;
+  }
   const { data, error } = await supabase
     .from("clinic_invitations")
     .insert({ clinic_id: clinicId, email: email.trim().toLowerCase(), role, invited_by: invitedBy, ...(role === "doctor" ? { dentist_name: name.trim() } : {}) })

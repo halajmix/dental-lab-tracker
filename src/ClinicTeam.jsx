@@ -55,9 +55,9 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
     setError("");
     setNotice("");
     try {
-      await createClinicInvitation(clinic.id, currentUserId, { email: inviteEmail, role: inviteRole, name: inviteName });
+      const invitation = await createClinicInvitation(clinic.id, currentUserId, { email: inviteEmail, role: inviteRole, name: inviteName });
       logActivity("invited clinic member", `${inviteEmail} as ${inviteRole} — ${clinic.name}`);
-      setNotice(`Invitation requested for ${inviteEmail.trim()} — the link expires in 7 days.`);
+      setNotice(invitation.reused ? "Dentist ready to select in the prescription form. No invitation acceptance is needed to submit on their behalf." : `Invitation requested for ${inviteEmail.trim()} — the link expires in 7 days.`);
       setInviteEmail("");
       setInviteName("");
       await load();

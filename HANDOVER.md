@@ -502,3 +502,25 @@ and Settings team name/email invitation fields. The existing saved draft was
 preserved; no invitation or case was submitted. Real email delivery/acceptance
 remains an owner-controlled verification. Latest health check has no new client
 crashes and Noor remains shadow. Existing mobile-upload empty-probe 500 persists.
+
+
+## Pending dentist invitation repair (2026-09-12 — awaiting owner migration)
+
+The first delegation rollout missed existing pending doctor invitations without
+roster entries: Add and Invite hit the unique pending-email constraint and
+incorrectly told staff to select a dentist who was absent from their list.
+`20260912_reuse_pending_dentist_invites.sql` adds an authenticated, clinic-scoped
+`add_clinic_dentist` RPC used by both Settings and the prescription popup.
+It reuses an existing dentist, or creates the missing roster entry from the
+entered name and the existing pending invitation. Original token and expiry
+are preserved, including pending invitations whose links have expired.
+No new email is sent when reusing an invitation. A new email still creates a
+normal invitation and a immediately selectable dentist. Invitation acceptance
+is not required to submit on the dentist's behalf. A pending invitation for a
+different staff role cannot silently be converted to doctor.
+
+Apply this follow-up migration before deploying the new client. It makes no
+production data changes until staff use Add and Invite. Tests cover unnamed
+legacy invitations, expired links, repeated Add, no duplicate invitation,
+submission before acceptance, existing dentists, staff/tenant isolation and
+both UI entry points. Noor settings remain unchanged.
