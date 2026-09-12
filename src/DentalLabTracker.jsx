@@ -1620,6 +1620,7 @@ export default function DentalLabTracker({ auth }) {
             clinicsById={clinicsById}
             cases={filteredDentistCases}
             allCases={cases}
+            noorFlagsByCase={noorFlagsByCase}
             countBase={searchedDentistCases}
             totalCases={cases.length}
             statusFilter={statusFilter}
@@ -1989,6 +1990,7 @@ function DentistDashboard({
   clinicsById,
   cases,
   allCases,
+  noorFlagsByCase = {},
   countBase,
   totalCases,
   statusFilter,
