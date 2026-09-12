@@ -504,7 +504,7 @@ remains an owner-controlled verification. Latest health check has no new client
 crashes and Noor remains shadow. Existing mobile-upload empty-probe 500 persists.
 
 
-## Pending dentist invitation repair (2026-09-12 — awaiting owner migration)
+## Pending dentist invitation repair (2026-09-12 — activated)
 
 The first delegation rollout missed existing pending doctor invitations without
 roster entries: Add and Invite hit the unique pending-email constraint and
@@ -524,3 +524,8 @@ production data changes until staff use Add and Invite. Tests cover unnamed
 legacy invitations, expired links, repeated Add, no duplicate invitation,
 submission before acceptance, existing dentists, staff/tenant isolation and
 both UI entry points. Noor settings remain unchanged.
+
+Owner applied the pending-invitation repair. The production RPC is present and
+rejects a no-user probe before writing. Frontend `index-Cmhhvbxo.js` is live
+and its bytes match the built artifact; it calls `add_clinic_dentist`. No real
+invitation or case was submitted during rollout verification.
