@@ -27,6 +27,7 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
   const [team, setTeam] = useState(null); // {members, invitations} | null while loading
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("doctor");
   const [busy, setBusy] = useState(false);
@@ -54,10 +55,11 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
     setError("");
     setNotice("");
     try {
-      await createClinicInvitation(clinic.id, currentUserId, { email: inviteEmail, role: inviteRole });
+      await createClinicInvitation(clinic.id, currentUserId, { email: inviteEmail, role: inviteRole, name: inviteName });
       logActivity("invited clinic member", `${inviteEmail} as ${inviteRole} — ${clinic.name}`);
-      setNotice(`Invitation emailed to ${inviteEmail.trim()} — it expires in 7 days.`);
+      setNotice(`Invitation requested for ${inviteEmail.trim()} — the link expires in 7 days.`);
       setInviteEmail("");
+      setInviteName("");
       await load();
     } catch (err) {
       setError(err.message);
@@ -183,9 +185,13 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
           <div className="border-t border-slate-100 pt-4">
             <h4 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Invite someone</h4>
             <form onSubmit={invite} className="flex flex-wrap items-center gap-2">
+              {inviteRole === "doctor" && <label className="w-full text-xs font-semibold text-slate-600">Dentist name
+                <input required maxLength={160} value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Dentist name" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal" />
+              </label>}
               <div className="relative min-w-[12rem] flex-1">
                 <Mail size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
+                  aria-label="Invitation email"
                   type="email"
                   required
                   value={inviteEmail}
@@ -195,6 +201,7 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
                 />
               </div>
               <select
+                aria-label="Invitation role"
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value)}
                 className="rounded-lg border border-slate-200 px-2 py-2 text-sm font-semibold text-slate-700"
@@ -209,7 +216,7 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
                 disabled={busy}
                 className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Invite
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} {inviteRole === "doctor" ? "Add and Invite" : "Invite"}
               </button>
             </form>
             <p className="mt-1.5 text-[11px] text-slate-400">
@@ -225,7 +232,7 @@ export default function ClinicTeamPanel({ clinic, myRole, currentUserId, onClose
                 {team.invitations.map((inv) => (
                   <div key={inv.id} className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-700">{inv.email}</p>
+                      <p className="truncate text-sm font-medium text-slate-700">{inv.name ? `${inv.name} · ${inv.email}` : inv.email}</p>
                       <p className="text-[11px] text-slate-400">
                         {ROLE_LABEL[inv.role] ?? inv.role}
                         {inv.status === "pending" &&

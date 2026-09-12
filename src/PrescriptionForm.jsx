@@ -38,6 +38,7 @@ const SCAN_MAX_BYTES = 50 * 1024 * 1024;
 import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
 import MobilePhotoQR from "./MobilePhotoQR.jsx";
+import ClinicDentistPicker from "./ClinicDentistPicker.jsx";
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -1473,6 +1474,15 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultClinicId]);
 
+  const [treatingDentistId, setTreatingDentistId] = useState("");
+  const [treatingDentistName, setTreatingDentistName] = useState("");
+  const [dentistValid, setDentistValid] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const sendingClinicId = selectedClinicId || defaultClinicId;
+  const sendingRole = clinics.find((c) => c.id === sendingClinicId)?.myRole;
+  const delegateRx = !editing && ["admin", "receptionist"].includes(sendingRole);
+
   // What is physically going to the lab with this case.
   const [included, setIncluded] = useState([]);
   const [includedOther, setIncludedOther] = useState("");
@@ -1654,6 +1664,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setNotation("FDI"); setMode("unit"); setSelection({});
     setPatientName(""); setPatientId(""); setPatientPhone(""); setShowPatientExtras(false);
     setSelectedClinicId(defaultClinicId);
+    setTreatingDentistId(""); setTreatingDentistName(""); setDentistValid(false); setSaveError("");
     setIncluded([]); setIncludedOther("");
     setCategory("Crown - tooth"); setMaterial(CATEGORIES["Crown - tooth"].materials[0]);
     setShadeGuide("Vita Classical"); setVitaShade("A2"); setStumpShade("N/A"); setArches("upper");
@@ -1675,7 +1686,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   const serializeRxDraft = () => ({
     notation, mode, selection,
     patientName, patientId, patientPhone, showPatientExtras,
-    selectedClinicId, included, includedOther,
+    selectedClinicId, treatingDentistId, treatingDentistName, included, includedOther,
     category, material, shadeGuide, vitaShade, stumpShade, arches,
     caseMode, restorations,
     cartDraft: draft, cartDraftOpen: draftOpen, cartDraftTouched: draftTouched,
@@ -1694,6 +1705,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setPatientPhone(d.patientPhone ?? "");
     setShowPatientExtras(!!d.showPatientExtras);
     setSelectedClinicId(d.selectedClinicId ?? defaultClinicId);
+    setTreatingDentistId(d.treatingDentistId ?? "");
+    setTreatingDentistName(d.treatingDentistName ?? "");
     setIncluded(d.included ?? []);
     setIncludedOther(d.includedOther ?? "");
     setCategory(d.category ?? "Crown - tooth");
@@ -2156,6 +2169,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // Appliance-mode error keys only apply outside restorations mode — a case
   // is one or the other, never both, so only one set is ever "live".
   const errors = {
+    treatingDentist: delegateRx && !dentistValid,
     patientName: !patientName.trim(),
     labId: !labId,
     restorations: caseMode === "restorations" && restorations.length === 0,
@@ -2179,6 +2193,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // Human-readable list of what is still missing, so the user is never left
   // guessing why the Submit button does nothing.
   const MISSING_LABEL = {
+    treatingDentist: "Treating dentist",
     patientName: "Patient name",
     teeth: "At least one tooth on the chart",
     labId: "Target lab",
@@ -2196,9 +2211,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
 
 
   // `opts.share` submits and immediately opens the share panel for the new case.
-  const submit = (opts = {}) => {
+  const submit = async (opts = {}) => {
     setTouched(true);
-    if (!isValid) return;
+    if (!isValid || submitting) return;
+    setSubmitting(true); setSaveError("");
     const common = {
       notation,
       included,
@@ -2243,22 +2259,27 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       deliveryTime,
       labId,
       clinicId: selectedClinicId || defaultClinicId,
+      ...(delegateRx ? { treatingDentistId, treatingDentistName } : {}),
       prescription,
     };
-    if (isEditing) onSaveEdit(editing.id, payload);
-    else {
-      onSave(payload, opts);
-      discardRxDraft(); // submitted — the stored draft is obsolete
-    }
-    reset();
-    onClose();
+    try {
+      if (isEditing) await onSaveEdit(editing.id, payload);
+      else {
+        await onSave(payload, opts);
+        discardRxDraft();
+      }
+      reset();
+      onClose();
+    } catch (err) {
+      setSaveError("Couldn't save the prescription — " + err.message);
+    } finally { setSubmitting(false); }
   };
 
   const err = (k) => touched && errors[k];
 
   /* ---------------- per-step status for the accordion ---------------- */
   const stepErrors = {
-    1: ["patientName", "labId"],
+    1: ["patientName", "labId", "treatingDentist"],
     2: ["restorations", "unsavedRestoration", "teeth", "material", "implantSystem", "abutmentType"],
     3: ["insertionDate"],
   };
@@ -2333,13 +2354,16 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   case, where it just silently uses their default clinic. */}
               {clinics.length > 1 && !isEditing && (
                 <Field label="Sending Clinic" required>
-                  <select className={inputCls} value={selectedClinicId ?? ""} onChange={(e) => setSelectedClinicId(e.target.value)}>
+                  <select className={inputCls} value={selectedClinicId ?? ""} onChange={(e) => { setSelectedClinicId(e.target.value); setTreatingDentistId(""); setTreatingDentistName(""); setDentistValid(false); }}>
                     {clinics.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </Field>
               )}
+              {delegateRx && <ClinicDentistPicker key={sendingClinicId} clinicId={sendingClinicId} userId={userId} value={treatingDentistId}
+                onChange={(id, name) => { setTreatingDentistId(id); setTreatingDentistName(name); }} onValidity={setDentistValid} />}
+              {isEditing && editing.treatingDentistName && <div className="sm:col-span-2 text-sm text-slate-600">Treating dentist: <strong>{editing.treatingDentistName}</strong></div>}
               <Field label="Patient Name" required>
                 <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
               </Field>
@@ -2930,6 +2954,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         </div>
 
         {/* Sticky summary + action bar — always in reach, never scrolls away */}
+        {saveError && <p role="alert" className="bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-700">{saveError}</p>}
         <div className={`border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
           {/* live order summary */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-2 text-[11px] sm:px-6">
@@ -3002,14 +3027,16 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <button
                 type="button"
+                disabled={submitting}
                 onClick={() => submit()}
                 className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:py-2 ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
               >
-                <Check size={15} /> {isEditing ? "Save Changes" : "Submit Prescription"}
+                <Check size={15} /> {submitting ? "Saving…" : isEditing ? "Save Changes" : "Submit Prescription"}
               </button>
               {!isEditing && (
                 <button
                   type="button"
+                  disabled={submitting}
                   onClick={() => submit({ share: true })}
                   title="Save the case and immediately share the Rx PDF with the patient"
                   className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-3 sm:py-2 ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}

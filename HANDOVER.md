@@ -429,3 +429,63 @@ tool; patient name/phone go to the model only when the case's own clinic asks;
 email subjects carry case ids, never patient names; a returned case (open
 follow-up round on completed work) is live work again — for the lab queue,
 the clinic dashboard and the watcher alike.
+
+
+## Clinic dentist delegation (2026-09-12 — prepared, not activated)
+
+Clinic admins (including owners) and receptionists can select a treating dentist
+when submitting a new prescription. Settings → My Clinics → Team now asks for
+name and email for doctor invitations; the prescription form offers the same
+operation through Add a Dentist → Add and Invite. Doctors submit their own work
+and do not see these invitation controls. Invitation creation uses the existing
+email webhook; no new Edge Function or secret is needed.
+
+`supabase/migrations/20260912_clinic_dentist_delegation.sql` requires owner
+application **before publishing the frontend**. It creates `clinic_dentists`,
+adds invitation names and separate case dentist attribution, and extends the
+existing case/notes/rounds/photo/Noor visibility policies to the selected dentist.
+The submitting user's `created_by` still comes from their JWT. Dentist/clinic/
+submitter attribution cannot be repointed by a client. Existing prescription
+edit restrictions and the 30-minute window are preserved.
+
+Invited dentists are selectable immediately, without accounts. Invitation
+acceptance links the stable roster identity to the verified account, so their
+previous delegated cases become visible. Revoking an unaccepted invite disables
+selection; removing membership disables selection and access. Re-inviting reuses
+the same identity. Invitation expiry alone does not remove the clinic's dentist
+record; revoke/re-invite through Team to renew an expired link. Duplicate pending
+invitations are rejected with instructions; no duplicate email is sent.
+
+Backfill adds existing doctor members and existing named clinic owners only.
+It sends no invitations and rewrites no historical case attribution. Older
+pending invitations lack a supplied dentist name and are not guessed into the
+roster; revoke and re-invite with a name if they must be selected before joining.
+During the migration-to-frontend interval, old clients' doctor invitations lack
+the required name and will be rejected. Publish promptly and refresh open tabs.
+Old doctor/admin prescription submissions continue to work; receptionists must
+supply a valid same-clinic dentist. Active-account checks are enforced on save.
+
+The selected dentist appears in the case drawer, prescription printout, PDF and
+shared prescription text. New prescriptions keep their draft when a save is
+rejected. Offline queued submissions retain their selected dentist; the server
+revalidates that selection on replay.
+
+Rollout: apply the migration → probe `clinic_dentists`, `clinic_invitations`,
+and `cases` → publish committed source with `./deploy.sh` → refresh the affected
+clinic role's live page → verify one owner-controlled Add and Invite, receipt
+of its email, delegated submission and invitation acceptance. Do not use real
+patients as test fixtures. No test email/account/case was created in production
+during implementation. Noor remains in shadow with the existing review gate.
+
+Validation: existing 40 client tests, 44 Noor tests, schema/prompt check, 14
+code-path evals (3 model evals skipped), both undefined-name checks and build.
+`tests/clinicDentistDatabase.mjs` runs the actual migration twice in disposable
+PGlite and tests invitation acceptance with the existing RPC, attribution,
+permissions/tenant isolation, removal/re-invitation, inactive accounts and
+notes/photos/Noor access. `PGLITE_MODULE` can point to a scratch installation.
+`tests/clinicDentistBrowser.mjs` uses Playwright/Chrome against a local Vite server
+on port 5182 and `tests/fixtures/clinic-dentist-preview.html`; all external
+requests are mocked. Set `PLAYWRIGHT_MODULE` if installed outside the repo.
+It covers both staff roles, doctor gating, immediate selection, duplicate
+invitations, clinic switching, preserving the form after a failed save, and
+mobile layout. Screenshots go into ignored `work/`.

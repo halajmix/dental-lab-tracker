@@ -1,0 +1,73 @@
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+import assert from 'node:assert/strict';
+const browser=await chromium.launch({channel:'chrome',headless:true});
+const page=await browser.newPage({viewport:{width:1280,height:1000}});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+const clinic='11111111-1111-4111-8111-111111111111';
+const rows=[{id:'66666666-6666-4666-8666-666666666666',name:'Dr. Example One',user_id:'77777777-7777-4777-8777-777777777777',clinic_id:clinic},{id:'88888888-8888-4888-8888-888888888888',name:'Dr. Example Two',user_id:null,clinic_id:clinic}];
+let invites=[];
+await page.route('**/*',async route=>{
+ const url=new URL(route.request().url());
+ if(url.hostname==='127.0.0.1')return route.continue();
+ if(!url.hostname.endsWith('supabase.co'))return route.abort();
+ const table=url.pathname.split('/').pop();
+ let body=[];let status=200;
+ if(table==='clinic_dentists')body=rows.filter(x=>`eq.${x.clinic_id}`===url.searchParams.get('clinic_id'));
+ if(table==='clinic_invitations' && route.request().method()==='POST'){
+  const input=route.request().postDataJSON();
+  if(invites.some(x=>x.email===input.email)){status=409;body={code:'23505',message:'duplicate'};}
+  else {body={...input,id:'99999999-9999-4999-8999-999999999999',status:'pending'};invites.push(body);rows.push({id:crypto.randomUUID(),name:input.dentist_name,user_id:null,invitation_id:body.id,clinic_id:input.clinic_id});}
+ }
+ if(table==='clinic_invitations' && route.request().method()==='GET')body=invites;
+ if(table==='rx_drafts')body=page.url().includes('failSave') ? {payload:{patientName:'Fictional Draft Patient',selectedClinicId:clinic,treatingDentistId:rows[0].id,treatingDentistName:rows[0].name,labId:'55555555-5555-4555-8555-555555555555',caseMode:'appliance',category:'Study model',material:'',arches:'upper',insertionDate:'2026-10-01',selection:{}}} : null;
+ if(table==='estimate_case_price')body=null;
+ await route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
+});
+await page.goto('http://127.0.0.1:5182/tests/fixtures/clinic-dentist-preview.html');
+await page.getByLabel('Treating dentist').selectOption(rows[0].id);
+await page.getByPlaceholder('Full name',{exact:true}).fill('Fictional Patient');
+await page.getByRole('button',{name:'Add a Dentist',exact:true}).click();
+await page.getByLabel('Dentist name',{exact:true}).fill('Dr. Example New');
+await page.getByLabel('Dentist email',{exact:true}).fill('new@example.test');
+await page.screenshot({path:'work/dentist-dialog.png'});
+await page.getByRole('button',{name:'Add and Invite',exact:true}).click();
+await page.getByRole('dialog').waitFor({state:'hidden'});
+assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'Fictional Patient');
+assert.equal(await page.getByLabel('Treating dentist').inputValue(),rows.at(-1).id);
+assert.equal(invites.length,1);assert.equal(invites[0].role,'doctor');
+await page.screenshot({path:'work/dentist-selected.png'});
+// Failed duplicate keeps the modal and prescription intact.
+await page.getByRole('button',{name:'Add a Dentist',exact:true}).click();
+await page.getByLabel('Dentist name',{exact:true}).fill('Dr. Example New');
+await page.getByLabel('Dentist email',{exact:true}).fill('new@example.test');
+await page.getByRole('button',{name:'Add and Invite',exact:true}).click();
+await page.getByRole('alert').filter({hasText:'pending invitation'}).waitFor();
+await page.getByRole('dialog').getByRole('button',{name:'Cancel',exact:true}).click();
+await page.locator('select').filter({has:page.locator('option',{hasText:'Second Example Clinic'})}).selectOption('22222222-2222-4222-8222-222222222222');
+assert.equal(await page.getByLabel('Treating dentist').inputValue(),'');
+await page.getByText('Add and invite a dentist to send this prescription on their behalf.').waitFor();
+await page.goto('http://127.0.0.1:5182/tests/fixtures/clinic-dentist-preview.html?role=doctor');
+await page.getByPlaceholder('Full name',{exact:true}).waitFor();
+assert.equal(await page.getByRole('button',{name:'Add a Dentist',exact:true}).count(),0);
+await page.goto('http://127.0.0.1:5182/tests/fixtures/clinic-dentist-preview.html?settings=1&role=receptionist');
+await page.getByLabel('Dentist name',{exact:true}).fill('Dr. Example Settings');
+await page.getByLabel('Invitation email').fill('settings@example.test');
+await page.getByRole('button',{name:'Add and Invite',exact:true}).click();
+await page.getByText('Invitation requested for settings@example.test',{exact:false}).waitFor();
+assert.equal(invites.length,2);assert.equal(invites[1].dentist_name,'Dr. Example Settings');
+await page.goto('http://127.0.0.1:5182/tests/fixtures/clinic-dentist-preview.html?role=admin');
+await page.getByLabel('Treating dentist').selectOption(rows.at(-1).id);
+await page.setViewportSize({width:390,height:844});
+await page.getByRole('button',{name:'Add a Dentist',exact:true}).click();
+await page.screenshot({path:'work/dentist-mobile.png'});
+assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'no horizontal overflow');
+await page.goto('http://127.0.0.1:5182/tests/fixtures/clinic-dentist-preview.html?failSave=1');
+await page.getByRole('button',{name:/Unfinished Rx.*Resume/}).click();
+await page.getByLabel('Treating dentist').selectOption(rows[0].id);
+await page.getByRole('button',{name:'Submit Prescription',exact:true}).click();
+await page.getByRole('alert').filter({hasText:'Simulated save failure'}).waitFor();
+assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'Fictional Draft Patient');
+assert.equal((await page.evaluate(()=>window.savedPrescription)).treatingDentistId,rows[0].id);
+assert.deepEqual(errors,[]);
+console.log('PASS: receptionist and admin picker, immediate invited selection, settings invitation, duplicate handling, clinic reset, failed-save draft preservation, doctor gating, mobile layout, no runtime errors. All external requests mocked.');
+await browser.close();

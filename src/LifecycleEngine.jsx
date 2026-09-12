@@ -929,6 +929,7 @@ export function CaseDrawer({ open, caseObj, role, authorName, rxDetails, onClose
                 </div>
                 <p className="mt-0.5 text-sm text-slate-600">
                   {caseObj.patientName} <span className="text-slate-400">· {caseObj.patientId}</span>
+                  {caseObj.treatingDentistName && <span className="block text-xs font-normal text-slate-500">Treating dentist: {caseObj.treatingDentistName}</span>}
                 </p>
                 <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
                   <Clock size={11} /> Appointment: {caseObj.appointmentDate}

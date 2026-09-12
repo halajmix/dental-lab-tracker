@@ -95,6 +95,8 @@ export const caseFromRow = (r) => (noteSchema(r), {
   labShade: r.lab_shade ?? "",
   // Phase 56: which clinic user authored the case (stamped server-side).
   createdBy: r.created_by ?? null,
+  treatingDentistId: r.treating_dentist_id ?? null,
+  treatingDentistName: r.treating_dentist_name ?? "",
 });
 
 export const clinicFromRow = (r) => ({
@@ -205,6 +207,7 @@ export async function fetchClinicTeam(clinicId) {
     invitations: (invites.error ? [] : invites.data).map((i) => ({
       id: i.id,
       email: i.email,
+      name: i.dentist_name ?? "",
       role: i.role,
       // pending-past-expiry renders as expired; the row itself stays pending.
       status: i.status === "pending" && new Date(i.expires_at) < new Date() ? "expired" : i.status,
@@ -214,14 +217,20 @@ export async function fetchClinicTeam(clinicId) {
   };
 }
 
-export async function createClinicInvitation(clinicId, invitedBy, { email, role }) {
+export async function fetchClinicDentists(clinicId) {
+  const { data, error } = await supabase.from("clinic_dentists").select("id,name,user_id,invitation_id").eq("clinic_id", clinicId).eq("active", true).order("name");
+  if (error) throw error;
+  return data;
+}
+
+export async function createClinicInvitation(clinicId, invitedBy, { email, role, name = "" }) {
   const { data, error } = await supabase
     .from("clinic_invitations")
-    .insert({ clinic_id: clinicId, email: email.trim(), role, invited_by: invitedBy })
+    .insert({ clinic_id: clinicId, email: email.trim().toLowerCase(), role, invited_by: invitedBy, ...(role === "doctor" ? { dentist_name: name.trim() } : {}) })
     .select()
     .single();
   if (error) {
-    if (error.code === "23505") throw new Error("There is already a pending invitation for that email.");
+    if (error.code === "23505") throw new Error("There is already a pending invitation for that email. Select the dentist from the list, or revoke the old invitation in Settings before inviting again.");
     throw error;
   }
   return data;
@@ -368,6 +377,7 @@ export async function updateClinic(clinicId, patch) {
 }
 
 const caseToRow = (data) => ({
+  ...(data.treatingDentistId ? { treating_dentist_id: data.treatingDentistId, treating_dentist_name: data.treatingDentistName ?? "" } : {}),
   patient_name: data.patientName,
   patient_id: data.patientId,
   patient_phone: data.patientPhone ?? "",

@@ -1300,7 +1300,6 @@ export default function DentalLabTracker({ auth }) {
   };
 
   const addCase = async (data, opts = {}) => {
-    logActivity("submitted prescription", `${data.patientName ?? ""}`);
     // Multi-clinic: the Rx form's "Sending Clinic" selector (only shown when
     // the dentist owns more than one) passes clinicId explicitly; falls
     // back to the profile's default clinic for everyone else.
@@ -1326,15 +1325,16 @@ export default function DentalLabTracker({ auth }) {
     try {
       const saved = await insertCase(targetClinic, newCaseData, id);
       setCases((p) => p.map((c) => (c.id === id ? saved : c)));
-      setRxToast("Prescription submitted — you can edit it for the next 30 minutes.");
+      logActivity("submitted prescription", saved.id);
+      setRxToast("Prescription submitted to the lab.");
     } catch (err) {
       if (isNetworkError(err)) {
         enqueue({ kind: "insert", caseId: id, clinicId: targetClinic, data: newCaseData, label: `New case ${id}` });
         setRxToast("No connection — the case is saved on this device and will send automatically.");
       } else {
         console.error(err);
-        alert("Couldn't save the case — " + err.message);
         setCases((p) => p.filter((c) => c.id !== id)); // roll back the optimistic row
+        throw err;
       }
     }
   };
@@ -1396,9 +1396,9 @@ export default function DentalLabTracker({ auth }) {
     [myClinics],
   );
   const roleForCase = (c) => clinicRoleById[c.clinicId] ?? clinicRole ?? "admin";
-  // Receptionists never author prescriptions (cases_insert RLS enforces it).
-  const rxClinics = myClinics.filter((c) => c.status === "active" && (c.myRole ?? "admin") !== "receptionist");
-  const canCreateRx = myClinics.length === 0 ? clinicRole !== "receptionist" : rxClinics.length > 0;
+  // Clinic staff may submit on behalf of a validated treating dentist.
+  const rxClinics = myClinics.filter((c) => c.status === "active");
+  const canCreateRx = rxClinics.length > 0;
 
   // 30-minute Rx edit window (mirrors the cases_guard_prescription trigger,
   // which is the real enforcement — this just decides whether to show the
@@ -1428,7 +1428,7 @@ export default function DentalLabTracker({ auth }) {
       setRxToast("Prescription updated — the lab sees the new version.");
     } catch (err) {
       console.error(err);
-      alert("Couldn't update the prescription — " + err.message);
+      throw err;
     }
   };
 

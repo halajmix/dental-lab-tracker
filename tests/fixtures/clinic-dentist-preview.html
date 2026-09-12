@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1" /></head><body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import PrescriptionForm from '/src/PrescriptionForm.jsx';
+import ClinicTeam from '/src/ClinicTeam.jsx';
+import '/src/index.css';
+const clinic={id:'11111111-1111-4111-8111-111111111111',ownerId:'33333333-3333-4333-8333-333333333333',name:'Example Dental Clinic',myRole:new URLSearchParams(location.search).get('role')||'receptionist',status:'active'};
+const other={...clinic,id:'22222222-2222-4222-8222-222222222222',name:'Second Example Clinic'};
+const userId='44444444-4444-4444-8444-444444444444';
+function App(){const [open,setOpen]=React.useState(!new URLSearchParams(location.search).has('failSave')); const settings=new URLSearchParams(location.search).get('settings');return settings?React.createElement(ClinicTeam,{clinic,myRole:clinic.myRole,currentUserId:userId,onClose:()=>{}}):React.createElement(PrescriptionForm,{open,onClose:()=>setOpen(false),onResume:()=>setOpen(true),userId,authorName:'Example Reception',clinics:[clinic,other],defaultClinicId:clinic.id,labs:[{id:'55555555-5555-4555-8555-555555555555',name:'Example Lab',status:'active',tat:5,procedureTats:{}}],onSave:async(data)=>{window.savedPrescription=data; if(new URLSearchParams(location.search).has('failSave'))throw Error('Simulated save failure');}})}
+createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

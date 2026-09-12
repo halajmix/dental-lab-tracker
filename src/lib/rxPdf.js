@@ -39,7 +39,7 @@ function vectorSafe(caseObj, clinic, lab) {
   const rx = caseObj.prescription ?? {};
   const restorations = rx.restorations ?? [];
   const strings = [
-    clinic?.name, clinic?.address, clinic?.contact, clinic?.dentist, clinic?.governorate, clinic?.wilayat,
+    clinic?.name, clinic?.address, clinic?.contact, caseObj.treatingDentistName || clinic?.dentist, clinic?.governorate, clinic?.wilayat,
     lab?.name, lab?.address, lab?.contact, lab?.governorate, lab?.wilayat,
     caseObj.patientName, caseObj.patientId, caseObj.deliveryTime, rx.notes, rx.includedOther,
     ...(rx.included ?? []),
@@ -212,9 +212,9 @@ async function vectorPdf(caseObj, clinic, lab, photos) {
   pdf.text("LABORATORY PRESCRIPTION", A4W - M, y, { baseline: "top", align: "right" });
   font(8.5, "normal", MUTED);
   pdf.text(`Date: ${new Date().toISOString().slice(0, 10)}`, A4W - M, y + 14, { baseline: "top", align: "right" });
-  if (clinic?.dentist) {
+  if (caseObj.treatingDentistName || clinic?.dentist) {
     font(9, "bold", INK);
-    pdf.text(clinic.dentist, A4W - M, y + 26, { baseline: "top", align: "right" });
+    pdf.text(caseObj.treatingDentistName || clinic.dentist, A4W - M, y + 26, { baseline: "top", align: "right" });
   }
   y = Math.max(leftY, y + 40) + 4;
   pdf.setDrawColor(...INK);
@@ -389,7 +389,7 @@ async function vectorPdf(caseObj, clinic, lab, photos) {
   pdf.setLineWidth(0.8);
   pdf.line(M, y + 26, M + 190, y + 26);
   font(9, "bold", INK);
-  pdf.text(clinic?.dentist ?? "", M, y + 30, { baseline: "top" });
+  pdf.text(caseObj.treatingDentistName || clinic?.dentist || "", M, y + 30, { baseline: "top" });
 
   /* footer */
   font(6.5, "normal", FAINT);
