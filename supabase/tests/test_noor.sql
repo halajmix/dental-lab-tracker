@@ -91,3 +91,17 @@ do $$ begin
   if (select enabled from feature_flags where key = 'noor.global') then raise exception 'flag must default off'; end if;
 end $$;
 select 'noor RLS matrix: PASS' as result;
+
+-- ---------- REGRESSION: the trigger must not block a cases write with the flag ON ----------
+-- The 2026-09-11 version referenced new.kind (a case_rounds column) from a
+-- function also attached to cases; PL/pgSQL resolves record fields against
+-- the firing table before evaluating the boolean, so every cases write
+-- raised. This is the exact path that took production down for 13 hours.
+update feature_flags set enabled = true where key = 'noor.global';
+update cases set delivery_time = delivery_time where id = 'C-NOORTEST1';           -- fires cases_noor_webhook
+update cases set stage_index = 2 where id = 'C-NOORTEST1';                         -- the "interesting" branch
+insert into case_rounds (parent_case_id, kind, instructions, created_by, created_by_name, created_by_role)
+  values ('C-NOORTEST1', 'remake', 'x', '00000000-0000-0000-0000-000000000001', 'Owner One', 'dentist'); -- fires case_rounds_noor_webhook
+update case_clarifications set answer = 'A2', answered_at = now(), status = 'answered' where case_id = 'C-NOORTEST1'; -- fires case_clarifications_noor_webhook
+update feature_flags set enabled = false where key = 'noor.global';
+select 'noor trigger fires on all three tables with the flag on: PASS' as result;
