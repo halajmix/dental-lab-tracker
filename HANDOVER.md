@@ -133,6 +133,27 @@ running code that exists nowhere in git.
 The receipt test fixtures were once built from a real invoice and had to be
 scrubbed to fictional names. `scripts/.proof/` is gitignored for the same reason.
 
+**12. A trigger function shared across tables must never reference `new.<col>`.**
+PL/pgSQL resolves `new.kind` against the *firing* table's row type before it
+evaluates your `TG_TABLE_NAME` guard. One such line in `notify_noor_webhook()`
+raised on **every write to `cases`** for 13 hours (2026-09-11/12) — dentists
+could not submit, labs could not advance stages. Read fields through
+`to_jsonb(new)->>'col'`, and give any notification trigger an
+`exception when others then raise warning …; return new;` so it can never
+block a clinical write. The fix is `20260912_noor_trigger_hotfix.sql`.
+
+**13. Turning a feature flag on is a deployment.** That outage was latent while
+`noor.global` was off (the function returned early) and armed the moment it went
+on. After any flag flip, probe a real user write within a minute — not just
+the feature's own logs.
+
+**14. Vite does not catch undefined identifiers.** A free variable in JSX is a
+runtime `ReferenceError` (`noorFlagsByCase is not defined` blanked the dentist
+dashboard for 25 minutes). `scripts/check-undef.mjs` runs TypeScript's checker
+over every `.jsx` and fails the deploy on `Cannot find name`; it is wired into
+`deploy.sh`. Tests that never mount a component prove nothing about it — load
+the live page as the affected role before calling a deploy done.
+
 ---
 
 ## Where security is actually enforced
@@ -149,25 +170,26 @@ scrubbed to fictional names. `scripts/.proof/` is gitignored for the same reason
   the patient, since the lab and clinic are both treating them.
 - Every case view is written to `login_events`.
 
-## Known open issues
+## Known open issues (refreshed 2026-09-12)
 
-- **The clinic-invite accept flow looks broken.** Several invitees created
-  confirmed accounts and sign in regularly, yet their invitations stay `pending`
-  and they are attached to no clinic. Suspect the `?clinic_invite=<token>` is
-  lost across the signup / email-confirmation round trip.
-- **No handling for `#error=` / `otp_expired`** fragments — an expired email link
-  dumps the user on a bare login screen with no explanation and files a useless
-  "Script error." alert.
+- **Noor false "overdue" flags.** Smile World has `tat = 5` and no
+  `procedure_tats`, so every case older than 5 days trips "overdue vs promise".
+  Data fix (per-procedure TATs in Lab Admin), not code. Blocks Noor go-live.
 - **`SUPPORT_PHONE` in `PrintReceipt.jsx` is one constant**, so every lab prints
-  the same number and their own `contact` is not printed at all.
+  the same phone number and none print their own `contact`.
 - **Patient-billed clinics are matched by name** (`PATIENT_BILLED_CLINICS` in
-  `lib/invoiceDoc.js`). Renaming the clinic silently reverts to billing it.
+  `lib/invoiceDoc.js`). Renaming the clinic silently reverts to billing it;
   `billsPatientDirectly()` already checks `clinic.billsPatient` first, so a
   `bills_patient` column is a drop-in fix.
 - **No account has MFA.** The `Admin` account can read every lab and impersonate
-  any user.
-- `supabase/migrations/20260908_demo_org_flag.sql` and `supabase/demo/` are
-  written but **not applied** — advertising/demo data, inert until run.
+  any user. A device-bound super-admin design exists (see project memory /
+  earlier handover) but is not built.
+- `mobile-upload` returns HTTP 500 on an empty probe (harmless, undiagnosed).
+- `supabase/migrations/20260908_demo_org_flag.sql` + `supabase/demo/` — demo
+  data for filming, written, **not applied**, owner deprioritised.
+- Two clinic invitations (hind@…, aldhamrif@…) still pending, expire 2026-09-16.
+  (The invite accept flow and the expired-link screen were fixed on 2026-09-10 —
+  two of four reissued invitations have since been accepted.)
 
 ## 2026-09-09 invitation follow-up (source fix)
 
@@ -365,3 +387,45 @@ technicians without finance read access may have no choices. No finance
 read privileges are granted to technicians by the new RPC. Tested in the
 fictional browser and PGlite for valid choices, unknown-name rejection,
 other-lab isolation and anonymous denial.
+
+
+## Noor — the AI case coordinator (2026-09-11 → 12)
+
+**State:** live in **shadow mode** for Smile World only. It watches, decides
+and records; it sends and writes nothing. Two-week gate: review on or after
+**2026-09-26**, then decide go-live.
+
+| Piece | Where |
+|---|---|
+| Design (7 docs + eval fixtures) | `docs/agents/noor/` — read `00` and `02` first |
+| Runtime (Deno Edge Function `noor`) | `supabase/functions/noor/` — `index.ts` auth → gate → route; `runner.ts` manual tool loop with hard caps; `authz.ts` server-side tenancy for the 6 write tools; `lib/` pure modules; `jobs/` watcher · brief · patterns (no model) |
+| Client UI | `src/Noor.jsx` (`NoorFlagChips`, `NoorClarificationBanner`, `AskNoorPanel`, `NoorBriefCard`, `NoorEscalationInbox`, `NoorStatusPill`); data calls `fetchNoorState` / `askNoor` in `src/lib/data.js`; mounted in `DentalLabTracker.jsx` (dentist table, lab card, lab dashboard, Lab Admin workspace ~line 750) and `LifecycleEngine.jsx` (drawer) |
+| Schema | `20260911_noor_phase2_schema.sql`, `20260911_noor_phase2_jobs.sql`, `20260912_noor_trigger_hotfix.sql` — **all applied** |
+| Cron | `noor-watch-30min`, `noor-brief-hourly` (fires 07:30 in `labs.timezone`), `noor-patterns-weekly` |
+| Switches | `feature_flags.noor.global` (on) · `labs.noor_enabled` (Smile World) · function secret `NOOR_SHADOW` (unset = shadow; `false` = live) · `labs.escalation_user_id` (Tony Hannoun) |
+| Model | official SDK via `npm:@anthropic-ai/sdk`; answering `claude-opus-5`, phrasing `claude-haiku-4-5`; `ANTHROPIC_API_KEY` is a function secret (owner says set; unverified until a user question runs). Roles 2/3/6 never call a model |
+| Evidence | `agent_runs.would_have` per run; `node scripts/health-check.mjs` has a Noor section — the `would have` line is the daily read |
+
+**Deploying the function:** no Supabase CLI login exists. Bundle to one file with
+esbuild (entry `index.ts`, esm, platform neutral, keep `npm:`/`jsr:` external,
+json loader — recipe in project memory) and paste into Edge Functions → `noor`
+→ Code. **Verify JWT must be OFF.** Then probe: unsigned POST → 401, wrong
+secret → 401, GET → 405.
+
+**Verification:** `npm run noor:test` (44), `npm run noor:ui` (8),
+`npm run noor:check` (schemas + prompt == docs), `npm run noor:evals`
+(14 code-path fixtures; 3 model scenarios skip without a key),
+`supabase/tests/test_noor.sql` (RLS matrix + the trigger regression, Docker).
+
+**Go-live checklist (owner + dev):** per-procedure TATs set in Lab Admin →
+`would have` output reads true for a few days → gate metrics in
+`docs/agents/noor/06-rollout-plan.md` → DPA for case data → Anthropic signed →
+set `NOOR_SHADOW=false` → probe a real write within a minute → watch the first
+live tick. Roll back = flag off (one row) or the secret removed.
+
+**Design decisions to respect:** Noor reads under the caller's JWT so RLS
+decides visibility; the model never sees a tenant id it did not get from a
+tool; patient name/phone go to the model only when the case's own clinic asks;
+email subjects carry case ids, never patient names; a returned case (open
+follow-up round on completed work) is live work again — for the lab queue,
+the clinic dashboard and the watcher alike.
