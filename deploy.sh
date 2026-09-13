@@ -17,7 +17,15 @@ NODE_ENV=production npm run build
 # This never replaces the newly built entry, service worker, or current assets.
 if [[ -n "${DEPLOY_RETAIN_ASSETS_FROM:-}" ]]; then
   [[ -d "$DEPLOY_RETAIN_ASSETS_FROM" ]] || { echo "Previous assets directory missing" >&2; exit 1; }
-  cp -Rn "$DEPLOY_RETAIN_ASSETS_FROM/." dist/assets/
+  node --input-type=module <<'JS'
+import { readdirSync, existsSync, copyFileSync } from 'node:fs';
+import { join } from 'node:path';
+for (const entry of readdirSync(process.env.DEPLOY_RETAIN_ASSETS_FROM, { withFileTypes: true })) {
+  if (!entry.isFile()) throw new Error('Unexpected directory in previous assets');
+  const target = join('dist/assets', entry.name);
+  if (!existsSync(target)) copyFileSync(join(process.env.DEPLOY_RETAIN_ASSETS_FROM, entry.name), target);
+}
+JS
 fi
 
 # GitHub Pages: skip Jekyll processing, and serve index.html for unknown paths.
