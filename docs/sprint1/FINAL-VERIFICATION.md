@@ -1,6 +1,6 @@
 # Dr-Crown release status — 13 September 2026
 
-The focused staging workflows and non-destructive client rollback rehearsal passed. Production has not been migrated or deployed. Live catalog verification and final owner approval remain required before release.
+The focused staging workflows and non-destructive client rollback rehearsal passed. Production has not been migrated or deployed. Targeted live catalog verification passed on 13 September; final owner approval remains required before release. See LIVE-PREFLIGHT.md.
 
 ## Implemented and prepared
 
@@ -43,7 +43,7 @@ The previous deployed archive is for production rollback. Do not serve it agains
 
 ## Remaining release gates and limits
 
-- Sign in to the Supabase dashboard for the prepared read-only catalog preflight. The available session expired. No password needs to be shared. Compare effective policies/functions/triggers before applying the exact four reviewed migrations.
+- Targeted live schema preflight completed through the signed-in dashboard; relevant definitions, policies, triggers and column types match the tested baseline. See LIVE-PREFLIGHT.md. Recheck if another actor changes production before release.
 - Confirm a current provider recovery point immediately before rollout. This is a release safeguard, not a request to restart historical backup work. The accepted staging scope uses local test credentials; it does not prove production credential recovery or an exact full-database disaster restore.
 - Obtain final owner approval for the concrete migrations/client and guide activation. Apply only reviewed migrations, not schema.sql. Start with guidance off and check controlled non-patient flows. Never run the mutating staging probe script against historical production rows.
 - The current guide switch applies to all eligible new accounts; there is no per-clinic pilot allowlist. Keep it off until the intended activation scope is approved.

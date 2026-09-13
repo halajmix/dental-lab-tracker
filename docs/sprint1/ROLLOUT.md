@@ -1,6 +1,6 @@
 # Sprint 1 — staged rollout and recovery
 
-Current status (13 September): the focused reconstructed-staging workflows and client rollback rehearsal passed. See FINAL-VERIFICATION.md for the current evidence, accepted test-identity scope, security deltas and remaining live-catalog/approval gates. No production deployment occurred. The sections below retain the original preparation record; their requirement for a complete credential-bearing clone is superseded by the owner-approved reconstructed staging scope.
+Current status (13 September): the focused reconstructed-staging workflows and client rollback rehearsal passed. See FINAL-VERIFICATION.md for the current evidence, accepted test-identity scope, security deltas and completed live-catalog check and remaining approval gate. No production deployment occurred. The sections below retain the original preparation record; their requirement for a complete credential-bearing clone is superseded by the owner-approved reconstructed staging scope.
 
 ## Baseline and inspection
 
