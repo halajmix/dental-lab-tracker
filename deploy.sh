@@ -13,6 +13,13 @@ node scripts/check-undef.mjs
 echo "▸ Building production bundle…"
 NODE_ENV=production npm run build
 
+# Keep prior hashed chunks for open tabs after a reviewed release or rollback.
+# This never replaces the newly built entry, service worker, or current assets.
+if [[ -n "${DEPLOY_RETAIN_ASSETS_FROM:-}" ]]; then
+  [[ -d "$DEPLOY_RETAIN_ASSETS_FROM" ]] || { echo "Previous assets directory missing" >&2; exit 1; }
+  cp -Rn "$DEPLOY_RETAIN_ASSETS_FROM/." dist/assets/
+fi
+
 # GitHub Pages: skip Jekyll processing, and serve index.html for unknown paths.
 touch dist/.nojekyll
 cp dist/index.html dist/404.html
