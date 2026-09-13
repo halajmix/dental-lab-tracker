@@ -1,3 +1,5 @@
+> Update: approved production rollout is complete, guidance OFF. See [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md) for current status and live verification.
+
 # Dr-Crown release status — 13 September 2026
 
 The focused staging workflows and non-destructive client rollback rehearsal passed. Production has not been migrated or deployed. Targeted live catalog verification passed on 13 September; final owner approval remains required before release. See LIVE-PREFLIGHT.md.
