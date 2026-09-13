@@ -1,6 +1,6 @@
 # Sprint 1 — staged rollout and recovery
 
-Status: local implementation and isolated synthetic tests complete; production rollout blocked on a verified staging/restore environment. No production migration, deployment, account creation, invitation email or clinical write has been performed for this sprint.
+Current status (13 September): the focused reconstructed-staging workflows and client rollback rehearsal passed. See FINAL-VERIFICATION.md for the current evidence, accepted test-identity scope, security deltas and remaining live-catalog/approval gates. No production deployment occurred. The sections below retain the original preparation record; their requirement for a complete credential-bearing clone is superseded by the owner-approved reconstructed staging scope.
 
 ## Baseline and inspection
 
