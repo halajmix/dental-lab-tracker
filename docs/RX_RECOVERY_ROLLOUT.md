@@ -18,3 +18,8 @@ No migration, account changes, clinical-data rewrite or authentication changes.
 Rollback: republish the pre-release website artifact with its retained assets. Previous Pages revision: f18da8ec92f53cb509e8fd1e7aea352b0dd0c364. No database restore is necessary. Preserve prior hashed assets on release to support already-open tabs.
 
 Limits: drafts still expire after 24 hours; unsaved changes cannot survive a forced browser/process termination while disconnected. Failed or incomplete attachment uploads are not backed up by the server draft. The existing single-draft-per-user design does not merge simultaneous edits from different devices. Existing offline queue security/ownership design is outside this change.
+
+Release verification:
+- Source d8360ba published; live entry `/assets/index-BuHJW46u.js` matches the local build byte-for-byte by SHA-256.
+- Prior hashed assets retained. Live login page reloaded without browser errors. No authenticated production form session was available; form interaction verification used the isolated fixture.
+- Post-release health check: latest recorded client crash still September 12; no new recorded crash. Existing empty mobile-upload probe still returns 500, unchanged from before this release. Noor remains in shadow mode.
