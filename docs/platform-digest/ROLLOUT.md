@@ -11,3 +11,11 @@ Deploy platform-digest with Verify JWT ON and existing CASE_NOTIFY_SECRET, RESEN
 Cron checks every five minutes during UTC hour 19. A daily key, five-minute lease, frozen snapshot/recipient and provider idempotency prevent repeated emails. Twelve attempts maximum, within 23 hours. Failure retained for inspection; no unlimited retry or guaranteed delivery during provider outages. Turning enabled=false stops future sends, retaining all history.
 
 Tests: platformDigest.mjs covers Oman cutoff, half-open ranges, privacy, metric counts, disabled state, stable snapshots, leases, deduplication, preview separation and denied access. platformDigestWorker.mjs runs bundled worker against fake network/provider for unauthorized calls, disabled/no-due, success, fixed recipient/idempotency and provider failure. Full staging migration and preview aggregation returned 27 summary fields; transaction rolled back. No external staging mail was sent.
+
+Production verification — 2026-09-14:
+- Deployed `platform-digest`; legacy JWT verification remains enabled. Authenticated GET returned 405; POST without the private webhook secret returned 401.
+- Applied `20260914_platform_daily_digest.sql` successfully; cron job 10. Enabled only after deployment and authentication checks. Recipient read back as the owner's requested mailbox (not stored in this public document).
+- Active schedule read back as `*/5 19 * * *`: initial attempt at 23:00 Oman with bounded retry checks. The daily claim prevents duplicate sends and runs even on quiet days.
+- Preview `preview-2026-09-14` accepted on attempt 1 at 2026-09-14T17:43:13.753Z; no delivery error. Verified the preview in the owner's Gmail inbox and inspected all report sections: aggregate counts only, no patient names or individual case details.
+- First scheduled nightly delivery is due at 23:00 Oman on September 14. Preview delivery verifies the production query, worker, provider and inbox path; it is not evidence that a future scheduled invocation has already run.
+- No existing clinical/authentication records changed. Rollback remains disabling the reporting setting; no schema removal or data restore is needed.
