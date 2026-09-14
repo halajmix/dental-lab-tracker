@@ -1317,8 +1317,8 @@ export default function DentalLabTracker({ auth }) {
     // Client-generated id so an offline case has a stable identity shared by
     // its optimistic row and its queued insert. Any attached photos were
     // already uploaded-or-queued by the form and carry their final URLs.
-    const id = newCaseId();
-    setCases((p) => [buildLocalCase(id, targetClinic, newCaseData), ...p]);
+    const id = opts.submissionId || newCaseId();
+    setCases((p) => [buildLocalCase(id, targetClinic, newCaseData), ...p.filter(c => c.id !== id)]);
     if (opts.share) {
       setAutoShare(true);
       setPrintCaseId(id);
@@ -1330,7 +1330,12 @@ export default function DentalLabTracker({ auth }) {
       setRxToast("Prescription submitted to the lab.");
     } catch (err) {
       if (isNetworkError(err)) {
-        enqueue({ kind: "insert", caseId: id, clinicId: targetClinic, data: newCaseData, label: `New case ${id}` });
+        try {
+          enqueue({ kind: "insert", caseId: id, clinicId: targetClinic, data: newCaseData, label: `New case ${id}` });
+        } catch {
+          setCases(p => p.filter(c => c.id !== id));
+          throw new Error("This device could not store the offline submission. Keep this form open, reconnect and retry.");
+        }
         setRxToast("No connection — the case is saved on this device and will send automatically.");
       } else {
         console.error(err);

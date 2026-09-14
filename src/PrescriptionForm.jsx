@@ -30,7 +30,7 @@ import {
   Search,
   Smartphone,
 } from "lucide-react";
-import { uploadCasePhoto, classifyRxFile, scanPickerAccept, isMobileDevice, estimateCasePrice, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
+import { uploadCasePhoto, classifyRxFile, scanPickerAccept, isMobileDevice, estimateCasePrice, newCaseId, fetchMyRxDraft, saveRxDraft, deleteRxDraft } from "./lib/data.js";
 
 // Phase 61: STL exports dwarf photos — 50 MB cap, enforced here and by
 // the bucket itself.
@@ -1479,6 +1479,12 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   const [dentistValid, setDentistValid] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const submitLock = useRef(false);
+  const submissionId = useRef(null);
+  const draftWrites = useRef(Promise.resolve());
+  const [draftStatus, setDraftStatus] = useState("idle");
+  const [savedDraftJson, setSavedDraftJson] = useState("");
+  const [draftRetry, setDraftRetry] = useState(0);
   const sendingClinicId = selectedClinicId || defaultClinicId;
   const sendingRole = clinics.find((c) => c.id === sendingClinicId)?.myRole;
   const delegateRx = !editing && ["admin", "receptionist"].includes(sendingRole);
@@ -1661,6 +1667,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   }, [open, editing]);
 
   const reset = () => {
+    submissionId.current = null;
+    setSavedDraftJson(""); setDraftStatus("idle");
     setNotation("FDI"); setMode("unit"); setSelection({});
     setPatientName(""); setPatientId(""); setPatientPhone(""); setShowPatientExtras(false);
     setSelectedClinicId(defaultClinicId);
@@ -1694,9 +1702,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     implantSystem, abutmentType, abutmentColor, notes,
     scans: scans.filter((f) => !f.error).map((f) => ({ name: f.name, size: f.size, url: f.url ?? null })),
     photos: photos.filter((f) => f.url).map((f) => ({ name: f.name, size: f.size, url: f.url })),
-    photoGroupId,
+    photoGroupId, submissionId: submissionId.current,
   });
   const hydrateRxDraft = (d) => {
+    submissionId.current = d.submissionId ?? null;
     setNotation(d.notation ?? "FDI");
     setMode(d.mode ?? "unit");
     setSelection(d.selection ?? {});
@@ -1733,7 +1742,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setPhotoGroupId(d.photoGroupId ?? crypto.randomUUID());
   };
   const discardRxDraft = () => {
-    if (userId) deleteRxDraft(userId).catch(() => {});
+    if (userId) draftWrites.current = draftWrites.current.catch(() => {}).then(() => deleteRxDraft(userId)).catch(() => {});
   };
 
   // A closed NEW-case form with content keeps living as a minimized pill —
@@ -1754,30 +1763,45 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       notes.trim() ||
       scans.length ||
       photos.length ||
-      draftTouched
+      draftTouched || Object.keys(draft.selection).length
     );
 
-  // Persist on close (Phase 60): open -> closed with content saves the
-  // draft; closed empty removes any stored one (so an emptied-out form
-  // can't resurrect stale data on the next load). Both fire-and-forget —
-  // pre-SQL schemas and offline just keep the in-memory pill behavior.
-  // MUST stay above the !open early return (hook-count — React #310).
-  const prevOpenRef = useRef(open);
+  // Serialize writes so a slow save cannot resurrect a submitted/discarded draft.
+  // Keep patient data in the existing protected server draft, not new browser storage.
+  const draftJson = JSON.stringify(serializeRxDraft());
+  const currentDraftJson = useRef(draftJson);
+  currentDraftJson.current = draftJson;
   useEffect(() => {
-    const was = prevOpenRef.current;
-    prevOpenRef.current = open;
-    if (!was || open || isEditing || wasEditingRef.current || !userId) return;
-    if (hasDraft) {
-      saveRxDraft({
-        clinicId: selectedClinicId || defaultClinicId || null,
-        patientName: patientName.trim(),
-        payload: serializeRxDraft(),
-      }).catch(() => {});
-    } else {
-      deleteRxDraft(userId).catch(() => {});
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    if (!hasDraft || isEditing || !userId || submitting || formKind !== "new") return;
+    if (draftJson === savedDraftJson) return;
+    const timer = setTimeout(() => {
+      setDraftStatus("saving");
+      const payload = JSON.parse(draftJson);
+      draftWrites.current = draftWrites.current.catch(() => {}).then(() => saveRxDraft({
+        clinicId: payload.selectedClinicId || defaultClinicId || null,
+        patientName: payload.patientName.trim(), payload,
+      })).then(() => {
+        if (currentDraftJson.current === draftJson) {
+          setSavedDraftJson(draftJson); setDraftStatus("saved");
+        }
+      }).catch(() => {
+        if (currentDraftJson.current === draftJson) setDraftStatus("error");
+      });
+    }, open ? 900 : 0);
+    return () => clearTimeout(timer);
+  }, [draftJson, savedDraftJson, hasDraft, isEditing, userId, submitting, formKind, open, defaultClinicId, draftRetry]);
+  useEffect(() => {
+    const retry = () => setDraftRetry(n => n + 1);
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, []);
+  const unsavedFiles = [...photos, ...scans].some(f => f.uploading || f.error || !f.url);
+  useEffect(() => {
+    if (!hasDraft || (draftJson === savedDraftJson && !unsavedFiles)) return;
+    const warn = event => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasDraft, draftJson, savedDraftJson, unsavedFiles]);
 
   // Restore on load: one fetch per session, and only into an idle, empty,
   // non-editing form — never over live typing.
@@ -1807,7 +1831,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         <button
           type="button"
           onClick={onResume}
-          title="Saved as a draft — kept for 1 day, then deleted automatically if not submitted"
+          title={draftJson === savedDraftJson ? "Draft saved for 24 hours" : "Draft is open in this tab; saving is not yet confirmed"}
           className="min-w-0 truncate px-1 text-left text-sm font-semibold text-slate-700 hover:text-blue-700"
         >
           Unfinished Rx{patientName.trim() ? ` — ${patientName.trim()}` : ""}
@@ -2187,6 +2211,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     abutmentType: caseMode === "appliance" && isImplant && !abutmentType,
     insertionDate: !insertionDate,
     photosUploading,
+    failedFiles: [...photos, ...scans].some(f => f.error),
   };
   const isValid = !Object.values(errors).some(Boolean);
 
@@ -2204,6 +2229,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     abutmentType: "Abutment size",
     insertionDate: "Next appointment",
     photosUploading: "Files still uploading",
+    failedFiles: "Retry or remove files that failed to upload",
   };
   const missing = Object.entries(errors)
     .filter(([, bad]) => bad)
@@ -2213,7 +2239,13 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // `opts.share` submits and immediately opens the share panel for the new case.
   const submit = async (opts = {}) => {
     setTouched(true);
-    if (!isValid || submitting) return;
+    if (submitLock.current) return;
+    if (!isValid) {
+      setStep(errors.patientName || errors.labId || errors.treatingDentist ? 1 : errors.restorations || errors.unsavedRestoration || errors.teeth || errors.material || errors.implantSystem || errors.abutmentType ? 2 : 3);
+      return;
+    }
+    submitLock.current = true;
+    if (!isEditing && !submissionId.current) submissionId.current = newCaseId();
     setSubmitting(true); setSaveError("");
     const common = {
       notation,
@@ -2265,14 +2297,14 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     try {
       if (isEditing) await onSaveEdit(editing.id, payload);
       else {
-        await onSave(payload, opts);
+        await onSave(payload, { ...opts, submissionId: submissionId.current });
         discardRxDraft();
       }
       reset();
       onClose();
     } catch (err) {
-      setSaveError("Couldn't save the prescription — " + err.message);
-    } finally { setSubmitting(false); }
+      setSaveError("Your prescription is still here. Check the message below, then retry Submit Prescription. " + (err.message || "The connection failed."));
+    } finally { submitLock.current = false; setSubmitting(false); }
   };
 
   const err = (k) => touched && errors[k];
@@ -2312,7 +2344,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   /* ---------------- render ---------------- */
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
-      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => { if (!submitLock.current) onClose(); }} />
       <div className="relative z-10 flex w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92vh] sm:rounded-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
@@ -2324,19 +2356,28 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               <h3 className="text-base font-bold text-slate-800">
                 {isEditing ? `Edit Prescription · ${editing.id}` : "Digital Laboratory Prescription"}
               </h3>
-              <p className="text-[11px] text-slate-500">Phase 2 · Rx work order</p>
+              <p className="text-[11px] text-slate-500">Patient & lab → Treatment → Appointment & files</p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+          <button onClick={() => { if (!submitLock.current) onClose(); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
             <X size={18} />
           </button>
         </div>
 
         {/* New Case vs Follow-up — hidden while editing an existing case. */}
-        {!isEditing && <ModeToggle value={formKind} onChange={setFormKind} />}
+        {!isEditing && <ModeToggle value={formKind} onChange={value => { if (!submitLock.current) setFormKind(value); }} />}
 
+        {!isEditing && <div className="border-b border-slate-100 px-4 py-2 text-xs" role="status">
+          {hasDraft ? (draftJson === savedDraftJson
+            ? "Draft saved for 24 hours. You can close and resume later."
+            : draftStatus === "error" ? "Draft could not be saved. Keep this tab open until saving succeeds."
+            : "Saving your draft… Keep this tab open until saved.")
+            : "Complete the three steps below. Required fields are marked *."}
+          {hasDraft && draftStatus === "error" && <button type="button" className="ml-2 font-semibold text-blue-700 underline" onClick={() => setDraftRetry(n => n + 1)}>Retry draft save</button>}
+          {unsavedFiles && <span className="block text-amber-700">Unfinished uploads are not protected by the draft. Retry or remove failed files before sending.</span>}
+        </div>}
         {/* Scroll body */}
-        <div className="flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">
+        <fieldset disabled={submitting} className="min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">
           {/* ---------------- STEP 1 · Patient & Lab ---------------- */}
           <Step
             n={1}
@@ -2428,8 +2469,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               </button>
             )}
             <div className="mt-4 flex justify-end">
-              <button type="button" onClick={() => setStep(2)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
-                Next · Clinical <ChevronDown size={15} className="-rotate-90" />
+              <button type="button" onClick={() => { if (stepInvalid(1)) setTouched(true); else setStep(2); }} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                Next · Treatment <ChevronDown size={15} className="-rotate-90" />
               </button>
             </div>
           </Step>
@@ -2437,7 +2478,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           {/* ---------------- STEP 2 · Clinical parameters ---------------- */}
           <Step
             n={2}
-            title="Clinical Parameters"
+            title="Treatment"
             subtitle="What is included, which teeth, and the restoration spec"
             summary={stepSummary[2]}
             open={step === 2}
@@ -2753,8 +2794,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             </>
           )}
             <div className="mt-4 flex justify-end">
-              <button type="button" onClick={() => setStep(3)} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
-                Next · Logistics <ChevronDown size={15} className="-rotate-90" />
+              <button type="button" onClick={() => { if (stepInvalid(2)) setTouched(true); else setStep(3); }} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                Next · Appointment & files <ChevronDown size={15} className="-rotate-90" />
               </button>
             </div>
           </Step>
@@ -2762,7 +2803,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           {/* ---------------- STEP 3 · Logistics & attachments ---------------- */}
           <Step
             n={3}
-            title="Logistics & Attachments"
+            title="Appointment & files"
             subtitle="Delivery, express handling, scans and instructions"
             summary={stepSummary[3]}
             open={step === 3}
@@ -2951,7 +2992,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             </div>
           </section>
           </Step>
-        </div>
+        </fieldset>
 
         {/* Sticky summary + action bar — always in reach, never scrolls away */}
         {saveError && <p role="alert" className="bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-700">{saveError}</p>}
@@ -3019,7 +3060,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   ? "Changes go straight to the lab's live case."
                   : isValid
                     ? "Ready to submit to lab queue."
-                    : "Complete required fields (*) to submit."}
+                    : `Still needed: ${missing.join(", ")}.`}
               </div>
             )}
             {/* Stacked full-width on phones (three inline buttons overflow a
@@ -3044,8 +3085,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <MessageCircle size={15} /> Submit &amp; Share
                 </button>
               )}
-              <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
-                Cancel
+              <button type="button" disabled={submitting} onClick={() => { if (!submitLock.current) onClose(); }} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
+                {isEditing ? "Cancel" : "Close & keep draft"}
               </button>
               {/* Cancel keeps the draft (it minimizes to a pill); Discard
                   actually throws the started prescription away. */}
@@ -3054,7 +3095,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <span className="flex items-center justify-center gap-1 sm:order-0">
                     <button
                       type="button"
-                      onClick={() => { reset(); onClose(); discardRxDraft(); }}
+                      disabled={submitting} onClick={() => { reset(); onClose(); discardRxDraft(); }}
                       className="rounded-lg bg-rose-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-rose-700 sm:py-2"
                     >
                       Discard

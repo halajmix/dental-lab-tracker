@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1" /></head><body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import PrescriptionForm from '/src/PrescriptionForm.jsx';
+import '/src/index.css';
+// Fictional, isolated test fixture. All API calls are handled locally.
+if(new URLSearchParams(location.search).has('complete') && !sessionStorage.getItem('fictional-rx-draft')) sessionStorage.setItem('fictional-rx-draft',JSON.stringify({payload:{patientName:'Fictional Retry Patient',selectedClinicId:'11111111-1111-4111-8111-111111111111',labId:'55555555-5555-4555-8555-555555555555',caseMode:'appliance',category:'Study model',material:'',arches:'upper',insertionDate:'2026-10-01',selection:{}}}));
+let failDraft=false,failSubmit=true,saves=0,lastId='',sameId=true;
+window.fetch=async(input,init={})=>{
+ const url=new URL(typeof input==='string'?input:input.url,location.href);
+ const table=url.pathname.split('/').pop();let body=null;
+ if(table==='save_rx_draft'){
+  if(failDraft)return new Response(JSON.stringify({message:'Simulated draft connection failure'}),{status:503});
+  const data=JSON.parse(init.body);sessionStorage.setItem('fictional-rx-draft',JSON.stringify({payload:data.p_payload}));
+ }
+ else if(table==='rx_drafts'){
+  if(init.method==='DELETE')sessionStorage.removeItem('fictional-rx-draft');
+  else body=JSON.parse(sessionStorage.getItem('fictional-rx-draft')||'null');
+ }else if(table!=='estimate_case_price') return new Response('{}',{status:503});
+ return new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
+};
+const clinic={id:'11111111-1111-4111-8111-111111111111',name:'Example Clinic',myRole:'doctor',status:'active'};
+function App(){const [open,setOpen]=React.useState(false);const [tick,setTick]=React.useState(0);return React.createElement(React.Fragment,null,
+ React.createElement('button',{onClick:()=>setOpen(true)},'Open prescription'),
+ React.createElement('button',{onClick:()=>{failDraft=!failDraft;setTick(tick+1)}},failDraft?'Restore draft connection':'Fail draft connection'),
+ React.createElement('button',{onClick:()=>{failSubmit=false;setTick(tick+1)}},'Allow submission'),
+ React.createElement('p',null,`Save attempts: ${saves}; same case ID: ${sameId}`),
+ React.createElement(PrescriptionForm,{open,onClose:()=>setOpen(false),onResume:()=>setOpen(true),userId:'44444444-4444-4444-8444-444444444444',authorName:'Dr Example',clinics:[clinic],defaultClinicId:clinic.id,labs:[{id:'55555555-5555-4555-8555-555555555555',name:'Example Lab',status:'active',tat:5,procedureTats:{}}],onSave:async(data,opts)=>{saves++;sameId=!lastId||lastId===opts.submissionId;lastId=opts.submissionId;setTick(n=>n+1);await new Promise(r=>setTimeout(r,800));if(failSubmit)throw Error('Simulated save failure');}}));}
+createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

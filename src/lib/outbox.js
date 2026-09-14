@@ -15,21 +15,23 @@
 const KEY = "drcrown.outbox.v1";
 const listeners = new Set();
 
-function read() {
+function read(requireReadable = false) {
   try {
     const raw = localStorage.getItem(KEY);
     const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr) && requireReadable) throw new Error("Unreadable queue");
     return Array.isArray(arr) ? arr : [];
   } catch {
+    if (requireReadable) throw new Error("Offline storage unavailable");
     return [];
   }
 }
 
-function write(ops) {
+function write(ops, requireDurable = false) {
   try {
     localStorage.setItem(KEY, JSON.stringify(ops));
   } catch {
-    /* storage full / disabled — nothing safe to do here */
+    if (requireDurable) throw new Error("Offline storage unavailable");
   }
   for (const cb of listeners) {
     try {
@@ -66,9 +68,10 @@ export function enqueue(op) {
     status: "pending",
     ...op,
   };
-  const ops = read();
+  const ops = read(op.kind === "insert");
+  if (op.kind === "insert" && ops.some(existing => existing.kind === "insert" && existing.caseId === op.caseId)) return ops.find(existing => existing.kind === "insert" && existing.caseId === op.caseId);
   ops.push(full);
-  write(ops);
+  write(ops, op.kind === "insert");
   return full;
 }
 
