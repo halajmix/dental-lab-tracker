@@ -55,13 +55,15 @@ revoke all on function public.claim_registration_reviews() from public,anon,auth
 grant execute on function public.claim_registration_reviews() to service_role;
 create function private.run_registration_reviews() returns void
 language plpgsql security definer set search_path=public,private as $$
-declare secret text;
+declare secret text; public_token text;
 begin
  if not exists(select 1 from registration_review_settings where enabled) then return; end if;
  select value into secret from private.webhook_config where key='case_notify_secret';
  if coalesce(trim(secret),'')='' then raise exception 'Registration webhook is not configured'; end if;
+ select value into public_token from private.webhook_config where key='registration_public_anon_token';
+ if coalesce(trim(public_token),'')='' then raise exception 'Registration public token is not configured'; end if;
  perform net.http_post(url:='https://mtxkushcxczjwypwoxdh.supabase.co/functions/v1/registration-notify',
- headers:=jsonb_build_object('Content-Type','application/json','x-webhook-secret',secret),body:='{}'::jsonb,timeout_milliseconds:=30000);
+ headers:=jsonb_build_object('Content-Type','application/json','x-webhook-secret',secret,'Authorization','Bearer '||public_token),body:='{}'::jsonb,timeout_milliseconds:=30000);
 end $$;
 revoke all on function private.run_registration_reviews() from public,anon,authenticated;
 select cron.schedule('registration-review-minute','* * * * *',$$select private.run_registration_reviews()$$);
