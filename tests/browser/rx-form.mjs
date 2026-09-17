@@ -15,10 +15,10 @@ let browser;
 try {
 for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
  browser = await ({chromium,webkit}[engineName]).launch();
- async function setup({viewport={width:1041,height:631},role='admin',roster=[self],savedDraft=null,failRoster=false}={}) {
+ async function setup({viewport={width:1041,height:631},role='admin',roster=[self],savedDraft=null,failRoster=false,draftAction='resume',failDeleteOnce=false}={}) {
   const page=await browser.newPage({viewport});
   const errors=[]; page.on('pageerror',e=>errors.push(e.message));
-  const drafts=[];
+  const drafts=[];let deletes=0;
   await page.route('**/*',async route=>{
    const url=new URL(route.request().url());
    if(url.origin===origin)return route.continue();
@@ -27,14 +27,22 @@ for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
     if(failRoster)return route.fulfill({status:500,json:{message:'Fictional roster failure'}});
     return route.fulfill({json:url.searchParams.get('clinic_id')==='eq.clinic-b'?[other]:roster});
    }
+   if(url.pathname.includes('rx_drafts') && route.request().method()==='DELETE') {
+    deletes++;
+    if(failDeleteOnce && deletes===1)return route.fulfill({status:500,json:{message:'Fictional deletion failure'}});
+    savedDraft=null;return route.fulfill({status:204});
+   }
    if(url.pathname.includes('save_rx_draft'))drafts.push(route.request().postDataJSON());
    return route.fulfill({json:url.pathname.includes('rx_drafts') ? (savedDraft?{payload:savedDraft}:null):null});
   });
   await page.goto(`${origin}/tests/browser/rx-form.html?role=${role}${savedDraft?'&draft=1':''}`);
-  if(savedDraft){await page.getByText('Resume',{exact:true}).waitFor();await page.getByRole('button',{name:'Open prescription',exact:true}).click();}
-  await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).waitFor();
+  if(savedDraft){await page.getByText('Resume',{exact:true}).waitFor();await page.getByRole('button',{name:'Open prescription',exact:true}).click();
+   await page.getByRole('dialog',{name:'Unfinished prescription found'}).waitFor();
+   if(draftAction==='resume')await page.getByRole('button',{name:'Resume saved draft',exact:true}).click();
+  }
+  if(draftAction==='resume')await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).waitFor();
   await page.waitForTimeout(150);
-  return {page,errors,drafts};
+  return {page,errors,drafts,deleteCount:()=>deletes};
  }
  for(const viewport of [{width:1041,height:631},{width:1440,height:900},{width:390,height:844},{width:320,height:568}]) {
   const {page,errors}=await setup({viewport});
@@ -135,6 +143,34 @@ for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
   assert.deepEqual(errors,[]);await page.close();
  }
  console.log(`PASS ${engineName} all 35 follow-up cases browse/search/select, including older completed cases`);
+ {
+  const {page,errors,deleteCount}=await setup({savedDraft:{...draft,patientName:'5'},draftAction:'choose',failDeleteOnce:true});
+  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).count(),0,'No silently restored patient field');
+  assert.ok(await page.getByText('Saved patient name:',{exact:false}).isVisible());
+  await page.getByRole('button',{name:'Discard draft & start blank',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:"Couldn't discard"}).waitFor();
+  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).count(),0,'Failed delete preserves the draft choice');
+  await page.getByRole('button',{name:'Resume saved draft',exact:true}).click();
+  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'5','Explicit resume preserves original value');
+  await page.getByRole('button',{name:'Close & keep draft',exact:true}).click();
+  await page.getByRole('button',{name:'Open prescription',exact:true}).click();
+  await page.getByRole('dialog',{name:'Unfinished prescription found'}).waitFor();
+  await page.getByRole('button',{name:'Discard draft & start blank',exact:true}).click();
+  await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).waitFor();
+  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'');
+  assert.equal(deleteCount(),2);
+  await page.getByRole('button',{name:'Close & keep draft',exact:true}).click();
+  await page.reload();
+  await page.getByRole('button',{name:'Open prescription',exact:true}).click();
+  await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).waitFor();
+  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'','Discarded name stays gone after reload');
+  await page.getByPlaceholder('Full name',{exact:true}).fill('Fresh Patient');
+  await page.getByRole('button',{name:'Close & keep draft',exact:true}).click();
+  await page.getByRole('button',{name:/Unfinished Rx.*Resume/}).click();
+  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'Fresh Patient','Resume shortcut retains work');
+  assert.deepEqual(errors,[]);await page.close();
+ }
+ console.log(`PASS ${engineName} saved name 5 requires explicit resume; failed discard preserves work; successful discard starts blank`);
  await browser.close(); browser=null;
 }
 }finally{await browser?.close();await server.close();}

@@ -1567,6 +1567,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
 
   const [touched, setTouched] = useState(false);
   const [discardConfirm, setDiscardConfirm] = useState(false);
+  const [draftChoiceMade, setDraftChoiceMade] = useState(false);
+  const [clearingDraft, setClearingDraft] = useState(false);
+  const [draftChoiceError, setDraftChoiceError] = useState("");
+  const clearingDraftRef = useRef(false);
   const [step, setStep] = useState(1); // 1 = Patient & Lab, 2 = Clinical, 3 = Logistics
 
   // Brief green confirmation on the card that was just added/updated.
@@ -1777,13 +1781,37 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       draftTouched || Object.keys(draft.selection).length
     );
 
+  // New Prescription must not silently become Resume. Keep the saved work
+  // intact until the user explicitly resumes it or discards it for a blank Rx.
+  useEffect(() => {
+    if (!open) { setDraftChoiceMade(false); setDraftChoiceError(""); }
+    else if (!hasDraft) setDraftChoiceMade(true);
+  }, [open, hasDraft]);
+
+  const startBlankPrescription = async () => {
+    if (clearingDraftRef.current) return;
+    clearingDraftRef.current = true;
+    setClearingDraft(true); setDraftChoiceError("");
+    try {
+      // Delete after all previously queued saves, and pause new autosaves.
+      // A failed deletion must not make the same draft reappear on reload.
+      draftWrites.current = draftWrites.current.catch(() => {}).then(() => userId ? deleteRxDraft(userId) : undefined);
+      await draftWrites.current;
+      reset(); setDraftChoiceMade(true);
+    } catch {
+      setDraftChoiceError("Couldn't discard the saved draft. Your work is still here. Check your connection and try again, or resume it.");
+    } finally {
+      clearingDraftRef.current = false; setClearingDraft(false);
+    }
+  };
+
   // Serialize writes so a slow save cannot resurrect a submitted/discarded draft.
   // Keep patient data in the existing protected server draft, not new browser storage.
   const draftJson = JSON.stringify(serializeRxDraft());
   const currentDraftJson = useRef(draftJson);
   currentDraftJson.current = draftJson;
   useEffect(() => {
-    if (!hasDraft || isEditing || !userId || submitting || formKind !== "new") return;
+    if (!hasDraft || isEditing || !userId || submitting || clearingDraft || formKind !== "new") return;
     if (draftJson === savedDraftJson) return;
     const timer = setTimeout(() => {
       setDraftStatus("saving");
@@ -1800,7 +1828,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       });
     }, open ? 900 : 0);
     return () => clearTimeout(timer);
-  }, [draftJson, savedDraftJson, hasDraft, isEditing, userId, submitting, formKind, open, defaultClinicId, draftRetry]);
+  }, [draftJson, savedDraftJson, hasDraft, isEditing, userId, submitting, clearingDraft, formKind, open, defaultClinicId, draftRetry]);
   useEffect(() => {
     const retry = () => setDraftRetry(n => n + 1);
     window.addEventListener("online", retry);
@@ -1841,7 +1869,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         <FileText size={15} className="shrink-0 text-blue-600" />
         <button
           type="button"
-          onClick={onResume}
+          onClick={() => { setDraftChoiceMade(true); onResume(); }}
           title={draftJson === savedDraftJson ? "Draft saved for 24 hours" : "Draft is open in this tab; saving is not yet confirmed"}
           className="min-w-0 truncate px-1 text-left text-sm font-semibold text-slate-700 hover:text-blue-700"
         >
@@ -1873,6 +1901,23 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         )}
       </div>
     );
+  }
+
+  if (!isEditing && formKind === "new" && hasDraft && !draftChoiceMade) {
+    return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="rx-draft-choice-title" className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+        <h3 id="rx-draft-choice-title" className="text-lg font-bold text-slate-800">Unfinished prescription found</h3>
+        <p className="mt-2 text-sm text-slate-600">You have an unfinished prescription. Resume it, or discard it to start a blank one.</p>
+        <p className="mt-3 break-words rounded-lg bg-slate-50 p-3 text-sm text-slate-700">Saved patient name: <strong>{patientName.trim() || "Not entered"}</strong></p>
+        {draftChoiceError && <p role="alert" className="mt-3 text-sm text-rose-700">{draftChoiceError}</p>}
+        <div className="mt-4 flex flex-col gap-2">
+          <button type="button" disabled={clearingDraft} onClick={startBlankPrescription} className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{clearingDraft ? "Clearing draft…" : "Discard draft & start blank"}</button>
+          <button type="button" disabled={clearingDraft} onClick={() => setDraftChoiceMade(true)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50">Resume saved draft</button>
+          <button type="button" disabled={clearingDraft} onClick={() => setFormKind("followup")} className="rounded-lg px-4 py-2 text-sm font-semibold text-blue-700 disabled:opacity-50">Follow-up existing case</button>
+          <button type="button" disabled={clearingDraft} onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-slate-500 disabled:opacity-50">Close</button>
+        </div>
+      </div>
+    </div>;
   }
 
   // Follow-up mode renders a wholly separate, isolated modal (no tooth chart /
