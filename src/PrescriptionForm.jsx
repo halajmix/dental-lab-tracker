@@ -1116,14 +1116,13 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
   // caller's own set (RLS-scoped); we just filter it here.
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return cases.slice(0, 8);
+    if (!q) return cases;
     return cases
       .filter((c) => {
         const lab = labById[c.labId]?.name ?? "";
         return [c.id, c.patientName, c.patientId, lab, caseWorkSummary(c)]
           .some((v) => String(v ?? "").toLowerCase().includes(q));
-      })
-      .slice(0, 20);
+      });
   }, [query, cases, labById]);
 
   const uploadOnePhoto = async (entryId, file) => {
@@ -1270,7 +1269,10 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
                   />
                 </div>
                 {touched && !parent && <p className="mt-1.5 text-xs font-semibold text-rose-600">Select the case this follow-up is for.</p>}
-                <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+                <p role="status" className="mt-2 text-xs text-slate-500">
+                  {query.trim() ? `${results.length} of ${cases.length} cases match` : `All ${cases.length} cases · active and completed`}
+                </p>
+                <div aria-label="Cases available for follow-up" className="mt-2 max-h-64 space-y-1 overflow-y-auto overscroll-contain">
                   {results.length === 0 ? (
                     <p className="py-6 text-center text-sm text-slate-400">No matching cases.</p>
                   ) : (

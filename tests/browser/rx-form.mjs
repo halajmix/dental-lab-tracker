@@ -105,6 +105,36 @@ for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
   assert.deepEqual(errors,[]);await page.close();
  }
  console.log(`PASS ${engineName} restored draft reaches all steps, submits self identity, locks controls, and closes`);
+ for(const viewport of [{width:1041,height:631},{width:390,height:844}]) {
+  const {page,errors}=await setup({viewport});
+  await page.getByRole('button',{name:'Follow-up existing case',exact:true}).click();
+  const list=page.getByLabel('Cases available for follow-up');
+  assert.equal(await list.getByRole('button').count(),35,'All cases, not just eight');
+  await page.getByText('All 35 cases · active and completed',{exact:true}).waitFor();
+  const search=page.getByPlaceholder('Search all cases — patient, ID, case #, lab (incl. completed)');
+  await search.fill('Fictional');
+  assert.equal(await list.getByRole('button').count(),35,'Search is not capped at twenty');
+  await search.fill('CASE-034');
+  assert.equal(await list.getByRole('button').count(),1);
+  await list.getByRole('button').click();
+  await page.getByText('Patient ID PATIENT-34 · Work complete',{exact:false}).waitFor();
+  await page.getByRole('button',{name:'Change',exact:true}).click();
+  assert.equal(await list.getByRole('button').count(),35);
+  const box=await list.boundingBox();
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.wheel(0,5000);await page.waitForTimeout(200);
+  assert.ok(await list.evaluate(e=>e.scrollTop>0),'Case list scrolls to older cases');
+  assert.equal(await page.evaluate(()=>window.scrollY),0);
+  await list.getByRole('button',{name:/CASE-035/}).click();
+  await page.getByText('Patient ID PATIENT-35 · In progress',{exact:false}).waitFor();
+  await page.getByRole('button',{name:'Change',exact:true}).click();
+  await search.fill('no-such-case');
+  await page.getByText('No matching cases.',{exact:true}).waitFor();
+  await search.fill('');
+  assert.equal(await list.getByRole('button').count(),35);
+  assert.deepEqual(errors,[]);await page.close();
+ }
+ console.log(`PASS ${engineName} all 35 follow-up cases browse/search/select, including older completed cases`);
  await browser.close(); browser=null;
 }
 }finally{await browser?.close();await server.close();}
