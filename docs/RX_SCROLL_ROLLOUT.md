@@ -16,3 +16,10 @@ Validation:
 Reproduce: `npm ci`, `npx playwright install chromium webkit`, then `RX_BROWSERS=chromium,webkit npm run test:rx-browser`.
 
 Release uses the current production public client configuration and retains prior hashed assets for open tabs. Previous Pages revision: `9c2b86c984ff225d32a35065a6e57d266149e564`. Roll back by restoring that website artifact; no database rollback is needed.
+
+Published and verified:
+- Source change `9b2bbe0`; Pages release `71d8266b5c383e51054c53b4e4b015b2975b9d83` completed successfully.
+- Live `/assets/index-DHIqlTVJ.js` and `/assets/index-Bt0enRuA.css` match the production build byte-for-byte by SHA-256.
+- Previous entry `/assets/index-BuHJW46u.js` remains available for already-open tabs.
+- Live login renders with no browser runtime errors. Authenticated clinical interactions were checked using the isolated fixture, not a production patient submission.
+- Both-engine regression suite also passes with the fixture in standards mode and an explicit mobile viewport meta tag.
