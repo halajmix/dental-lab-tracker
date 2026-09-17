@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { fetchClinicDentists, createClinicInvitation } from "./lib/data.js";
 
-export default function ClinicDentistPicker({ clinicId, userId, value, onChange, onValidity }) {
+export default function ClinicDentistPicker({ clinicId, userId, value, onChange, onValidity, autoSelectSelf = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -33,6 +33,14 @@ export default function ClinicDentistPicker({ clinicId, userId, value, onChange,
   useEffect(() => {
     onValidity(!loading && !error && rows.some((d) => d.id === value));
   }, [rows, value, loading, error, onValidity]);
+
+  // Legacy self-service dentists also have the clinic's internal admin role.
+  // Only collapse the picker when the active roster proves the signed-in
+  // dentist is its sole member; staff and multi-dentist clinics still choose.
+  const soleSelf = autoSelectSelf && userId && !loading && !error && rows.length === 1 && rows[0].user_id === userId ? rows[0] : null;
+  useEffect(() => {
+    if (soleSelf && value !== soleSelf.id) onChange(soleSelf.id, soleSelf.name);
+  }, [soleSelf, value, onChange]);
 
   useEffect(() => {
     setAdding(false); setNotice("");
@@ -78,6 +86,10 @@ export default function ClinicDentistPicker({ clinicId, userId, value, onChange,
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
   };
+
+  if (soleSelf) return <div className="sm:col-span-2 text-sm text-slate-600">
+    Treating dentist: <strong>{soleSelf.name}</strong>
+  </div>;
 
   return <div className="sm:col-span-2">
     <label htmlFor="treating-dentist" className="mb-1 block text-xs font-semibold text-slate-700">Treating dentist <span className="text-rose-500">*</span></label>

@@ -1455,6 +1455,15 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
 /* ================================================================== */
 
 export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId, authorName = "", cases = [], clinics = [], defaultClinicId = null, labAllowed = () => true }) {
+  // Keep wheel/touch scrolling inside the prescription, including follow-ups.
+  // Restore the page's existing styles when closing or unmounting the form.
+  useEffect(() => {
+    if (!open) return;
+    const elements = [document.documentElement, document.body];
+    const previous = elements.map((element) => element.style.overflow);
+    elements.forEach((element) => { element.style.overflow = "hidden"; });
+    return () => elements.forEach((element, index) => { element.style.overflow = previous[index]; });
+  }, [open]);
   const [formKind, setFormKind] = useState("new"); // "new" | "followup" — MUST stay above the !open early return
   const [notation, setNotation] = useState("FDI");
   const [mode, setMode] = useState("unit");
@@ -2345,9 +2354,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => { if (!submitLock.current) onClose(); }} />
-      <div className="relative z-10 flex w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92vh] sm:rounded-2xl">
+      <div role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 max-h-[100dvh] w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92dvh] sm:rounded-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white">
               <FileText size={18} />
@@ -2376,8 +2385,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           {hasDraft && draftStatus === "error" && <button type="button" className="ml-2 font-semibold text-blue-700 underline" onClick={() => setDraftRetry(n => n + 1)}>Retry draft save</button>}
           {unsavedFiles && <span className="block text-amber-700">Unfinished uploads are not protected by the draft. Retry or remove failed files before sending.</span>}
         </div>}
-        {/* Scroll body */}
-        <fieldset disabled={submitting} className="min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">
+        {/* Fieldset's anonymous content box does not reliably receive wheel
+            scrolling. A normal flex child owns scrolling; fieldset only
+            disables the controls while a submission is in progress. */}
+        <div data-rx-scroll className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-50/60">
+        <fieldset disabled={submitting} className="min-w-0 space-y-3 px-3 py-4 sm:px-5">
           {/* ---------------- STEP 1 · Patient & Lab ---------------- */}
           <Step
             n={1}
@@ -2403,6 +2415,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 </Field>
               )}
               {delegateRx && <ClinicDentistPicker key={sendingClinicId} clinicId={sendingClinicId} userId={userId} value={treatingDentistId}
+                autoSelectSelf={sendingRole === "admin"}
                 onChange={(id, name) => { setTreatingDentistId(id); setTreatingDentistName(name); }} onValidity={setDentistValid} />}
               {isEditing && editing.treatingDentistName && <div className="sm:col-span-2 text-sm text-slate-600">Treating dentist: <strong>{editing.treatingDentistName}</strong></div>}
               <Field label="Patient Name" required>
@@ -2993,10 +3006,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           </section>
           </Step>
         </fieldset>
+        </div>
 
         {/* Sticky summary + action bar — always in reach, never scrolls away */}
         {saveError && <p role="alert" className="bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-700">{saveError}</p>}
-        <div className={`border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
+        <div className={`shrink-0 border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
           {/* live order summary */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-2 text-[11px] sm:px-6">
             {caseMode === "restorations" ? (
