@@ -153,7 +153,6 @@ export const ARCH_CATEGORIES = [
   "Clear retainer",
   "Night guard",
   "Fixed retainer",
-  "Space maintainer",
   "Study model",
   "Special tray",
 ];
