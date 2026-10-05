@@ -144,18 +144,10 @@ const CATEGORIES = {
   "Others - refer to notes": { materials: ["Refer to notes"] },
 };
 
-// Appliances made per dental arch: the dentist picks Upper / Lower / Both and
-// the lab prices a single arch vs both arches separately (schema Phase 45).
-// The partial denture included — a complete denture is upper, lower, or both.
-export const ARCH_CATEGORIES = [
-  "Removable partial denture",
-  "Complete denture",
-  "Clear retainer",
-  "Night guard",
-  "Fixed retainer",
-  "Study model",
-  "Special tray",
-];
+// New prescriptions always use the tooth chart to describe their extent.
+// Keep this export empty for legacy readers that still import it; old cases
+// with an `arches` value continue to render through ARCH_LABELS below.
+export const ARCH_CATEGORIES = [];
 export const ARCH_LABELS = { upper: "Upper arch", lower: "Lower arch", both: "Both arches" };
 
 // Bridges always carry a pontic, so pontic design is always shown for these.

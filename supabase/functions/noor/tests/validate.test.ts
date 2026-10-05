@@ -27,9 +27,9 @@ test("1.5 notes shade contradicts field", () => {
   assert.ok(issues.some((i) => i.field === "notes_conflict" && /B1/.test(i.detail) && /A2/.test(i.detail)));
 });
 test("1.6 Shade by Lab needs no shade", () => { assert.deepEqual(validatePrescription(crown({ shadeGuide: "Shade by Lab", vitaShade: "" }) as never), []); });
-test("1.7 complete denture needs no teeth", () => {
-  const p = { prescription: { caseMode: "restorations", notation: "FDI", included: ["Upper impression", "Lower impression"], restorations: [{ category: "Complete denture", material: "Acrylic Complete Denture", shadeGuide: "Vita Classical", vitaShade: "A2", arches: "both" }] }, appointment_date: "2026-09-20", lab_shade: null };
-  assert.deepEqual(validatePrescription(p as never), []);
+test("1.7 complete denture requires tooth-chart selection", () => {
+  const p = { prescription: { caseMode: "restorations", notation: "FDI", included: ["Upper impression", "Lower impression"], restorations: [{ category: "Complete denture", material: "Acrylic Complete Denture", shadeGuide: "Vita Classical", vitaShade: "A2" }] }, appointment_date: "2026-09-20", lab_shade: null };
+  assert.ok(validatePrescription(p as never).some((i) => i.field === "teeth" && i.severity === "blocking"));
 });
 test("1.8 need-by before promise date", () => {
   const p = crown() as never as { prescription: Record<string, unknown>; appointment_date: string }; p.prescription.estReady = "2026-09-25"; p.appointment_date = "2026-09-18";

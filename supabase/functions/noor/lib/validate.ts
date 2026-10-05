@@ -14,11 +14,11 @@ export const CATEGORY_MATERIALS: Record<string, string[]> = {
   "Complete denture": ["Acrylic Complete Denture", "Acrylic Overdenture", "Immediate Denture", "Flexible (Nylon / Valplast)"],
   "Orthodontics splint": [], "Single layer splint - soft": [], "Double layer splint - soft": [],
   "Double layer splint - outer hard, inner soft": [], "Michigan splint": [], "Clear retainer": [],
-  "Night guard": [], "Fixed retainer": [], "Study model": [], "Special tray": [],
+  "Night guard": [], "Fixed retainer": [], "Space maintainer": [], "Study model": [], "Special tray": [],
   "Others - refer to notes": ["Refer to notes"],
 };
 export const SHADED_CATEGORIES = new Set(["Crown - tooth", "Crown - implant", "Bridge - tooth (conventional)", "Bridge - tooth (Resin Bonded)", "Bridge - implant", "Veneer", "Removable partial denture", "Complete denture"]);
-export const ARCH_CATEGORIES = new Set(["Removable partial denture", "Complete denture", "Orthodontics splint", "Single layer splint - soft", "Double layer splint - soft", "Double layer splint - outer hard, inner soft", "Michigan splint", "Clear retainer", "Night guard", "Study model", "Special tray"]);
+export const ARCH_CATEGORIES = new Set<string>();
 export const SHADE_GUIDES: Record<string, string[]> = {
   "Vita Classical": ["A1", "A2", "A3", "A3.5", "A4", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "C4", "D2", "D3", "D4"],
   "Vita 3D-Master": [], "Ivoclar Chromascop": [], "Bleach/Whitening": ["BL1", "BL2", "BL3", "BL4"], "Custom/Photo": [],
