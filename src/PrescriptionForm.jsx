@@ -138,6 +138,7 @@ const CATEGORIES = {
   "Clear retainer": { materials: [] },
   "Night guard": { materials: [] },
   "Fixed retainer": { materials: [] },
+  "Space maintainer": { materials: [] },
   "Study model": { materials: [] },
   "Special tray": { materials: [] },
   "Others - refer to notes": { materials: ["Refer to notes"] },
@@ -152,6 +153,7 @@ export const ARCH_CATEGORIES = [
   "Clear retainer",
   "Night guard",
   "Fixed retainer",
+  "Space maintainer",
   "Study model",
   "Special tray",
 ];
@@ -183,6 +185,7 @@ const SPLINT_CATEGORIES = [
   "Clear retainer",
   "Night guard",
   "Fixed retainer",
+  "Space maintainer",
   "Study model",
   "Special tray",
 ];

@@ -21,6 +21,7 @@ export const BASE_PRICE = {
   "Double layer splint - soft": 240,
   "Double layer splint - outer hard, inner soft": 320,
   "Michigan splint": 350,
+  "Space maintainer": 300,
   "Others - refer to notes": 300,
 };
 
