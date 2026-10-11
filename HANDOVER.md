@@ -172,9 +172,10 @@ the live page as the affected role before calling a deploy done.
 
 ## Known open issues (refreshed 2026-09-12)
 
-- **Noor false "overdue" flags.** Smile World has `tat = 5` and no
-  `procedure_tats`, so every case older than 5 days trips "overdue vs promise".
-  Data fix (per-procedure TATs in Lab Admin), not code. Blocks Noor go-live.
+- **Noor timing blocker resolved 2026-10-11.** Owner specified six calendar
+  days for Smile World's clinics, thirteen for Health Center. The pilot uses
+  total turnaround rather than assumed one/two-day intermediate stage SLAs;
+  stalled work is a separate flag. Later explicit promises are preserved.
 - **`SUPPORT_PHONE` in `PrintReceipt.jsx` is one constant**, so every lab prints
   the same phone number and none print their own `contact`.
 - **Patient-billed clinics are matched by name** (`PATIENT_BILLED_CLINICS` in
@@ -391,9 +392,10 @@ other-lab isolation and anonymous denial.
 
 ## Noor — the AI case coordinator (2026-09-11 → 12)
 
-**State:** live in **shadow mode** for Smile World only. It watches, decides
-and records; it sends and writes nothing. Two-week gate: review on or after
-**2026-09-26**, then decide go-live.
+**State (2026-10-11):** owner-authorized internal pilot is active for Smile
+World lab accounts. Other labs remain disabled and clinic accounts cannot ask
+Noor. All Noor email is off. Normal case-notify owns completion messages.
+See `docs/agents/noor/07-smile-world-pilot.md` for current scope and checks.
 
 | Piece | Where |
 |---|---|
@@ -403,25 +405,28 @@ and records; it sends and writes nothing. Two-week gate: review on or after
 | Schema | `20260911_noor_phase2_schema.sql`, `20260911_noor_phase2_jobs.sql`, `20260912_noor_trigger_hotfix.sql` — **all applied** |
 | Cron | `noor-watch-30min`, `noor-brief-hourly` (fires 07:30 in `labs.timezone`), `noor-patterns-weekly` |
 | Switches | `feature_flags.noor.global` (on) · `labs.noor_enabled` (Smile World) · function secret `NOOR_SHADOW` (unset = shadow; `false` = live) · `labs.escalation_user_id` (Tony Hannoun) |
-| Model | official SDK via `npm:@anthropic-ai/sdk`; answering `claude-opus-5`, phrasing `claude-haiku-4-5`; `ANTHROPIC_API_KEY` is a function secret (owner says set; unverified until a user question runs). Roles 2/3/6 never call a model |
+| Model | official SDK; both purposes use `claude-haiku-4-5-20251001`. Real provider checks passed 3/3. Atomic $2/day budget includes input, output and cache usage; no hidden retries. Scheduled monitoring does not call AI |
 | Evidence | `agent_runs.would_have` per run; `node scripts/health-check.mjs` has a Noor section — the `would have` line is the daily read |
 
-**Deploying the function:** no Supabase CLI login exists. Bundle to one file with
-esbuild (entry `index.ts`, esm, platform neutral, keep `npm:`/`jsr:` external,
-json loader — recipe in project memory) and paste into Edge Functions → `noor`
-→ Code. **Verify JWT must be OFF.** Then probe: unsigned POST → 401, wrong
-secret → 401, GET → 405.
+**Deploying:** CLI is authenticated. `supabase functions deploy noor
+--project-ref mtxkushcxczjwypwoxdh --no-verify-jwt --use-api`. The handler verifies
+JWT users or the webhook secret itself; do not remove that authentication.
 
-**Verification:** `npm run noor:test` (44), `npm run noor:ui` (8),
+**Verification:** `npm run noor:test` (54), `npm run noor:ui` (9),
 `npm run noor:check` (schemas + prompt == docs), `npm run noor:evals`
-(14 code-path fixtures; 3 model scenarios skip without a key),
+(14 code-path fixtures; model scenarios are explicitly skipped offline),
+`NOOR_EVAL_LAB_ID=<pilot lab UUID> npm run noor:live-evals` (3 synthetic scenarios
+against the deployed provider; billable, no patient records or emails),
+`PGLITE_MODULE=<installed module> node tests/noorPilotDatabase.mjs` (budget,
+rate limits, privileges and unique escalation constraints),
 `supabase/tests/test_noor.sql` (RLS matrix + the trigger regression, Docker).
 
-**Go-live checklist (owner + dev):** per-procedure TATs set in Lab Admin →
-`would have` output reads true for a few days → gate metrics in
-`docs/agents/noor/06-rollout-plan.md` → DPA for case data → Anthropic signed →
-set `NOOR_SHADOW=false` → probe a real write within a minute → watch the first
-live tick. Roll back = flag off (one row) or the secret removed.
+**Pilot controls:** additive migration `20261011_noor_pilot.sql` is applied.
+`noor_pilot_settings` has per-trigger live/shadow modes, email opt-in, timings,
+and budget. Global `NOOR_SHADOW=false` does not activate an unconfigured trigger.
+Rollback: set `NOOR_SHADOW=true` or turn off `feature_flags.noor.global`.
+Broader clinic/general rollout still requires a separate decision based on
+observed usefulness, correct answers, zero access leaks and zero duplicate sends.
 
 **Design decisions to respect:** Noor reads under the caller's JWT so RLS
 decides visibility; the model never sees a tenant id it did not get from a

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, AlertTriangle, Clock, MessageSquareWarning, Send, Loader2, Check, CheckCheck, Inbox, Flag } from "lucide-react";
-import { answerNoorClarification, askNoor, composeNoorBriefClient, setNoorEscalationStatus } from "./lib/data.js";
+import { answerNoorClarification, askNoor, composeNoorBriefClient, setNoorEscalationStatus,fetchNoorStatus,rateNoorAnswer } from "./lib/data.js";
 
 /**
  * Noor — the in-app surfaces for the AI case coordinator.
@@ -107,6 +107,12 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [thread, setThread] = useState([]); // {role:'user'|'noor', text, traceId?}
+  const [feedbackError,setFeedbackError]=useState('');
+  const feedback=async(index,rating)=>{
+    setFeedbackError('');
+    try{await rateNoorAnswer(thread[index].traceId,rating);setThread(t=>t.map((m,i)=>i===index?{...m,rating}:m));}
+    catch(e){setFeedbackError(e.message);}
+  };
   const endRef = useRef(null);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [thread]);
 
@@ -118,7 +124,7 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
     setThread((t) => [...t, { role: "user", text }]);
     try {
       const r = await askNoor(text, { caseId });
-      setThread((t) => [...t, { role: "noor", text: r.answer, traceId: r.traceId }]);
+      setThread((t) => [...t, { role: "noor", text: r.answer, traceId: r.traceId,error:r.outcome==='failed'||r.outcome==='killed' }]);
     } catch (err) {
       setThread((t) => [...t, { role: "noor", text: err.message, error: true }]);
     } finally {
@@ -128,6 +134,7 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white">
+      <NoorPilotStatus />
       <div className="flex items-center gap-2 border-b border-slate-100 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-400">
         <Sparkles size={13} className="text-violet-500" /> Ask Noor
         <span className="ml-auto text-[10px] font-medium normal-case tracking-normal text-slate-400">AI assistant · answers only from your cases</span>
@@ -140,8 +147,12 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
                 dir={/[؀-ۿ]/.test(m.text) ? "rtl" : "ltr"}
                 className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${m.role === "user" ? "bg-slate-800 text-white" : m.error ? "bg-rose-50 text-rose-700" : "bg-violet-50 text-slate-800"}`}
               >
-                {m.text}
-                {m.traceId && <div className="mt-1 text-[10px] text-slate-400" dir="ltr">ref {m.traceId}</div>}
+                {m.role==='noor'?String(m.text).replace(/\*\*(.*?)\*\*/g,'$1'):m.text}
+                {m.traceId && <div className="mt-2 flex gap-3 text-xs" dir="ltr">
+                  <button type="button" onClick={()=>feedback(i,'helpful')} className={m.rating==='helpful'?'font-bold text-emerald-700':'text-slate-500'} aria-label="Mark Noor answer helpful">Helpful</button>
+                  <button type="button" onClick={()=>feedback(i,'wrong')} className={m.rating==='wrong'?'font-bold text-rose-700':'text-slate-500'} aria-label="Report wrong Noor answer">Something is wrong</button>
+                  {m.rating&&<span className="text-slate-500">Feedback saved</span>}
+                </div>}
               </div>
             </div>
           ))}
@@ -149,6 +160,8 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
           <div ref={endRef} />
         </div>
       )}
+      {!thread.length&&<div className="flex flex-wrap gap-2 px-3 pt-3">{['What needs attention today?','Which cases are overdue?','Summarise my open follow-ups.'].map(text=><button key={text} type="button" onClick={()=>setQ(text)} className="rounded-full bg-violet-50 px-3 py-1.5 text-xs text-violet-700">{text}</button>)}</div>}
+      {feedbackError&&<p role="alert" className="px-3 text-xs text-rose-700">{feedbackError}</p>}
       <form onSubmit={ask} className="flex gap-2 p-3">
         <input
           value={q}
@@ -165,16 +178,35 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
   );
 }
 
+export function NoorPilotStatus() {
+  const [status,setStatus]=useState(null),[error,setError]=useState('');
+  useEffect(()=>{let active=true;const load=()=>fetchNoorStatus().then(s=>{if(active){setStatus(s);setError('');}}).catch(e=>{if(active)setError(e.message);});load();const timer=setInterval(load,60000);return()=>{active=false;clearInterval(timer);};},[]);
+  const mode=error?'Status unavailable':!status?'Checking Noor…':status.usage.paused?'AI questions paused':status.mode==='pilot'?'Smile World pilot active':status.enabled?'Noor is observing':'Noor is off';
+  const stamp=status?.last_watch?.finished_at;
+  const stale=stamp&&Date.now()-new Date(stamp).getTime()>45*60000;
+  return <div className="border-b border-violet-100 bg-violet-50 p-3 text-xs text-slate-700" role="status">
+    <div className="font-bold text-violet-800">{mode}</div>
+    {status&&<><p className="mt-1">Ask about your cases, due work, and follow-ups. {status.emails_enabled?'Email enabled.':'Noor emails are off; your normal case notifications continue.'}</p>
+      <p className="mt-1">{stamp?`Case check: ${new Date(stamp).toLocaleString('en-GB',{timeZone:'Asia/Muscat',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} Oman time${stale?' · monitoring delayed':''}`:'Waiting for the first case check.'}</p>
+      <p className="mt-1">Estimated AI today: ${Number(status.usage.spent_usd).toFixed(4)} of ${Number(status.budget_usd).toFixed(2)} daily limit · {status.feedback.helpful} helpful / {status.feedback.wrong} reported wrong.</p>
+      {Number(status.usage.reserved_usd)>0&&<p className="mt-1">${Number(status.usage.reserved_usd).toFixed(4)} held for ongoing or unconfirmed requests.</p>}
+      {status.usage.paused&&<p className="mt-1">Questions resume tomorrow. Case monitoring continues.</p>}
+      {status.recent.some(r=>r.outcome==='failed'||r.fallback_reason)&&<p className="mt-1 text-amber-800">A recent AI request needed attention. Please use “Something is wrong” if an answer is unhelpful.</p>}
+    </>}
+    {error&&<p className="mt-1 text-rose-700">{error}</p>}
+  </div>;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Today's brief — the lab dashboard card                               */
 /* ------------------------------------------------------------------ */
 
-export function NoorBriefCard({ cases, flags, clarifications, escalations, clinicsById, onOpenCase }) {
+export function NoorBriefCard({ cases, flags, clarifications, escalations, clinicsById, onOpenCase,rounds=[],lab=null }) {
   const today = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }, []);
-  const brief = useMemo(() => composeNoorBriefClient({ cases, flags, clarifications, escalations, today }), [cases, flags, clarifications, escalations, today]);
+  const brief = useMemo(() => composeNoorBriefClient({ cases, flags, clarifications, escalations, today,rounds,lab }), [cases, flags, clarifications, escalations, today,rounds,lab]);
   const Row = ({ c, note }) => (
     <button onClick={() => onOpenCase?.(c.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50">
       <span className="font-semibold text-slate-800">{c.id}</span>
@@ -291,7 +323,7 @@ export function NoorEscalationInbox({ escalations, loading, onChanged, onOpenCas
 export function NoorStatusPill() {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-bold text-violet-700" title="Noor, the AI case coordinator, is watching this lab's cases">
-      <Sparkles size={11} /> Noor on
+      <Sparkles size={11} /> Noor pilot
     </span>
   );
 }

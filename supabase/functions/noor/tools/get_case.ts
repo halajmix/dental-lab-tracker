@@ -1,6 +1,7 @@
 import type { CaseRow, CaseSummary, ToolContext } from "../lib/types.ts";
 import { toCaseSummary } from "../lib/redact.ts";
 import { isClinicCaller } from "../authz.ts";
+import {pilotSummary} from '../pilot.ts';
 
 /** Loads a case and everything the summary needs, through the caller's RLS. */
 export async function loadSummary(ctx: ToolContext, caseId: string, includePatient: boolean): Promise<{ row: CaseRow; summary: CaseSummary } | null> {
@@ -26,7 +27,7 @@ export async function loadSummary(ctx: ToolContext, caseId: string, includePatie
     openRounds: rounds.data ?? [], openFlags: visibleFlags.map(({ kind, reason }) => ({ kind, reason })),
     openClarification: clar.data ?? null,
   });
-  return { row: r, summary };
+  return { row: r, summary:pilotSummary(r,summary,ctx.pilot,ctx.now) };
 }
 
 export async function getCase(input: { case_id: string; include_patient?: boolean }, ctx: ToolContext): Promise<CaseSummary | null> {

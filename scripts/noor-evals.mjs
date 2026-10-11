@@ -1,7 +1,7 @@
 // Eval harness for docs/agents/noor/05-evals.md. Fixtures live in
 // docs/agents/noor/evals/*.json. Code-path scenarios run offline; model
-// scenarios run only with ANTHROPIC_API_KEY and @anthropic-ai/sdk present,
-// and are reported as SKIPPED otherwise — never silently passed.
+// scenarios are explicitly SKIPPED offline; npm run noor:live-evals runs
+// real-provider synthetic scenarios through the deployed budget/auth controls.
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -40,7 +40,7 @@ for (const f of readdirSync(dir).filter((x) => x.endsWith(".json")).sort()) {
       const b = composeBrief(s.input);
       results.push(check(s.id, Object.entries(s.expect).every(([k, v]) => JSON.stringify(b[k].map((x) => x.case_id ?? x)) === JSON.stringify(v)), JSON.stringify(Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v.length])))));
     } else if (s.kind === "runner") {
-      results.push({ name: s.id, pass: null, why: "model scenario — run with ANTHROPIC_API_KEY and @anthropic-ai/sdk installed (see README)" });
+      results.push({ name: s.id, pass: null, why: "model scenario — run NOOR_EVAL_LAB_ID=<pilot lab UUID> npm run noor:live-evals" });
     }
   } catch (e) { results.push(check(s.id, false, e.message)); }
 }

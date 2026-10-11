@@ -3,6 +3,7 @@ import { assertCanAct, loadCaseForAuthz } from "../authz.ts";
 import { loadSummary } from "./get_case.ts";
 import { renderStatus } from "../lib/templates.ts";
 import { sendEmail } from "../../_shared/email.ts";
+import {emailAllowed} from '../pilot.ts';
 
 export async function requestClarification(input: { case_id: string; issue: Issue; question: string; language: Language }, ctx: ToolContext): Promise<{ clarification_id: string; asked_at: string }> {
   const row = await loadCaseForAuthz(ctx, input.case_id);
@@ -23,7 +24,7 @@ export async function requestClarification(input: { case_id: string; issue: Issu
     ctx.admin.from("clinics").select("email,language").eq("id", row.clinic_id).maybeSingle(),
     loadSummary({ ...ctx, caller: { kind: "system", jobLabId: row.lab_id ?? undefined, language: input.language, timezone: ctx.caller.timezone } }, row.id, false),
   ]);
-  if (clinic?.email && loaded) {
+  if (clinic?.email && loaded && emailAllowed(ctx)) {
     const r = renderStatus("clarification_request", loaded.summary, (clinic.language as Language) ?? input.language, { question: input.question });
     await sendEmail({ to: clinic.email, subject: r.subject, html: r.html, idempotencyKey: `noor-clar-${data.id}` }, ctx.resendKey);
   }

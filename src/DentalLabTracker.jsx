@@ -1494,7 +1494,7 @@ export default function DentalLabTracker({ auth }) {
   const printCase = cases.find((c) => c.id === printCaseId) || null;
   const invoiceCase = cases.find((c) => c.id === invoiceCaseId) || null;
   // Noor lookups. The lab's flag gates every Noor surface; RLS already scoped the rows.
-  const noorOn = !isDentist ? !!lab?.noorEnabled : cases.some((c) => labById[c.labId]?.noorEnabled);
+  const noorOn = !isDentist && !!lab?.noorEnabled; // Internal lab pilot; clinic-facing Noor is not released.
   const noorFlagsByCase = useMemo(() => {
     const m = {};
     for (const f of noorState.flags) (m[f.caseId] ??= []).push(f);
@@ -2529,7 +2529,7 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, noor = null, onAdv
 
       {/* Noor's brief — the same sections as the morning email, live */}
       {noor && (
-        <NoorBriefCard cases={queue} flags={noor.flags} clarifications={noor.clarifications} escalations={noor.escalations} clinicsById={clinicsById} onOpenCase={onOpenCase} />
+        <NoorBriefCard lab={lab} rounds={rounds} cases={queue} flags={noor.flags} clarifications={noor.clarifications} escalations={noor.escalations} clinicsById={clinicsById} onOpenCase={onOpenCase} />
       )}
 
       {/* Delivery pressure first: everything due within 72h (or overdue),

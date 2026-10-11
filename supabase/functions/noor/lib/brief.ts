@@ -9,8 +9,9 @@ export interface BriefInput {
   cancellationRequests: string[];   // case ids with cancel_status='requested'
 }
 export function composeBrief(i: BriefInput): BriefSections {
-  const due_today = i.openCases.filter((c) => c.need_by_date === i.today || c.promise_date === i.today);
-  const overdue = i.openCases.filter((c) => c.open_flags.some((f) => f.kind === "overdue") || (c.need_by_date !== null && c.need_by_date < i.today && c.stage !== "WORK_COMPLETE"));
+  const returning=(c:CaseSummary)=>['WORK_COMPLETE','CLINIC_RECEIVED'].includes(c.stage)&&c.open_rounds.length>0;
+  const due_today = i.openCases.filter((c) => (!returning(c)&&c.need_by_date === i.today) || c.promise_date === i.today);
+  const overdue = i.openCases.filter((c) => c.open_flags.some((f) => f.kind === "overdue") || (!returning(c)&&c.need_by_date !== null && c.need_by_date < i.today && c.stage !== "WORK_COMPLETE"&&c.stage!=='CLINIC_RECEIVED'));
   const awaiting_clarification = i.openCases.filter((c) => c.open_clarification !== null);
   const needs_decision: BriefSections["needs_decision"] = [];
   for (const e of i.openEscalations) needs_decision.push({ case_id: e.case_id ?? "—", what: `open escalation (${e.category.replace(/_/g, " ")})` });

@@ -5,9 +5,11 @@ export async function flagCaseRisk(input: { case_id: string; kind: FlagKind; rea
   const row = await loadCaseForAuthz(ctx, input.case_id);
   assertCanAct(ctx.caller, row);
   if (ctx.shadow) { ctx.wouldHave.push({ tool: "flag_case_risk", input }); return { flag_id: "shadow", created: true }; }
-  const { data: existing } = await ctx.admin.from("case_flags").select("id").eq("case_id", row.id).eq("kind", input.kind).is("resolved_at", null).maybeSingle();
+  const { data: existing,error:readError } = await ctx.admin.from("case_flags").select("id").eq("case_id", row.id).eq("kind", input.kind).is("resolved_at", null).maybeSingle();
+  if(readError) throw new Error('Existing case flags could not be checked');
   if (existing) {
-    await ctx.admin.from("case_flags").update({ reason: input.reason, visible_to: input.visible_to, days_over: input.days_over ?? null }).eq("id", existing.id);
+    const {error}=await ctx.admin.from("case_flags").update({ reason: input.reason, visible_to: input.visible_to, days_over: input.days_over ?? null }).eq("id", existing.id);
+    if(error) throw new Error('Case flag could not be updated');
     return { flag_id: existing.id, created: false };
   }
   const { data, error } = await ctx.admin.from("case_flags").insert({ case_id: row.id, kind: input.kind, reason: input.reason, visible_to: input.visible_to, days_over: input.days_over ?? null, trace_id: ctx.traceId }).select("id").single();
@@ -17,5 +19,6 @@ export async function flagCaseRisk(input: { case_id: string; kind: FlagKind; rea
 
 export async function resolveFlag(ctx: ToolContext, caseId: string, kind: FlagKind): Promise<void> {
   if (ctx.shadow) { ctx.wouldHave.push({ tool: "resolve_flag", input: { caseId, kind } }); return; }
-  await ctx.admin.from("case_flags").update({ resolved_at: ctx.now.toISOString() }).eq("case_id", caseId).eq("kind", kind).is("resolved_at", null);
+  const {error}=await ctx.admin.from("case_flags").update({ resolved_at: ctx.now.toISOString() }).eq("case_id", caseId).eq("kind", kind).is("resolved_at", null);
+  if(error) throw new Error('Case flag could not be resolved');
 }

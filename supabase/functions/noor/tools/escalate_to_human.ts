@@ -2,6 +2,7 @@ import type { Language, ToolContext } from "../lib/types.ts";
 import { loadCaseForAuthz, assertCanAct } from "../authz.ts";
 import { renderEscalation, type EscalationCtx } from "../lib/templates.ts";
 import { sendEmail } from "../../_shared/email.ts";
+import {emailAllowed} from '../pilot.ts';
 
 /** G6: labs.escalation_user_id → owner_id → first active lab_admin → platform admin. */
 export async function resolveManager(ctx: ToolContext, labId: string | null): Promise<{ userId: string | null; name: string; email: string | null }> {
@@ -36,14 +37,24 @@ export async function escalateToHuman(input: { case_id?: string; category: strin
   } else if (ctx.caller.kind === "user" && !labId && ctx.caller.clinicIds?.length) clinicId = ctx.caller.clinicIds[0];
   const mgr = await resolveManager(ctx, labId);
   if (ctx.shadow) { ctx.wouldHave.push({ tool: "escalate_to_human", input: { ...input, assigned_to: mgr.name } }); return { escalation_id: "shadow", assigned_to_name: mgr.name }; }
+  if(input.case_id) {
+    const {data:existing,error:readError}=await ctx.admin.from('escalations').select('id,assigned_to_name').eq('case_id',input.case_id).eq('lab_id',labId).eq('category',input.category).neq('status','resolved').limit(1).maybeSingle();
+    if(readError) throw new Error('Escalation inbox could not be checked');
+    if(existing) return {escalation_id:`esc_${String(existing.id).slice(0,4)}`,assigned_to_name:existing.assigned_to_name??mgr.name};
+  }
   const { data, error } = await ctx.admin.from("escalations").insert({
     case_id: input.case_id ?? null, lab_id: labId, clinic_id: clinicId, category: input.category, summary: input.summary,
     context: input.context, assigned_to: mgr.userId, assigned_to_name: mgr.name, trace_id: ctx.traceId,
   }).select("id").single();
+  if(error?.code==='23505'&&input.case_id) {
+    const {data:other}=await ctx.admin.from('escalations').select('id,assigned_to_name').eq('case_id',input.case_id).eq('category',input.category).neq('status','resolved').limit(1).maybeSingle();
+    if(other) return {escalation_id:`esc_${String(other.id).slice(0,4)}`,assigned_to_name:other.assigned_to_name??mgr.name};
+  }
   if (error) throw new Error(`escalate_to_human: ${error.message}`);
   const shortId = `esc_${String(data.id).slice(0, 4)}`;
-  if (input.case_id) await ctx.admin.from("case_notes").insert({ case_id: input.case_id, author_name: "Noor", author_role: "agent", body: `Noor: escalated to ${mgr.name} (${shortId}) — ${input.context.stop_reason}`.slice(0, 300) });
-  if (mgr.email) {
+  // Internal pilot alerts belong in the lab inbox, not clinic-visible notes.
+  if (input.case_id && !ctx.labOnly) await ctx.admin.from("case_notes").insert({ case_id: input.case_id, author_name: "Noor", author_role: "agent", body: `Noor: escalated to ${mgr.name} (${shortId}) — ${input.context.stop_reason}`.slice(0, 300) });
+  if (mgr.email && emailAllowed(ctx)) {
     const r = renderEscalation(shortId, input.case_id ?? null, input.category, input.summary, input.context, input.language ?? "en", caseLine);
     await sendEmail({ to: mgr.email, subject: r.subject, html: r.html, idempotencyKey: `noor-esc-${data.id}` }, ctx.resendKey);
   }

@@ -2105,7 +2105,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         ? Math.max(...restorations.map((r) => procTat(r.category)))
         : lab?.tat ?? 0
       : procTat(category);
-  const effTat = baseTat;
+  const effTat = Number(lab?.turnaroundByClinic?.[selectedClinicId || defaultClinicId]) || baseTat;
   const today = new Date();
   const estReady = lab ? addDays(today, effTat) : null;
   const insufficientTime =

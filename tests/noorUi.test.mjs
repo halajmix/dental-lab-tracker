@@ -49,6 +49,16 @@ process.on("beforeExit", () => setTimeout(() => process.exit(process.exitCode ??
 setTimeout(() => process.exit(process.exitCode ?? 0), 15_000).unref();
 const h = React.createElement;
 
+test('pilot brief uses 13 days and restarts returned work instead of its old appointment',()=>{
+ const lab={tat:6,turnaroundByClinic:{health:13}};
+ const cases=[{id:'C-HEALTH',clinicId:'health',stageIndex:1,createdDate:'2026-10-01',prescription:{estReady:'2026-10-06'}},
+ {id:'C-RETURN',clinicId:'health',stageIndex:4,createdDate:'2026-09-01',appointmentDate:'2026-09-15',prescription:{}}];
+ const base={cases,lab,flags:[],clarifications:[],escalations:[],rounds:[{parentCaseId:'C-RETURN',status:'open',createdAt:'2026-10-06T07:00:00Z'}]};
+ assert.deepEqual(composeNoorBriefClient({...base,today:'2026-10-11'}).overdue,[]);
+ assert.deepEqual(composeNoorBriefClient({...base,today:'2026-10-14'}).dueToday.map(c=>c.id),['C-HEALTH']);
+ assert.deepEqual(composeNoorBriefClient({...base,today:'2026-10-19'}).dueToday.map(c=>c.id),['C-RETURN']);
+});
+
 const flags = [
   { id: "f1", caseId: "C-A", kind: "overdue", reason: "work complete was expected by 10 Sep", visibleTo: "lab", daysOver: 3 },
   { id: "f2", caseId: "C-A", kind: "stale", reason: "no activity for 5 days", visibleTo: "lab" },

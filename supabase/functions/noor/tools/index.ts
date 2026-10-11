@@ -12,12 +12,13 @@ import { getRemakePatterns } from "./get_remake_patterns.ts";
 import { composeDailyBrief } from "./compose_daily_brief.ts";
 import { escalateToHuman } from "./escalate_to_human.ts";
 import { addCaseNote } from "./add_case_note.ts";
+import {validateToolInput} from '../lib/tool-schema.ts';
 
 type Impl = (input: any, ctx: ToolContext) => Promise<unknown>;
 
 /* Registry. The model sees definitions from schemas.json (the committed copy
    of docs/agents/noor/03-tools.json — CI asserts they are identical) with
-   strict:true, so tool inputs are schema-valid before they reach an impl. */
+   backend validation before every implementation call. */
 const IMPL: Record<string, Impl> = {
   get_case: getCase, list_cases: listCases, validate_prescription: validatePrescriptionTool,
   request_clarification: requestClarification, get_turnaround_benchmark: getTurnaroundBenchmark,
@@ -53,6 +54,9 @@ export const liveExecutor: ToolExecutor = {
   async execute(name, input, ctx) {
     const impl = IMPL[name];
     if (!impl) throw new Error(`unknown tool ${name}`);
+    const definition=toolDefinitions([name])[0];
+    if(!definition) throw new Error(`missing tool schema ${name}`);
+    validateToolInput(definition.input_schema,input);
     return impl(input, ctx);
   },
 };

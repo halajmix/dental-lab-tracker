@@ -14,6 +14,7 @@ export interface BenchmarkInput {
   openRoundAt?: string | null;       // newest OPEN follow-up round — the clinic sent the case back
   now: Date;
   staleDays: number;
+  minimumTatPromise?: boolean;
   atRiskWindowDays?: number;         // default 1
 }
 export interface StageExpectation { stage: Stage; expected_by: string; status: StageStatus }
@@ -46,7 +47,9 @@ export function effectiveTat(rx: CaseRow["prescription"], procedureTats: Record<
 export function benchmark(i: BenchmarkInput): BenchmarkResult {
   const created = i.row.created_date;
   const { days: tat, source } = effectiveTat(i.row.prescription, i.procedureTats, i.labTat);
-  const promise = i.row.prescription?.estReady ?? (source === "none" ? null : addDays(created, tat));
+  const defaultPromise=source==='none'?null:addDays(created,tat);
+  const storedPromise=i.row.prescription?.estReady??null;
+  const promise=i.minimumTatPromise&&defaultPromise?(!storedPromise||storedPromise<defaultPromise?defaultPromise:storedPromise):storedPromise??defaultPromise;
   const today = isoDate(i.now);
   const window = i.atRiskWindowDays ?? 1;
   // A finished case with an open follow-up is back in production. The lab
@@ -59,8 +62,9 @@ export function benchmark(i: BenchmarkInput): BenchmarkResult {
   const effectivePromise = returning ? addDays(roundDay!, Math.max(tat, 1)) : promise;
   const expected: Record<Stage, string | null> = {
     STILL_AT_CLINIC: created,
-    PICKED_UP_BY_LAB: returning ? roundDay : addDays(created, 1),
-    WORK_IN_PROGRESS: returning ? addDays(roundDay!, 1) : addDays(created, 2),
+    // Pilot promises specify total turnaround, not separate one/two-day SLAs.
+    PICKED_UP_BY_LAB: i.minimumTatPromise ? effectivePromise : returning ? roundDay : addDays(created, 1),
+    WORK_IN_PROGRESS: i.minimumTatPromise ? effectivePromise : returning ? addDays(roundDay!, 1) : addDays(created, 2),
     WORK_COMPLETE: effectivePromise,
     CLINIC_RECEIVED: i.row.appointment_date ?? effectivePromise,
   };

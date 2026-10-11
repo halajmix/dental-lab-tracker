@@ -1,16 +1,18 @@
 import type { ToolContext } from "../lib/types.ts";
 import { benchmark } from "../lib/benchmark.ts";
 import { loadCaseForAuthz, assertCanAct } from "../authz.ts";
+import {pilotSettings,pilotTat} from '../pilot.ts';
 
 export const STALE_DAYS_DEFAULT = 5;
 
 /** Newest activity of any kind, plus the newest OPEN round if the clinic sent the case back. */
 export async function activity(ctx: ToolContext, caseId: string, history: Array<{ at: string }> | undefined): Promise<{ last: string | null; openRoundAt: string | null }> {
   const [notes, rounds, open] = await Promise.all([
-    ctx.admin.from("case_notes").select("created_at").eq("case_id", caseId).order("created_at", { ascending: false }).limit(1),
+    ctx.admin.from("case_notes").select("created_at").eq("case_id", caseId).neq('author_role','agent').order("created_at", { ascending: false }).limit(1),
     ctx.admin.from("case_rounds").select("created_at").eq("parent_case_id", caseId).order("created_at", { ascending: false }).limit(1),
     ctx.admin.from("case_rounds").select("created_at").eq("parent_case_id", caseId).eq("status", "open").order("created_at", { ascending: false }).limit(1),
   ]);
+  if(notes.error||rounds.error||open.error) throw new Error('Case activity could not be checked');
   const candidates = [history?.at(-1)?.at, notes.data?.[0]?.created_at, rounds.data?.[0]?.created_at].filter(Boolean) as string[];
   return { last: candidates.length ? candidates.sort().at(-1)! : null, openRoundAt: open.data?.[0]?.created_at ?? null };
 }
@@ -21,6 +23,7 @@ export async function getTurnaroundBenchmark(input: { case_id: string }, ctx: To
   assertCanAct(ctx.caller, row);
   const { data: lab } = row.lab_id ? await ctx.admin.from("labs").select("tat,procedure_tats").eq("id", row.lab_id).maybeSingle() : { data: null };
   const { last, openRoundAt } = await activity(ctx, row.id, row.history);
-  const b = benchmark({ row, procedureTats: lab?.procedure_tats ?? {}, labTat: lab?.tat ?? 0, lastActivityAt: last, openRoundAt, now: ctx.now, staleDays: STALE_DAYS_DEFAULT });
+  const settings=ctx.pilot??await pilotSettings(ctx.admin,row.lab_id);
+  const b = benchmark({ row, minimumTatPromise:!!settings, procedureTats: settings?{}:lab?.procedure_tats ?? {}, labTat: pilotTat(settings,row.clinic_id,lab?.tat??0), lastActivityAt: last, openRoundAt, now: ctx.now, staleDays: STALE_DAYS_DEFAULT });
   return { effective_tat_days: b.effective_tat_days, promise_date: b.promise_date, per_stage: b.per_stage, source: b.source };
 }

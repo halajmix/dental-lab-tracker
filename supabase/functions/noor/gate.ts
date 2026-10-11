@@ -23,11 +23,9 @@ export async function claimIdempotency(admin: Db, key: string): Promise<boolean>
 
 export async function withinRateLimit(admin: Db, scope: string, limit: number, windowMs: number, now: Date): Promise<boolean> {
   const windowStart = new Date(Math.floor(now.getTime() / windowMs) * windowMs).toISOString();
-  const { data } = await admin.from("noor_rate_limits").select("count").eq("scope", scope).eq("window_start", windowStart).maybeSingle();
-  const count = (data?.count ?? 0) + 1;
-  if (count > limit) return false;
-  await admin.from("noor_rate_limits").upsert({ scope, window_start: windowStart, count }, { onConflict: "scope,window_start" });
-  return true;
+  if(!admin.rpc) return false;
+  const {data,error}=await admin.rpc('noor_take_rate',{p_scope:scope,p_start:windowStart,p_limit:limit});
+  return !error && data===true;
 }
 
 export const idempotencyKeyFor = (trigger: string, parts: Array<string | number | null | undefined>): string =>

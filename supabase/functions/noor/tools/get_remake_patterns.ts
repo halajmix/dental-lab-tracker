@@ -10,8 +10,8 @@ export async function getRemakePatterns(input: { lab_id: string; period_days: 30
     ctx.admin.from("cases").select("id,clinic_id,created_at,remake").eq("lab_id", input.lab_id).gte("created_at", since),
     ctx.admin.from("clinics").select("id,name"),
   ]);
-  const caseClinic = new Map((cases.data ?? []).map((c: { id: string; clinic_id: string }) => [c.id, c.clinic_id]));
-  const clinicName = new Map((clinics.data ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
+  const caseClinic = new Map<string,string>((cases.data ?? []).map((c: { id: string; clinic_id: string }) => [c.id, c.clinic_id]));
+  const clinicName = new Map<string,string>((clinics.data ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
   const records: RemakeRecord[] = [];
   for (const r of (rounds.data ?? []) as Array<{ parent_case_id: string; reason_class: RemakeRecord["reason_class"]; reason_code: string; created_at: string }>) {
     const clinicId = caseClinic.get(r.parent_case_id); if (!clinicId) continue;

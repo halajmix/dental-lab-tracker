@@ -11,6 +11,7 @@
     "noor:test": "node --test 'supabase/functions/noor/tests/*.test.ts'",
     "noor:check": "node scripts/noor-check-schemas.mjs",
     "noor:evals": "node scripts/noor-evals.mjs",
+    "noor:live-evals": "node scripts/noor-live-evals.mjs",
     "noor:ui": "node --test tests/noorUi.test.mjs",
     "test:rx-browser": "node tests/browser/rx-form.mjs"
   },

@@ -119,7 +119,7 @@ export type StageStatus = "on_track" | "at_risk" | "overdue" | "done";
 /** Minimal supabase-js surface the tools use; typed loosely on purpose so the
     Node test runner can substitute fixtures without importing the SDK. */
 // deno-lint-ignore no-explicit-any
-export type Db = { from: (table: string) => any };
+export type Db = { from: (table: string) => any; rpc?: any };
 
 export interface ToolContext {
   caller: Caller;
@@ -129,6 +129,9 @@ export interface ToolContext {
   now: Date;
   traceId: string;
   resendKey?: string;
+  emailsEnabled?: boolean;
+  labOnly?: boolean;
+  pilot?: import('../pilot.ts').PilotSettings|null;
   wouldHave: Array<{ tool: string; input: unknown }>;
 }
 
@@ -149,7 +152,7 @@ export type LlmBlock = LlmTextBlock | LlmToolUseBlock | { type: string; [k: stri
 export interface LlmResponse {
   content: LlmBlock[];
   stop_reason: "end_turn" | "tool_use" | "max_tokens" | "refusal" | "pause_turn" | "stop_sequence" | string;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
   model?: string;
 }
 export type LlmMessage =

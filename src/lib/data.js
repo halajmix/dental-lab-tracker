@@ -20,6 +20,7 @@ export const labFromRow = (r) => ({
   wilayat: r.wilayat ?? "",
   tat: r.tat,
   procedureTats: r.procedure_tats ?? {},
+  turnaroundByClinic: r.turnaround_by_clinic ?? {},
   ownerId: r.owner_id,
   createdByClinicId: r.created_by_clinic_id,
   status: r.status ?? "active",
@@ -1097,14 +1098,25 @@ export async function setNoorEscalationStatus(id, status) {
 
 /** Today's brief for the lab dashboard: the same sections the morning email carries,
     computed client-side from data the lab already has, so no extra round trip. */
-export function composeNoorBriefClient({ cases, flags, clarifications, escalations, today }) {
-  const open = cases.filter((c) => c.stageIndex < 4 && c.cancelStatus !== "cancelled");
+export function composeNoorBriefClient({ cases, flags, clarifications, escalations, today, rounds=[],lab=null }) {
+  const returned=new Set(rounds.filter(r=>r.status==="open").map(r=>r.parentCaseId));
+  const open = cases.filter((c) => (c.stageIndex < 4 || returned.has(c.id)) && c.cancelStatus !== "cancelled");
   const flagsByCase = new Map();
   for (const f of flags) flagsByCase.set(f.caseId, [...(flagsByCase.get(f.caseId) ?? []), f]);
   const clarByCase = new Set(clarifications.map((c) => c.caseId));
-  const promise = (c) => c.prescription?.estReady ?? null;
-  const dueToday = open.filter((c) => c.appointmentDate === today || promise(c) === today);
-  const overdue = open.filter((c) => !dueToday.includes(c) && ((flagsByCase.get(c.id) ?? []).some((f) => f.kind === "overdue") || (c.appointmentDate && c.appointmentDate < today && c.stageIndex < 3)));
+  const returning=(c)=>c.stageIndex>=3&&returned.has(c.id);
+  const promise = (c) => {
+    if(!lab) return c.prescription?.estReady??null;
+    const tat=Number(lab.turnaroundByClinic?.[c.clinicId])||Number(lab.tat)||6;
+    const round=returning(c)?rounds.filter(r=>r.parentCaseId===c.id&&r.status==='open').map(r=>r.createdAt).sort().at(-1):null;
+    const start=(round||c.createdDate||'').slice(0,10);
+    if(!start) return c.prescription?.estReady??null;
+    const due=new Date(`${start}T00:00:00Z`);due.setUTCDate(due.getUTCDate()+tat);
+    const calculated=due.toISOString().slice(0,10),stored=c.prescription?.estReady;
+    return round?calculated:stored&&stored>calculated?stored:calculated;
+  };
+  const dueToday = open.filter((c) => (!returning(c)&&c.appointmentDate === today) || promise(c) === today);
+  const overdue = open.filter((c) => !dueToday.includes(c) && ((flagsByCase.get(c.id) ?? []).some((f) => f.kind === "overdue") || (!returning(c)&&c.appointmentDate && c.appointmentDate < today && c.stageIndex < 3)));
   const awaiting = open.filter((c) => clarByCase.has(c.id));
   const stale = open.filter((c) => (flagsByCase.get(c.id) ?? []).some((f) => f.kind === "stale"));
   const decisions = [
@@ -1134,6 +1146,18 @@ export async function askNoor(question, { caseId = null } = {}) {
   if (body.skipped) return { answer: "Noor isn't switched on for this lab yet.", traceId: null, outcome: "skipped" };
   return { answer: body.answer ?? "Noor didn't return an answer.", traceId: body.trace_id ?? null, outcome: body.outcome ?? "completed" };
 }
+
+async function noorAction(payload) {
+  const {data:sess}=await supabase.auth.getSession();
+  const token=sess?.session?.access_token;
+  if(!token) throw new Error("You're signed out.");
+  const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/noor`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`,apikey:import.meta.env.VITE_SUPABASE_ANON_KEY},body:JSON.stringify(payload)});
+  const body=await res.json();
+  if(!res.ok) throw new Error(body.error||'Noor is temporarily unavailable.');
+  return body;
+}
+export const fetchNoorStatus=()=>noorAction({action:'status'});
+export const rateNoorAnswer=(traceId,rating)=>noorAction({action:'feedback',trace_id:traceId,rating});
 
 async function callAdminAction(action, payload = {}) {
   const { data, error } = await supabase.functions.invoke("admin-actions", { body: { action, ...payload } });

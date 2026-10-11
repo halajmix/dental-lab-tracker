@@ -860,21 +860,16 @@
     },
     {
       "name": "compose_daily_brief",
-      "description": "Return the four brief sections for one lab for today in its timezone: due today, overdue, awaiting clarification, needs a decision (open escalations, open remake rounds, cancellation requests). Pure code; the model only orders and trims. NEVER add items not returned; NEVER send.",
-      "authz": "Service role scoped to lab_id.",
+      "description": "Return the four brief sections for the authenticated lab for today in its timezone: due today, overdue, awaiting clarification, needs a decision (open escalations, open remake rounds, cancellation requests). Lab scope is selected by the server; never guess a lab ID. Pure code; the model only orders and trims. NEVER add items not returned; NEVER send.",
+      "authz": "Server selects the authenticated caller's lab or the scheduled job's lab.",
       "side_effects": "none",
       "input_schema": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "lab_id",
           "date"
         ],
         "properties": {
-          "lab_id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "date": {
             "type": "string",
             "format": "date"
