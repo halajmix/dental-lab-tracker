@@ -10,6 +10,17 @@ The Attendance tab queries a per-lab connection and raw punches, displays Oman
 time, supports date selection, and refreshes every minute. It does not calculate
 absence, lateness, hours or payroll from incomplete or unspecified punches.
 
+The owner can download weekly or monthly attendance PDFs, for all staff or one
+device employee ID. Weeks are Monday through Sunday; the selected date is any
+date within that week. Months are complete calendar months. All boundaries and
+displayed times use Oman (UTC+04:00). Reports include recorded punches only,
+with no inferred absence or work hours. Empty periods download an explicit
+no-records report. Exports paginate beyond the API's 1,000-row limit and use a
+receipt cutoff to avoid mixing punches arriving while the export runs. PDF
+generation runs locally in the owner's browser, using the same owner-only RLS.
+Staff choices use the connection's registered device employee IDs and latest
+recorded names; an ID without punches is shown as Employee N.
+
 ## Deployment and activation
 
 - Applied `20261011_lab_attendance.sql` to project `mtxkushcxczjwypwoxdh`.
@@ -22,6 +33,9 @@ absence, lateness, hours or payroll from incomplete or unspecified punches.
   DS-K1T321MFWX20241227V030920ENGM9635172. Allowed device employee IDs: 1, 2, 3.
 - The connection defaults to **disabled**. Activation requires approval for the
   terminal's new external connection and an actual device punch to verify delivery.
+- Activated with user approval on 11 October 2026. Stored device records were
+  delivered successfully and displayed in the owner's Attendance page. A fresh
+  fingerprint punch remains to be checked when staff next register.
 - Device UI: System and Maintenance → System Configuration → Network →
   Network Service → HTTP(S) → HTTP Listening. Destination domain:
   `mtxkushcxczjwypwoxdh.supabase.co`, port 443, protocol HTTPS. URL:
@@ -44,6 +58,9 @@ absence, lateness, hours or payroll from incomplete or unspecified punches.
 
 `node --test tests/attendance.test.mjs`: verification failure filtering, payload
 minimization, replay identity, time offsets, invalid dates, multipart JSON.
+
+`node --test tests/attendanceReport.test.mjs`: week/year boundaries, leap months,
+paginated exports with staff/lab filters, fail-closed query errors and PDF pages.
 
 `supabase/tests/attendance.sql`: rolled-back fixture proves replay uniqueness,
 owner read access, denial to technicians/accountants/unrelated users, no browser
