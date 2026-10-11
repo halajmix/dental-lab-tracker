@@ -1,7 +1,9 @@
 # Smile World attendance connection
 
-Attendance is separate from application sign-in logs. Only lab administrators
-and platform administrators can read it; client users cannot write punches or
+Attendance is separate from application sign-in logs. Only the laboratory owner
+can read it; accountants, technicians, other lab admins and platform-admin
+identities cannot read attendance. Owner support-mode impersonation uses the
+owner's existing identity. Client users cannot write punches or
 read device credentials. No other lab has a connection configured by this release.
 
 The Attendance tab queries a per-lab connection and raw punches, displays Oman
@@ -11,6 +13,8 @@ absence, lateness, hours or payroll from incomplete or unspecified punches.
 ## Deployment and activation
 
 - Applied `20261011_lab_attendance.sql` to project `mtxkushcxczjwypwoxdh`.
+- Applied `20261011_attendance_owner_only.sql` to narrow read access to the
+  owner in both policies and the frontend navigation, at the user's request.
 - Deployed `attendance-webhook` with gateway JWT verification off. The handler
   verifies a 256-bit credential hash before accepting the body. There is no
   browser-accessible credential table or registration endpoint.

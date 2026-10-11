@@ -699,11 +699,11 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
   useEffect(()=>{
     let cancelled=false;
     setAttendanceLabId(null);
-    if(lab?.id && !financeOnly) fetchAttendanceConnections(lab.id).then(rows=>{
+    if(lab?.id && lab.ownerId===meId && !financeOnly) fetchAttendanceConnections(lab.id).then(rows=>{
       if(!cancelled && rows.length) setAttendanceLabId(lab.id);
     }).catch(()=>{});
     return()=>{cancelled=true;};
-  },[lab?.id,financeOnly]);
+  },[lab?.id,lab?.ownerId,meId,financeOnly]);
   if (!lab) return <p role="status" className="p-4 text-sm text-slate-500">Loading lab account…</p>;
   const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore) && (!["allwork","summary"].includes(t.id) || lab.workLedgerEnabled) && (t.id !== "noor" || noor) && (t.id !== "attendance" || attendanceLabId===lab.id));
   // The open-tab state survives switching between the Admin and Accountant
