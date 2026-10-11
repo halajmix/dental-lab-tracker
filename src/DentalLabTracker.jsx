@@ -1,4 +1,5 @@
 import FirstCaseGuide from "./FirstCaseGuide.jsx";
+import AttendancePanel, { fetchAttendanceConnections } from "./AttendancePanel.jsx";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -683,6 +684,7 @@ const ADMIN_TABS = [
   { id: "prices", label: "Price Lists", icon: Tags },
   { id: "staff", label: "Staff", icon: UserPlus },
   { id: "logs", label: "Staff logs", icon: HistoryIcon },
+  { id: "attendance", label: "Attendance", icon: Clock },
   { id: "noor", label: "Escalations", icon: Inbox },
 ];
 
@@ -693,14 +695,23 @@ const ACCOUNTANT_TAB_IDS = ["queue", "remakes", "allwork", "pending", "summary",
 function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = [], onResolveRound, meId, financeOnly = false, isAdminPreview = false, noor = null, onOpenCase }) {
   const [tab, setTab] = useState("queue");
   const [reviewAccount,setReviewAccount] = useState(null);
+  const [attendanceLabId,setAttendanceLabId] = useState(null);
+  useEffect(()=>{
+    let cancelled=false;
+    setAttendanceLabId(null);
+    if(lab?.id && !financeOnly) fetchAttendanceConnections(lab.id).then(rows=>{
+      if(!cancelled && rows.length) setAttendanceLabId(lab.id);
+    }).catch(()=>{});
+    return()=>{cancelled=true;};
+  },[lab?.id,financeOnly]);
   if (!lab) return <p role="status" className="p-4 text-sm text-slate-500">Loading lab account…</p>;
-  const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore) && (!["allwork","summary"].includes(t.id) || lab.workLedgerEnabled) && (t.id !== "noor" || noor));
+  const tabs = ADMIN_TABS.filter(t => (!financeOnly || ACCOUNTANT_TAB_IDS.includes(t.id)) && (t.id !== "history" || lab.financeHistoryBefore) && (!["allwork","summary"].includes(t.id) || lab.workLedgerEnabled) && (t.id !== "noor" || noor) && (t.id !== "attendance" || attendanceLabId===lab.id));
   // The open-tab state survives switching between the Admin and Accountant
   // views — without this clamp, an admin-only tab (e.g. Staff logs) kept
   // rendering its CONTENT in the accountant view after its nav button was
   // already filtered out (caught live by the user).
   const rawTab = tab;
-  const activeTab = financeOnly && !ACCOUNTANT_TAB_IDS.includes(rawTab) ? "queue" : rawTab;
+  const activeTab = (financeOnly && !ACCOUNTANT_TAB_IDS.includes(rawTab)) || (rawTab==='attendance' && attendanceLabId!==lab.id) ? "queue" : rawTab;
   return (
     <div>
       {isAdminPreview && (
@@ -747,6 +758,8 @@ function LabAdminWorkspace({ queue, lab, clinicsById, cases, allCases, rounds = 
         <PriceListsManager lab={lab} clinicsById={clinicsById} cases={cases} />
       ) : activeTab === "logs" ? (
         <LabStaffLogsPanel />
+      ) : activeTab === "attendance" ? (
+        <SectionBoundary label="Attendance couldn't load"><AttendancePanel key={lab.id} lab={lab}/></SectionBoundary>
       ) : activeTab === "noor" ? (
         <NoorEscalationInbox escalations={noor?.escalations ?? []} loading={noor?.escalationsLoading} onChanged={noor?.onEscalationChanged} onOpenCase={onOpenCase} />
       ) : (
