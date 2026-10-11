@@ -34,8 +34,8 @@ recorded names; an ID without punches is shown as Employee N.
 - The connection defaults to **disabled**. Activation requires approval for the
   terminal's new external connection and an actual device punch to verify delivery.
 - Activated with user approval on 11 October 2026. Stored device records were
-  delivered successfully and displayed in the owner's Attendance page. A fresh
-  fingerprint punch remains to be checked when staff next register.
+  delivered successfully and displayed in the owner's Attendance page. A new
+  Yusef check-in at 09:07:50 Oman time on 11 October arrived successfully too.
 - Device UI: System and Maintenance → System Configuration → Network →
   Network Service → HTTP(S) → HTTP Listening. Destination domain:
   `mtxkushcxczjwypwoxdh.supabase.co`, port 443, protocol HTTPS. URL:
@@ -61,6 +61,10 @@ minimization, replay identity, time offsets, invalid dates, multipart JSON.
 
 `node --test tests/attendanceReport.test.mjs`: week/year boundaries, leap months,
 paginated exports with staff/lab filters, fail-closed query errors and PDF pages.
+Live browser downloads verified: 5-11 October all staff (20 punches), October
+Yusef (26 punches). Counts match the database; rendered first/final PDF pages
+were checked. Accountant workspace hides Attendance and export controls; the
+database owner-only access assertions still pass.
 
 `supabase/tests/attendance.sql`: rolled-back fixture proves replay uniqueness,
 owner read access, denial to technicians/accountants/unrelated users, no browser
