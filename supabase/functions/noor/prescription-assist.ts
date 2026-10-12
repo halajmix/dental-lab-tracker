@@ -1,3 +1,4 @@
+import {normalizeSpokenToothNames,spokenToothReferences,enforceRxToothReferences} from '../_shared/rxToothNames.ts';
 import {RX_DRAFT_PROMPT,normalizeRxDraft} from '../_shared/rxDraft.ts';
 import {createLlm} from './llm.ts';
 import {budgetedLlm,usageCost} from './budget.ts';
@@ -31,11 +32,11 @@ export async function prescriptionAssist(body:any,caller:Caller,db:Db,admin:Db,e
   let usage:any=null,model:string|null=null;
   try {
     const llm=budgetedLlm(createLlm({apiKey:env.anthropicKey,modelAnswer:env.modelAnswer,modelPhrase:env.modelPhrase,effort:env.effort,timeoutMs:env.runTimeoutMs}),admin,body.lab_id,localParts(now,'Asia/Muscat').date,traceId);
-    const r=await llm.complete({purpose:'answer',system:RX_DRAFT_PROMPT+` Current Oman date: ${localParts(now,'Asia/Muscat').date}.`,messages:[{role:'user',content:JSON.stringify({notation:body.notation,instructions:body.text})}],tools:[],maxTokens:2200});
+    const r=await llm.complete({purpose:'answer',system:RX_DRAFT_PROMPT+` Current Oman date: ${localParts(now,'Asia/Muscat').date}.`,messages:[{role:'user',content:JSON.stringify({notation:body.notation,instructions:normalizeSpokenToothNames(body.text),toothReferences:spokenToothReferences(body.text,body.notation)})}],tools:[],maxTokens:2200});
     usage=r.usage;model=r.model??null;
     if(r.stop_reason!=='end_turn')throw Error('Noor could not complete the draft. Try a shorter instruction.');
     const text=r.content.filter((b:any)=>b.type==='text').map((b:any)=>b.text).join('').trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
-    const draft=normalizeRxDraft(JSON.parse(text));
+    const draft=enforceRxToothReferences(normalizeRxDraft(JSON.parse(text)),body.text,body.notation);
     await audit.finish({outcome:'completed',model,inputTokens:usage?.input_tokens,outputTokens:usage?.output_tokens,cacheReadTokens:usage?.cache_read_input_tokens,cacheCreationTokens:usage?.cache_creation_input_tokens,estimatedCostUsd:usageCost(usage??{})});
     // No prescription contents in audit logs, no patient fields, no case writes.
     return response({ok:true,trace_id:traceId,draft,platform_budget:(await admin.rpc!('noor_platform_budget_status')).data});

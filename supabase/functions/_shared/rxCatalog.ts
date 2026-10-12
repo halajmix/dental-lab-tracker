@@ -95,3 +95,28 @@ export const UNIVERSAL_TO_FDI = {
   17: 38, 18: 37, 19: 36, 20: 35, 21: 34, 22: 33, 23: 32, 24: 31,
   25: 41, 26: 42, 27: 43, 28: 44, 29: 45, 30: 46, 31: 47, 32: 48,
 };
+
+export const RX_IMPLANT_SYSTEMS = [
+  "Straumann",
+  "Nobel Biocare",
+  "Astra Tech / Dentsply",
+  "Osstem",
+  "MIS",
+  "Dentium",
+  "MegaGen",
+  "Zimmer Biomet",
+  "BioHorizons",
+  "Neodent",
+  "Implant Direct",
+  "Bio3",
+  "SPI (Thommen Medical)",
+  "Other — see notes",
+];
+export const RX_ABUTMENT_TYPES = [
+  "Stock / Straight",
+  "Stock / Angled",
+  "Custom CAD-CAM",
+  "Ti-Base",
+  "Multi-unit",
+  "Locator / Overdenture",
+];

@@ -31,3 +31,37 @@ test('a bridge requires supporting teeth as well as pontics',()=>{
  const d=normalizeRxDraft({notation:'FDI',items:[{...crown,category:'Bridge - tooth (conventional)',teeth:[{number:25,role:'pontic'}]}]});
  assert.equal(d.canApply,false);assert.ok(d.questions.some(q=>q.includes('supporting abutment')));
 });
+
+import {normalizeSpokenToothNames,spokenToothReferences,enforceRxToothReferences} from '../../_shared/rxToothNames.ts';
+test('permanent quadrant names map consistently and numeric FDI stays unchanged',()=>{
+ assert.equal(normalizeSpokenToothNames('tooth 21, tooth 23, tooth 24; upper right 4, upper left three, LL6, lr7'),'tooth 21, tooth 23, tooth 24; FDI tooth 14, FDI tooth 23, FDI tooth 36, FDI tooth 47');
+ assert.equal(normalizeSpokenToothNames('upper right 9, UR12, upper left D, left 4'),'upper right 9, UR12, upper left D, left 4');
+ for(const [q,base] of [['UR',10],['UL',20],['LL',30],['LR',40]])for(let p=1;p<=8;p++)assert.equal(normalizeSpokenToothNames(q+p),'FDI tooth '+(base+p));
+});
+test('implant brand, supported abutment and explicit colour are required independently',()=>{
+ const full={...crown,category:'Crown - implant',material:'Zirconia',implantSystem:'Straumann',abutmentType:'Ti-Base',abutmentColor:'Yellow'};
+ assert.equal(normalizeRxDraft({notation:'FDI',items:[full]}).canApply,true);
+ for(const field of ['implantSystem','abutmentType','abutmentColor']){
+  const d=normalizeRxDraft({notation:'FDI',items:[{...full,[field]:''}]});assert.equal(d.canApply,false);assert.ok(d.questions.length>0);
+ }
+ assert.equal(normalizeRxDraft({notation:'FDI',items:[{...full,abutmentColor:'N/A'}]}).canApply,true);
+ assert.equal(normalizeRxDraft({notation:'FDI',items:[{...full,abutmentType:'Invented component'}]}).canApply,false);
+ assert.equal(normalizeRxDraft({notation:'FDI',items:[{...full,implantSystem:'Other — see notes'}]}).canApply,false);
+});
+
+test('ambiguous quadrants and incorrect model conversions cannot be applied',()=>{
+ assert.deepEqual(spokenToothReferences('upper right 4 and upper left 3','Universal'),[{fdi:14,universal:5,outputNumber:5},{fdi:23,universal:11,outputNumber:11}]);
+ const d=normalizeRxDraft({notation:'Universal',items:[{...crown,teeth:[{number:5},{number:10}]}]});assert.equal(enforceRxToothReferences(d,'upper right 4 and upper left 3').canApply,false);
+ const complete=normalizeRxDraft({notation:'Universal',items:[{...crown,teeth:[{number:5},{number:11}]}]});assert.equal(enforceRxToothReferences(complete,'upper right 4 and upper left 3').canApply,true);
+ for(const text of ['left 4','right four','upper 3','UR9','upper left D'])assert.equal(enforceRxToothReferences(normalizeRxDraft({notation:'FDI',items:[crown]}),text).canApply,false);
+});
+
+test('explicit and bare tooth references are checked in their original notation',()=>{
+ assert.deepEqual(spokenToothReferences('tooth 21, tooth 23, tooth 24','FDI').map(t=>t.fdi),[21,23,24]);
+ assert.deepEqual(spokenToothReferences('tooth 26','Universal').map(t=>t.fdi),[42]);
+ const d=normalizeRxDraft({notation:'FDI',items:[crown]});
+ assert.equal(enforceRxToothReferences(d,'tooth 21','FDI').canApply,false);
+ assert.equal(enforceRxToothReferences(d,'FDI 99','FDI').canApply,false);
+ assert.equal(enforceRxToothReferences(d,'tooth 99','FDI').canApply,false);
+ assert.equal(enforceRxToothReferences(d,'tooth 26','FDI').canApply,true);
+});

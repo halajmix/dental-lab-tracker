@@ -1,4 +1,4 @@
-import {RX_CATEGORIES as CATEGORIES,RX_SHADE_GUIDES as SHADE_GUIDES,UNIVERSAL_TO_FDI} from "../supabase/functions/_shared/rxCatalog.ts";
+import {RX_IMPLANT_SYSTEMS as IMPLANT_SYSTEMS,RX_ABUTMENT_TYPES as ABUTMENT_TYPES,RX_CATEGORIES as CATEGORIES,RX_SHADE_GUIDES as SHADE_GUIDES,UNIVERSAL_TO_FDI} from "../supabase/functions/_shared/rxCatalog.ts";
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -166,30 +166,6 @@ const DELIVERY_TIMES = ["Anytime", "Morning", "Afternoon", "Before sunset", "Eve
 
 // Implant cases: the lab cannot order components without the system + platform.
 const IMPLANT_CATEGORIES = ["Crown - implant", "Bridge - implant"];
-const IMPLANT_SYSTEMS = [
-  "Straumann",
-  "Nobel Biocare",
-  "Astra Tech / Dentsply",
-  "Osstem",
-  "MIS",
-  "Dentium",
-  "MegaGen",
-  "Zimmer Biomet",
-  "BioHorizons",
-  "Neodent",
-  "Implant Direct",
-  "Bio3",
-  "SPI (Thommen Medical)",
-  "Other — see notes",
-];
-const ABUTMENT_TYPES = [
-  "Stock / Straight",
-  "Stock / Angled",
-  "Custom CAD-CAM",
-  "Ti-Base",
-  "Multi-unit",
-  "Locator / Overdenture",
-];
 // Translucent / tooth-coloured materials where the underlying prep colour shows
 // through — these are the only ones that need a stump shade.
 const AESTHETIC_MATERIALS = [
