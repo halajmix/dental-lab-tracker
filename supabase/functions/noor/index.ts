@@ -24,6 +24,7 @@ import {budgetedLlm} from './budget.ts';
 import {localParts} from './lib/brief.ts';
 import {runModelEvals} from './model-evals.ts';
 import {assertCanAct} from './authz.ts';
+import {prescriptionAssist} from './prescription-assist.ts';
 
 /**
  * Noor — the case-coordinator agent. One function, three kinds of caller:
@@ -35,7 +36,7 @@ import {assertCanAct} from './authz.ts';
 const json = (body: unknown, status = 200) => new Response(status===204?null:JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" } });
 const traceId = () => `nr_${Date.now().toString(36)}${crypto.randomUUID().slice(0, 8)}`;
 
-type Body = { action?:string; trace_id?:string; rating?:string; source?: string; trigger?: string; type?: string; table?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> | null; question?: string; case_id?: string };
+type Body = { action?:string; text?:string; notation?:string;clinic_id?:string;lab_id?:string;trace_id?:string; rating?:string; source?: string; trigger?: string; type?: string; table?: string; record?: Record<string, unknown>; old_record?: Record<string, unknown> | null; question?: string; case_id?: string };
 
 function classify(b: Body): Trigger | null {
   if (b.source === "pg_cron" && ["scheduled_watch","scheduled_brief","scheduled_patterns"].includes(b.trigger??"")) return b.trigger as Trigger;
@@ -98,6 +99,10 @@ async function handleRequest(req:Request) {
     return json({ error: "Unauthorized" }, 401);
   }
   try { body = await req.json(); } catch { return json({ error: "Bad JSON" }, 400); }
+  if(['prescription_status','prescription_draft'].includes(body.action??'')) {
+    const r=await prescriptionAssist(body,caller,userDb,admin,env,now,traceId());
+    return json(r.data,r.status);
+  }
   // Pilot is restricted to authenticated lab accounts. Clinic-facing roles
   // remain observing until a separate rollout is explicitly configured.
   if(caller.kind==='user' && (!caller.labId || caller.role!=='lab')) return json({error:'Noor is currently piloting with Smile World lab staff.'},403);
@@ -105,16 +110,17 @@ async function handleRequest(req:Request) {
     const settings=await pilotSettings(admin,caller.labId);
     const enabled=await noorEnabled(admin,caller.labId);
     const day=localParts(now,caller.timezone).date;
-    const [usage,recent,watch,feedback]=await Promise.all([
+    const [usage,recent,watch,feedback,platform]=await Promise.all([
       admin.from('noor_daily_usage').select('spent_usd,reserved_usd,paused').eq('lab_id',caller.labId).eq('day',day).maybeSingle(),
       admin.from('agent_runs').select('trigger,outcome,started_at,finished_at,model,estimated_cost_usd,fallback_reason').eq('lab_id',caller.labId).order('started_at',{ascending:false}).limit(10),
       admin.from('agent_runs').select('started_at,finished_at,outcome').eq('trigger','scheduled_watch').order('started_at',{ascending:false}).limit(1),
       admin.from('noor_feedback').select('rating,agent_runs!inner(lab_id)').eq('agent_runs.lab_id',caller.labId),
+      admin.rpc('noor_platform_budget_status'),
     ]);
-    if(usage.error||recent.error||watch.error||feedback.error) return json({error:'Noor status could not be read'},503);
+    if(usage.error||recent.error||watch.error||feedback.error||platform.error||!platform.data) return json({error:'Noor status could not be read'},503);
     return json({enabled,mode:enabled&&settings?.role_modes.user_question==='live'&&!env.shadow?'pilot':'observing',emails_enabled:settings?.emails_enabled??false,
       turnaround:settings?{default_days:settings.default_tat_days,exception_days:Object.values(settings.clinic_tats)}:null,
-      budget_usd:settings?.daily_budget_usd??0,day,usage:usage.data??{spent_usd:0,reserved_usd:0,paused:false},recent:recent.data??[],last_watch:watch.data?.[0]??null,
+      platform_budget:platform.data,budget_usd:settings?.daily_budget_usd??0,day,usage:usage.data??{spent_usd:0,reserved_usd:0,paused:false},recent:recent.data??[],last_watch:watch.data?.[0]??null,
       feedback:{helpful:(feedback.data??[]).filter((x:any)=>x.rating==='helpful').length,wrong:(feedback.data??[]).filter((x:any)=>x.rating==='wrong').length}});
   }
   if(caller.kind==='user' && body.action==='feedback') {

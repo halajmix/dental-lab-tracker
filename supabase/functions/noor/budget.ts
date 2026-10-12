@@ -14,11 +14,22 @@ export function budgetedLlm(llm:LlmClient,db:Db,labId:string,day:string,trace:st
     if(!db.rpc) throw new Error("Budget service unavailable");
     const amount=reserveCost(req);
     const {data,error}=await db.rpc('noor_reserve_budget',{p_lab:labId,p_day:day,p_amount:amount,p_trace:trace});
-    if(error) throw new Error('AI budget could not be checked.');
-    if(!data) throw new Error('Noor has reached its daily AI budget. Questions resume tomorrow; case monitoring remains active.');
+    if(error) throw new Error(`AI budget could not be checked (${error.code??'unavailable'}).`);
+    if(!data) {
+      const {data:platform,error:statusError}=await db.rpc('noor_platform_budget_status');
+      if(statusError) throw new Error('AI budget could not be checked.');
+      if(platform&&Number(platform.remaining_usd)<amount) throw new Error('Noor cannot cover this request within its shared $15 monthly AI budget. The allowance resets on the first of next month in Oman time; case monitoring remains active.');
+      throw new Error('Noor has reached its daily AI budget. Questions resume tomorrow; case monitoring remains active.');
+    }
     // An unknown provider failure retains the reservation: never assume a failed
     // response was free. This makes budget enforcement conservative.
-    const response=await llm.complete(req);
+    let response;
+    try {response=await llm.complete(req);} catch(e) {
+      // These statuses reject the request before generation. Release only
+      // confirmed rejections; timeouts and unknown failures remain reserved.
+      if([400,401,403,404,422,429].includes((e as any)?.status)) await db.rpc('noor_settle_budget',{p_reservation:data,p_actual:0});
+      throw e;
+    }
     const {error:settleError}=await db.rpc('noor_settle_budget',{p_reservation:data,p_actual:usageCost(response.usage??{})});
     if(settleError) throw new Error('AI usage could not be recorded.');
     return response;

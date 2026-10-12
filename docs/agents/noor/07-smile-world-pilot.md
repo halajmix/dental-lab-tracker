@@ -7,7 +7,7 @@ and email-first activation order in the original rollout plan.
 Live: lab questions, case monitoring, the in-app brief, internal escalation
 inbox and pattern observations. Intake, clarification and remake automation
 remain observing. Clinic accounts cannot ask Noor, and no other lab is enabled.
-Voice-assisted prescription entry is a future feature, not part of this pilot.
+The 13 October update in [08-prescription-assistant-and-budget.md](08-prescription-assistant-and-budget.md) adds doctor voice/typed prescription assistance for Smile World and a shared $15 monthly cap. The clinic-chat restriction below refers to general lab questions.
 
 Noor sends no emails. Completion messages belong to case-notify. Internal
 escalations do not create clinic-visible case notes. Active escalations are

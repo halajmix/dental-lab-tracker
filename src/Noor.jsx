@@ -181,16 +181,19 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
 export function NoorPilotStatus() {
   const [status,setStatus]=useState(null),[error,setError]=useState('');
   useEffect(()=>{let active=true;const load=()=>fetchNoorStatus().then(s=>{if(active){setStatus(s);setError('');}}).catch(e=>{if(active)setError(e.message);});load();const timer=setInterval(load,60000);return()=>{active=false;clearInterval(timer);};},[]);
-  const mode=error?'Status unavailable':!status?'Checking Noor…':status.usage.paused?'AI questions paused':status.mode==='pilot'?'Smile World pilot active':status.enabled?'Noor is observing':'Noor is off';
+  const mode=error?'Status unavailable':!status?'Checking Noor…':Number(status.platform_budget?.remaining_usd)===0?'Monthly AI allowance used':status.usage.paused?'AI questions paused':status.mode==='pilot'?'Smile World pilot active':status.enabled?'Noor is observing':'Noor is off';
   const stamp=status?.last_watch?.finished_at;
+  const monthly=status?.platform_budget;
   const stale=stamp&&Date.now()-new Date(stamp).getTime()>45*60000;
   return <div className="border-b border-violet-100 bg-violet-50 p-3 text-xs text-slate-700" role="status">
     <div className="font-bold text-violet-800">{mode}</div>
     {status&&<><p className="mt-1">Ask about your cases, due work, and follow-ups. {status.emails_enabled?'Email enabled.':'Noor emails are off; your normal case notifications continue.'}</p>
       <p className="mt-1">{stamp?`Case check: ${new Date(stamp).toLocaleString('en-GB',{timeZone:'Asia/Muscat',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} Oman time${stale?' · monitoring delayed':''}`:'Waiting for the first case check.'}</p>
       <p className="mt-1">Estimated AI today: ${Number(status.usage.spent_usd).toFixed(4)} of ${Number(status.budget_usd).toFixed(2)} daily limit · {status.feedback.helpful} helpful / {status.feedback.wrong} reported wrong.</p>
+      {monthly&&<p className="mt-1 font-semibold">Entire platform this month: ${Number(monthly.spent_usd).toFixed(4)} estimated use · ${Number(monthly.reserved_usd).toFixed(4)} reserved · ${Number(monthly.remaining_usd).toFixed(2)} available of the ${Number(monthly.limit_usd).toFixed(2)} shared monthly limit. Resets on the first in Oman time.</p>}
       {Number(status.usage.reserved_usd)>0&&<p className="mt-1">${Number(status.usage.reserved_usd).toFixed(4)} held for ongoing or unconfirmed requests.</p>}
-      {status.usage.paused&&<p className="mt-1">Questions resume tomorrow. Case monitoring continues.</p>}
+      {Number(status.platform_budget?.remaining_usd)===0&&<p className="mt-1">The shared monthly allowance resets on the first of next month in Oman time. Case monitoring continues.</p>}
+      {status.usage.paused&&Number(status.platform_budget?.remaining_usd)!==0&&<p className="mt-1">Questions resume tomorrow. Case monitoring continues.</p>}
       {status.recent.some(r=>r.outcome==='failed'||r.fallback_reason)&&<p className="mt-1 text-amber-800">A recent AI request needed attention. Please use “Something is wrong” if an answer is unhelpful.</p>}
     </>}
     {error&&<p className="mt-1 text-rose-700">{error}</p>}

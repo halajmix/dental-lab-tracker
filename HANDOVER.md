@@ -9,6 +9,10 @@ patients and real money. There is no staging environment.
 
 ---
 
+## Noor update — 13 October 2026
+
+Noor now has a shared $15/month platform AI cap and a doctor prescription assistant with typed instructions and browser dictation, piloted for Smile World. The expired Anthropic key was replaced by the owner and real provider checks passed. See [the release notes](docs/agents/noor/08-prescription-assistant-and-budget.md) for scope, budget accounting, flags, verification and voice limitations.
+
 ## Stack
 
 | | |

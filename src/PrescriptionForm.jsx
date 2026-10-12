@@ -1,3 +1,4 @@
+import {RX_CATEGORIES as CATEGORIES,RX_SHADE_GUIDES as SHADE_GUIDES,UNIVERSAL_TO_FDI} from "../supabase/functions/_shared/rxCatalog.ts";
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -39,18 +40,14 @@ import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
 import MobilePhotoQR from "./MobilePhotoQR.jsx";
 import ClinicDentistPicker from "./ClinicDentistPicker.jsx";
+import NoorPrescriptionAssist from './NoorPrescriptionAssist.jsx';
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
 /* ================================================================== */
 
 // Universal (1–32) → FDI (ISO 3950) two-digit notation.
-export const UNIVERSAL_TO_FDI = {
-  1: 18, 2: 17, 3: 16, 4: 15, 5: 14, 6: 13, 7: 12, 8: 11,
-  9: 21, 10: 22, 11: 23, 12: 24, 13: 25, 14: 26, 15: 27, 16: 28,
-  17: 38, 18: 37, 19: 36, 20: 35, 21: 34, 22: 33, 23: 32, 24: 31,
-  25: 41, 26: 42, 27: 43, 28: 44, 29: 45, 30: 46, 31: 47, 32: 48,
-};
+export { UNIVERSAL_TO_FDI };
 
 // Chart layout: teeth left→right as viewed (patient right on the left).
 export const UPPER_ROW = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
@@ -67,82 +64,7 @@ const toothType = (u) => {
 const label = (u, notation) => (notation === "FDI" ? UNIVERSAL_TO_FDI[u] : u);
 
 // Restoration categories → material / specification menus.
-const CATEGORIES = {
-  "Crown - tooth": {
-    materials: [
-      "Monolithic Zirconia",
-      "Layered Zirconia",
-      "Lithium Disilicate (E.max)",
-      "PFM (Porcelain-Fused-to-Metal)",
-      "Full Gold / Precious",
-      "Feldspathic Porcelain",
-      "PMMA Provisional",
-    ],
-  },
-  "Crown - implant": {
-    materials: ["Zirconia", "E.max", "PFM", "PMMA"],
-  },
-  "Bridge - tooth (conventional)": {
-    materials: [
-      "Monolithic Zirconia",
-      "Layered Zirconia",
-      "Lithium Disilicate (E.max)",
-      "PFM (Porcelain-Fused-to-Metal)",
-      "Full Gold / Precious",
-      "PMMA Provisional",
-    ],
-  },
-  "Bridge - tooth (Resin Bonded)": {
-    materials: [
-      "Monolithic Zirconia",
-      "Lithium Disilicate (E.max)",
-      "PFM (metal wing)",
-      "Cast Metal Wing",
-    ],
-  },
-  "Bridge - implant": {
-    materials: ["Zirconia", "E.max", "PFM", "PMMA", "Zirconia with metal bar"],
-  },
-  Veneer: {
-    materials: [
-      "Lithium Disilicate (E.max)",
-      "Feldspathic Porcelain",
-      "Layered Zirconia",
-      "Composite",
-      "PMMA Provisional",
-    ],
-  },
-  "Removable partial denture": {
-    materials: [
-      "Cobalt-Chrome RPD Framework",
-      "Removable Partial Denture - Acrylic (with clasps)",
-      "Removable Partial Denture - Acrylic (no clasps)",
-      "Flexible Partial (Nylon / Valplast)",
-      "Cast Metal Partial",
-      "Immediate Denture",
-    ],
-  },
-  // Split from Removable denture (2026-08-22): partials are priced per tooth
-  // (first tooth in the base, + fee per additional), complete dentures per
-  // ARCH (single vs both) — two different price models need two categories.
-  "Complete denture": {
-    materials: ["Acrylic Complete Denture", "Acrylic Overdenture", "Immediate Denture", "Flexible (Nylon / Valplast)"],
-  },
-  "Orthodontics splint": { materials: [] },
-  "Single layer splint - soft": { materials: [] },
-  "Double layer splint - soft": { materials: [] },
-  "Double layer splint - outer hard, inner soft": { materials: [] },
-  "Michigan splint": { materials: [] },
-  // Arch-based appliances (2026-08-21): ordered per arch — upper, lower, or
-  // both — with per-arch pricing on the lab side. No material/shade fields.
-  "Clear retainer": { materials: [] },
-  "Night guard": { materials: [] },
-  "Fixed retainer": { materials: [] },
-  "Space maintainer": { materials: [] },
-  "Study model": { materials: [] },
-  "Special tray": { materials: [] },
-  "Others - refer to notes": { materials: ["Refer to notes"] },
-};
+
 
 // New prescriptions always use the tooth chart to describe their extent.
 // Keep this export empty for legacy readers that still import it; old cases
@@ -224,20 +146,7 @@ const remapSelectionForCategory = (selection, category) => {
 };
 
 // Shade guides (systems) → their shade tabs. The form picks a guide, then a shade.
-const SHADE_GUIDES = {
-  "Vita Classical": ["A1", "A2", "A3", "A3.5", "A4", "B1", "B2", "B3", "B4", "C1", "C2", "C3", "C4", "D2", "D3", "D4"],
-  "Vita 3D-Master": [
-    "0M1", "0M2", "0M3", "1M1", "1M2", "2L1.5", "2L2.5", "2M1", "2M2", "2M3", "2R1.5", "2R2.5",
-    "3L1.5", "3L2.5", "3M1", "3M2", "3M3", "3R1.5", "3R2.5", "4L1.5", "4L2.5", "4M1", "4M2", "4M3",
-    "4R1.5", "4R2.5", "5M1", "5M2", "5M3",
-  ],
-  "Ivoclar Chromascop": [
-    "110", "120", "130", "140", "210", "220", "230", "240", "310", "320", "330", "340",
-    "410", "420", "430", "440", "510", "520", "530", "540",
-  ],
-  "Bleach / Whitening": ["BL1", "BL2", "BL3", "BL4"],
-  "Custom / Photo": ["Custom (see photo)"],
-};
+
 // A dedicated "guide" that isn't really a guide — picking it means the
 // dentist isn't specifying a shade at all, the lab decides it (e.g. from
 // photos/notes). Collapses the Shade dropdown entirely rather than listing
@@ -1450,7 +1359,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId, authorName = "", cases = [], clinics = [], defaultClinicId = null, labAllowed = () => true }) {
+export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId, authorName = "", cases = [], clinics = [], defaultClinicId = null, labAllowed = () => true,noorAssistApi }) {
   // Keep wheel/touch scrolling inside the prescription, including follow-ups.
   // Restore the page's existing styles when closing or unmounting the form.
   useEffect(() => {
@@ -2094,6 +2003,26 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
 
   /* ---------------- TAT auto-calculation ---------------- */
   const lab = labById[labId];
+  const applyNoorDraft=(proposal)=>{
+    if(!proposal?.canApply) throw new Error('Clarify the missing treatment details before adding the draft.');
+    if(draftDirty) throw new Error('Save or cancel the restoration currently being edited first.');
+    const fixed=proposal.items.every(r=>RESTORATION_CATEGORIES.includes(r.category));
+    if(fixed){
+      if(caseMode==='appliance') throw new Error('An appliance and fixed restorations need separate cases.');
+      const occupied=new Set(restorations.flatMap(r=>r.teeth.map(t=>t.universal)));
+      if(proposal.items.some(r=>r.teeth.some(t=>occupied.has(t.universal)))) throw new Error('A suggested tooth is already in the form. Review the existing restoration first.');
+      setCaseMode('restorations');setRestorations(prev=>[...prev,...proposal.items.map(r=>({...r,id:crypto.randomUUID()}))]);
+    }else{
+      if(proposal.items.length!==1||restorations.length||selectedTeeth.length) throw new Error('Start a separate blank case for this appliance; existing treatment is kept.');
+      const r=proposal.items[0];
+      if(caseMode==='appliance'&&(category!==r.category||material||vitaShade)) throw new Error('Review or clear the appliance already selected before adding this draft.');
+      setCaseMode('appliance');setCategory(r.category);setMaterial(r.material);setShadeGuide(r.shadeGuide);setVitaShade(r.vitaShade);setStumpShade(r.stumpShade);
+      setSelection(Object.fromEntries(r.teeth.map(t=>[t.universal,t.role])));setImplantSystem(r.implantSystem);setAbutmentType(r.abutmentType);setAbutmentColor(r.abutmentColor);
+    }
+    setNotation(proposal.notation);
+    if(proposal.notes)setNotes(prev=>[prev,proposal.notes].filter(Boolean).join('\n'));
+    if(proposal.appointmentDate&&!insertionDate)setInsertionDate(proposal.appointmentDate);
+  };
   // Procedure-specific turnaround (set by the lab in its Settings) wins over
   // the lab's standard TAT when one exists for the selected category. In
   // restorations mode the case can't be ready before its SLOWEST item, so
@@ -2540,6 +2469,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             complete={stepComplete(2)}
             invalid={touched && stepInvalid(2)}
           >
+          {!isEditing&&sendingRole!=='receptionist'&&<div className="mb-5">{sendingClinicId&&labId?<NoorPrescriptionAssist key={`${sendingClinicId}:${labId}`} clinicId={sendingClinicId} labId={labId} notation={notation} onApply={applyNoorDraft} api={noorAssistApi}/>:<p className="rounded-xl bg-violet-50 p-3 text-sm text-violet-800">Choose the sending clinic and lab to use Noor’s voice or typed prescription assistant.</p>}</div>}
           {/* Included — what physically goes to the lab with this case */}
           <section className="mb-6">
             <SectionHeader icon={PackageCheck} n="a" title="Included" subtitle="Tick everything being sent to the lab with this case" />

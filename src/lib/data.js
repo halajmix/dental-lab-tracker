@@ -1147,17 +1147,19 @@ export async function askNoor(question, { caseId = null } = {}) {
   return { answer: body.answer ?? "Noor didn't return an answer.", traceId: body.trace_id ?? null, outcome: body.outcome ?? "completed" };
 }
 
-async function noorAction(payload) {
+async function noorAction(payload,signal) {
   const {data:sess}=await supabase.auth.getSession();
   const token=sess?.session?.access_token;
   if(!token) throw new Error("You're signed out.");
-  const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/noor`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`,apikey:import.meta.env.VITE_SUPABASE_ANON_KEY},body:JSON.stringify(payload)});
+  const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/noor`,{method:'POST',signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`,apikey:import.meta.env.VITE_SUPABASE_ANON_KEY},body:JSON.stringify(payload)});
   const body=await res.json();
   if(!res.ok) throw new Error(body.error||'Noor is temporarily unavailable.');
   return body;
 }
 export const fetchNoorStatus=()=>noorAction({action:'status'});
 export const rateNoorAnswer=(traceId,rating)=>noorAction({action:'feedback',trace_id:traceId,rating});
+export const noorPrescriptionStatus=(clinicId,labId)=>noorAction({action:'prescription_status',clinic_id:clinicId,lab_id:labId});
+export const draftPrescriptionWithNoor=(text,{clinicId,labId,notation,signal})=>noorAction({action:'prescription_draft',clinic_id:clinicId,lab_id:labId,notation,text},signal);
 
 async function callAdminAction(action, payload = {}) {
   const { data, error } = await supabase.functions.invoke("admin-actions", { body: { action, ...payload } });

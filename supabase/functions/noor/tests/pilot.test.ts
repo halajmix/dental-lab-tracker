@@ -74,3 +74,13 @@ test('runner records model errors and cache usage; it blocks a tool absent from 
  const r=await runAgent({...base,llm:{complete:async()=>++n===1?{content:[{type:'tool_use',id:'x',name:'send_status_update',input:{}}],stop_reason:'tool_use',usage:{cache_read_input_tokens:1000}}:{content:[{type:'text',text:'Cannot send email.'}],stop_reason:'end_turn'}},executor:{definitions:()=>[],execute:async()=>{executed++;}}});
  assert.equal(executed,0);assert.match(r.toolCalls[0].error??'',/not enabled/);assert.equal(r.cacheReadTokens,1000);
 });
+
+test('shared monthly budget denies generation and confirmed authentication rejection releases funds',async()=>{
+ const req={system:'s',messages:[],tools:[],maxTokens:100,purpose:'answer'} as never;
+ let called=false;
+ const blocked=budgetedLlm({async complete(){called=true;throw Error('must not run');}},{from:()=>null,rpc:async(name:string)=>({data:name==='noor_platform_budget_status'?{remaining_usd:0}:null})},'L','2026-10-13','t');
+ await assert.rejects(blocked.complete(req),/shared \$15 monthly/);assert.equal(called,false);
+ const settlements:any[]=[];
+ const rejected=budgetedLlm({async complete(){throw Object.assign(Error('invalid x-api-key'),{status:401});}},{from:()=>null,rpc:async(name:string,args:any)=>{if(name==='noor_settle_budget')settlements.push(args);return {data:'R'};}},'L','2026-10-13','t');
+ await assert.rejects(rejected.complete(req),/invalid x-api-key/);assert.deepEqual(settlements,[{p_reservation:'R',p_actual:0}]);
+});

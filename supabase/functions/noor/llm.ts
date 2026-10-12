@@ -19,7 +19,19 @@ export function createLlm(opts: { apiKey: string; modelAnswer: string; modelPhra
       const system: Anthropic.TextBlockParam[] = [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }];
       const messages = req.messages as Anthropic.MessageParam[];
       const common = { max_tokens: req.maxTokens, system, messages, ...(tools.length ? { tools, tool_choice: { type: "auto" as const } } : {}) };
-      const res = await client.messages.create({ model: req.purpose==='answer'?opts.modelAnswer:opts.modelPhrase, ...common });
+      let res;
+      try {res=await client.messages.create({ model: req.purpose==='answer'?opts.modelAnswer:opts.modelPhrase, ...common });}
+      catch(e) {
+        const err=e as any;
+        if(err.status===401) {
+          const type=String(err.error?.error?.type??err.error?.type??err.error?.code??'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,80);
+          const message=String(err.error?.error?.message??err.error?.message??err.message??'');
+          const reason=/invalid.*(?:x-api-key|api.key)/i.test(message)?'invalid x-api-key':/jwt/i.test(message)?'JWT rejected':/expir/i.test(message)?'expired credential':'authentication rejected';
+          const tagged=Object.assign(new Error(`AI messages request rejected: HTTP 401, ${type}, ${reason}`),{status:401});
+          throw tagged;
+        }
+        throw e;
+      }
       return {
         content: res.content as unknown as LlmResponse["content"],
         stop_reason: (res.stop_reason ?? "end_turn") as LlmResponse["stop_reason"],
