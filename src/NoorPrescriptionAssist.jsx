@@ -3,17 +3,28 @@ import {Sparkles,Mic,Square,Loader2,Check} from 'lucide-react';
 import {noorPrescriptionStatus,draftPrescriptionWithNoor} from './lib/data.js';
 const DEFAULT_API={status:noorPrescriptionStatus,draft:draftPrescriptionWithNoor};
 export default function NoorPrescriptionAssist({clinicId,labId,notation,onApply,api=DEFAULT_API}) {
- const [text,setText]=useState(''),[preview,setPreview]=useState(null),[busy,setBusy]=useState(false),[applied,setApplied]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState(null),[listening,setListening]=useState(false),[interim,setInterim]=useState(''),[language,setLanguage]=useState('en-GB');
+ const [text,setText]=useState(''),[preview,setPreview]=useState(null),[busy,setBusy]=useState(false),[applied,setApplied]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState(null),[listening,setListening]=useState(false),[interim,setInterim]=useState(''),[language,setLanguage]=useState('en-GB'),[microphone,setMicrophone]=useState('unknown');
  const speech=useRef(null),timer=useRef(null),request=useRef(null),live=useRef(true);
  const Recognition=typeof window!=='undefined'&&(window.SpeechRecognition||window.webkitSpeechRecognition);
  useEffect(()=>{live.current=true;let active=true;api.status(clinicId,labId).then(s=>{if(active)setStatus(s);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;live.current=false;request.current?.abort();clearTimeout(timer.current);try{speech.current?.abort();}catch{}};},[clinicId,labId,api]);
  const change=value=>{setText(value);setPreview(null);setApplied(false);setError('');};
+ const allowMicrophone=async()=>{
+  if(!navigator.mediaDevices?.getUserMedia){setError('Microphone access is unavailable here. Open Dr-Crown in a browser with microphone support.');return;}
+  setMicrophone('requesting');setError('');
+  try{
+   const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+   // Permission check only: release every track without recording or sending audio.
+   stream.getTracks().forEach(track=>track.stop());
+   if(live.current)setMicrophone('granted');
+  }catch(e){if(live.current){setMicrophone('denied');setError(e.name==='NotAllowedError'?'Microphone access is blocked. Allow the microphone in your browser’s settings for dr-crown.com, then try again.':e.name==='NotFoundError'?'No microphone was found. Connect a microphone and try again.':'The microphone could not be opened. Check your device settings and try again.');}}
+ };
  const record=()=>{
   if(listening){try{speech.current?.stop();}catch{setListening(false);}clearTimeout(timer.current);return;}
   if(!Recognition)return;
   setError('');const rec=new Recognition();speech.current=rec;rec.lang=language;rec.continuous=true;rec.interimResults=true;
+  rec.onstart=()=>{if(live.current)setMicrophone('granted');};
   rec.onresult=e=>{if(!live.current)return;let final='',pending='';for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';else pending+=e.results[i][0].transcript;}if(final){setText(t=>(t+' '+final).trim().slice(0,4000));setPreview(null);setApplied(false);}setInterim(pending);};
-  rec.onerror=e=>{if(live.current){setListening(false);setInterim('');setError(e.error==='not-allowed'?'Microphone permission was not granted. You can type instead.':'Dictation stopped. Check the transcript, then type or try again.');}};
+  rec.onerror=e=>{if(live.current){setListening(false);setInterim('');if(e.error==='not-allowed')setMicrophone('denied');setError(e.error==='not-allowed'?'Microphone permission was not granted. You can type instead.':'Dictation stopped. Check the transcript, then type or try again.');}};
   rec.onend=()=>{if(live.current){setListening(false);setInterim('');}clearTimeout(timer.current);};
   try{rec.start();setListening(true);timer.current=setTimeout(()=>{try{rec.stop();}catch{}},45000);}catch{setError('Voice dictation is unavailable. Type your instructions instead.');}
  };
@@ -35,7 +46,8 @@ export default function NoorPrescriptionAssist({clinicId,labId,notation,onApply,
   {interim&&<p className="mt-1 text-sm italic text-slate-500" dir="auto">{interim}</p>}
   <div className="mt-2 flex flex-wrap items-center gap-2">
    <select aria-label="Dictation language" value={language} onChange={e=>setLanguage(e.target.value)} disabled={listening||busy} className="rounded-lg border border-slate-200 p-2 text-xs"><option value="en-GB">English</option><option value="ar-OM">العربية</option></select>
-   <button type="button" onClick={record} disabled={!Recognition||busy} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${listening?'border-rose-300 bg-rose-50 text-rose-700':'border-slate-200 text-slate-700'} disabled:opacity-50`}>{listening?<Square size={14}/>:<Mic size={14}/>} {listening?'Stop dictation':'Dictate'}</button>
+   <button type="button" onClick={allowMicrophone} disabled={busy||listening||microphone==='requesting'||microphone==='granted'} className="flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 disabled:opacity-50"><Mic size={14}/> {microphone==='requesting'?'Waiting for microphone permission…':microphone==='granted'?'Microphone allowed':'Allow microphone access'}</button>
+   <button type="button" onClick={record} disabled={!Recognition||busy||microphone==='requesting'} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${listening?'border-rose-300 bg-rose-50 text-rose-700':'border-slate-200 text-slate-700'} disabled:opacity-50`}>{listening?<Square size={14}/>:<Mic size={14}/>} {listening?'Stop dictation':'Dictate'}</button>
    <button type="button" onClick={prepare} disabled={busy||listening||!text.trim()||!status?.enabled||Number(status?.platform_budget?.remaining_usd)===0} className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">{busy?<Loader2 size={14} className="animate-spin"/>:<Sparkles size={14}/>} {busy?'Preparing draft…':'Prepare draft'}</button>
    {budget&&<span className="text-xs text-slate-500">Platform allowance: ${Number(budget.remaining_usd).toFixed(2)} left of ${Number(budget.limit_usd).toFixed(2)} this month</span>}
   </div>
