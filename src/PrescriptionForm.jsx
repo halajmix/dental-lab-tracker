@@ -2445,7 +2445,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             complete={stepComplete(2)}
             invalid={touched && stepInvalid(2)}
           >
-          {!isEditing&&sendingRole!=='receptionist'&&<div className="mb-5">{sendingClinicId&&labId?<NoorPrescriptionAssist key={`${sendingClinicId}:${labId}`} clinicId={sendingClinicId} labId={labId} notation={notation} onApply={applyNoorDraft} api={noorAssistApi}/>:<p className="rounded-xl bg-violet-50 p-3 text-sm text-violet-800">Choose the sending clinic and lab to use Noor’s voice or typed prescription assistant.</p>}</div>}
+          {!isEditing&&sendingRole!=='receptionist'&&<div className="mb-5">{sendingClinicId&&labId?<NoorPrescriptionAssist key={`${sendingClinicId}:${labId}`} clinicId={sendingClinicId} labId={labId} notation={notation} onApply={applyNoorDraft} api={noorAssistApi}/>:null}</div>}
           {/* Included — what physically goes to the lab with this case */}
           <section className="mb-6">
             <SectionHeader icon={PackageCheck} n="a" title="Included" subtitle="Tick everything being sent to the lab with this case" />

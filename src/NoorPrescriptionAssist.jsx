@@ -36,12 +36,12 @@ export default function NoorPrescriptionAssist({clinicId,labId,notation,onApply,
   finally{if(live.current)setBusy(false);}
  };
  const apply=()=>{try{onApply(preview);setApplied(true);setError('');}catch(e){setError(e.message);}};
+ if(!status||status.visible===false)return null;
  const budget=status?.platform_budget;
  return <section aria-label="Noor prescription assistant" className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
-  <div className="flex flex-wrap items-center gap-2"><Sparkles size={17} className="text-violet-600"/><h4 className="font-bold text-slate-800">Describe the prescription to Noor</h4><span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-700">Doctor preview</span></div>
-  <p className="mt-1 text-sm text-slate-600">Speak or type the treatment, teeth, material and shade. Review the draft, then add it to your form. Noor never submits it.</p>
-  <p className="mt-1 text-xs text-slate-500">Keep patient names and contact details in the patient section. Dictation may use your browser’s speech service; only the transcript you send is processed by Noor.</p>
-  <div className="mt-3 rounded-xl bg-violet-50 p-3 text-sm text-violet-900" aria-label="What to dictate"><p className="font-semibold">When you dictate, include:</p><ul className="mt-1 list-disc space-y-1 pl-5"><li>The treatment and each tooth: {notation==='FDI'?'FDI 21, 23, 24':'Universal tooth numbers'}, or names such as “upper right 4” (FDI 14) and “upper left 3” (FDI 23).</li><li>The material and shade. For bridges, say which teeth are abutments and which are pontics.</li><li>For an implant crown or bridge: implant brand/system, abutment type/size and colour code. Say “colour not applicable” if appropriate.</li></ul><p className="mt-1">Noor will ask for missing details before you can add the draft. Check the transcript and tooth numbers carefully.</p></div>
+  <div className="flex flex-wrap items-center gap-2"><Sparkles size={17} className="text-violet-600"/><h4 className="font-bold text-slate-800">Noor prescription assistant</h4><span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-700">{status.private_preview?'Private admin test':'Doctor preview'}</span></div>
+  <p className="mt-1 text-sm text-slate-600">Speak or type, then review the draft before adding it. Noor never submits the form.</p>
+  <p className="mt-2 rounded-lg bg-violet-50 p-2 text-xs text-violet-900" aria-label="What to dictate"><strong>Say:</strong> teeth (FDI 21, or “upper right 4”), treatment, material and shade. For bridges, identify pontics. For implants, add brand, abutment type/size and colour.</p>
   <label className="mt-3 block text-xs font-semibold text-slate-700" htmlFor="noor-rx-instructions">Treatment instructions · current notation: {notation}</label>
   <textarea id="noor-rx-instructions" value={text} onChange={e=>change(e.target.value)} disabled={busy} maxLength={4000} dir="auto" rows={3} placeholder="For example: FDI 26, monolithic zirconia crown, Vita Classical A2. " className="mt-1 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"/>
   {interim&&<p className="mt-1 text-sm italic text-slate-500" dir="auto">{interim}</p>}
@@ -52,6 +52,7 @@ export default function NoorPrescriptionAssist({clinicId,labId,notation,onApply,
    <button type="button" onClick={prepare} disabled={busy||listening||!text.trim()||!status?.enabled||Number(status?.platform_budget?.remaining_usd)===0} className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">{busy?<Loader2 size={14} className="animate-spin"/>:<Sparkles size={14}/>} {busy?'Preparing draft…':'Prepare draft'}</button>
 
   </div>
+  <details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">Dictation guidance &amp; privacy</summary><p className="mt-1">Check the transcript and tooth numbers. Upper right 4 = FDI 14; upper left 3 = FDI 23. Missing details require clarification. Keep patient names/contact details in the patient section. Your browser may process speech; only the transcript you send goes to Noor.</p></details>
   {!Recognition&&<p className="mt-2 text-xs text-slate-500">Browser dictation is unavailable here. Use your keyboard’s microphone or type your instructions.</p>}
   {budget&&Number(budget.remaining_usd)===0&&<p className="mt-2 text-xs text-amber-700">Noor is temporarily paused. You can still fill the form manually.</p>}
   {status&&!status.enabled&&<p className="mt-2 text-xs text-amber-700">Noor assistance is paused. You can fill the form manually.</p>}

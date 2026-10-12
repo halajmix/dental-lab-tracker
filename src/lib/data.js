@@ -1149,7 +1149,13 @@ export async function askNoor(question, { caseId = null } = {}) {
 
 async function noorAction(payload,signal) {
   const {data:sess}=await supabase.auth.getSession();
-  const token=sess?.session?.access_token;
+  let token=sess?.session?.access_token;
+  // Private Rx testing uses the real admin credential during View as.
+  // The server verifies that token and the current database role; a UI marker
+  // or forged stash never grants access. Other actions keep the clinic token.
+  if(['prescription_status','prescription_draft'].includes(payload.action)){
+    try{const stash=JSON.parse(sessionStorage.getItem('dr_crown_admin_stash')||'null');if(stash?.access_token)token=stash.access_token;}catch{}
+  }
   if(!token) throw new Error("You're signed out.");
   const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/noor`,{method:'POST',signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`,apikey:import.meta.env.VITE_SUPABASE_ANON_KEY},body:JSON.stringify(payload)});
   const body=await res.json();

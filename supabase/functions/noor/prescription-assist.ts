@@ -9,20 +9,23 @@ import type {NoorEnv} from './env.ts';
 import type {Caller,Db} from './lib/types.ts';
 export async function prescriptionAssist(body:any,caller:Caller,db:Db,admin:Db,env:NoorEnv,now:Date,traceId:string) {
   const response=(data:unknown,status=200)=>({data,status});
-  if(caller.kind!=='user'||caller.role!=='dentist')return response({error:'Prescription assistance is for active clinic accounts.'},403);
+  if(caller.kind!=='user'||!['dentist','admin'].includes(caller.role??''))return response({error:'Prescription assistance is for active clinic accounts.'},403);
   if(!/^[0-9a-f-]{36}$/i.test(body.clinic_id??'')||!/^[0-9a-f-]{36}$/i.test(body.lab_id??''))return response({error:'Select a clinic and lab first.'},400);
   if(!db.rpc)return response({error:'Prescription access could not be checked.'},503);
-  const [role,access,flags,lab,budget,pilot]=await Promise.all([
+  const platformAdmin=caller.kind==='user'&&caller.role==='admin';
+  const [role,access,flags,lab,budget,pilot,clinic]=await Promise.all([
     db.rpc('my_clinic_role',{target:body.clinic_id}),db.rpc('clinic_can_use_lab',{p_clinic:body.clinic_id,p_lab:body.lab_id}),
-    admin.from('feature_flags').select('key,enabled').in('key',['noor.global','noor.prescription_assist']),
-    admin.from('labs').select('status').eq('id',body.lab_id).maybeSingle(),admin.rpc!('noor_platform_budget_status'),admin.from('noor_pilot_settings').select('lab_id').eq('lab_id',body.lab_id).maybeSingle(),
+    admin.from('feature_flags').select('key,enabled').in('key',['noor.global','noor.prescription_assist','noor.prescription_admin_preview']),
+    admin.from('labs').select('status').eq('id',body.lab_id).maybeSingle(),admin.rpc!('noor_platform_budget_status'),admin.from('noor_pilot_settings').select('lab_id').eq('lab_id',body.lab_id).maybeSingle(),admin.from('clinics').select('status').eq('id',body.clinic_id).maybeSingle(),
   ]);
-  if(role.error||access.error)return response({error:'Prescription access could not be checked.'},503);
-  if(!['doctor','admin'].includes(role.data)||access.data!==true||lab.data?.status!=='active')return response({error:'You cannot prepare a prescription for this clinic and lab.'},403);
+  if(!platformAdmin&&(role.error||access.error))return response({error:'Prescription access could not be checked.'},503);
+  if((!platformAdmin&&(!['doctor','admin'].includes(role.data)||access.data!==true))||lab.data?.status!=='active'||clinic.error||clinic.data?.status!=='active')return response({error:'You cannot prepare a prescription for this clinic and lab.'},403);
   if(flags.error||budget.error||pilot.error||!budget.data)return response({error:'Noor budget or availability could not be checked.'},503);
-  const enabled=!!pilot.data&&['noor.global','noor.prescription_assist'].every(key=>flags.data?.some((f:any)=>f.key===key&&f.enabled));
-  if(body.action==='prescription_status')return response({enabled,platform_budget:budget.data});
-  if(!enabled)return response({error:'Noor prescription assistance is paused. You can still fill the form manually.'},503);
+  const flag=(key:string)=>!!flags.data?.some((f:any)=>f.key===key&&f.enabled);
+  const privatePreview=platformAdmin&&flag('noor.prescription_admin_preview');
+  const enabled=!!pilot.data&&flag('noor.global')&&(privatePreview||flag('noor.prescription_assist'));
+  if(body.action==='prescription_status')return response({enabled,visible:enabled,private_preview:privatePreview,platform_budget:enabled?budget.data:undefined});
+  if(!enabled)return response({error:'Noor prescription assistance is in private testing. You can fill the form manually.'},403);
   if(typeof body.text!=='string'||!body.text.trim()||body.text.length>4000||!['FDI','Universal'].includes(body.notation))return response({error:'Enter up to 4,000 characters of treatment instructions and select the tooth notation.'},400);
   if(!env.anthropicKey)return response({error:'Noor is temporarily unavailable.'},503);
   if(!await withinRateLimit(admin,`user:${caller.userId}`,env.userPerHour,3600000,now))return response({error:'Please wait before asking Noor again (20 requests per hour).'},429);

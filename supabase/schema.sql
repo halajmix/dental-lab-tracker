@@ -6770,3 +6770,9 @@ begin;
 insert into public.feature_flags(key,enabled) values('noor.prescription_assist',false) on conflict(key) do nothing;
 notify pgrst,'reload schema';
 commit;
+
+-- 20261013_noor_private_prescription_preview.sql
+begin;
+insert into public.feature_flags(key,enabled) values('noor.prescription_admin_preview',false) on conflict(key) do nothing;
+notify pgrst,'reload schema';
+commit;
