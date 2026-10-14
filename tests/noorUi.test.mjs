@@ -99,7 +99,7 @@ test("brief composition: due today, overdue excludes work-complete and received,
   assert.deepEqual(b.overdue.map((c) => c.id), ["C-B"]);             // C-C is work-complete → the clinic's delay, not the lab's
   assert.deepEqual(b.stale.map((c) => c.id), ["C-A"]);
   assert.deepEqual(b.awaiting.map((c) => c.id), ["C-B"]);
-  assert.deepEqual(b.decisions.map((d) => d.what), ["open escalation — stale case", "cancellation requested"]);
+  assert.deepEqual(b.decisions.map((d) => d.what), ["cancellation requested"]);
   assert.equal(b.isEmpty, false);
   assert.equal(composeNoorBriefClient({ cases: [], flags: [], clarifications: [], escalations: [], today: "2026-09-11" }).isEmpty, true);
 });
@@ -118,7 +118,7 @@ test("escalation inbox: open shows both buttons, acknowledged only resolve, reso
     { id: "e3", caseId: "C-B", category: "fee_dispute", summary: "done", status: "resolved", createdAt: "2026-09-09T06:00:00Z", context: {} },
   ];
   const html = r(h(N.NoorEscalationInbox, { escalations: esc, loading: false }));
-  assert.match(html, /Acknowledge/); assert.match(html, /04 Sep — picked up/); assert.match(html, /What Noor did: get_case/);
+  assert.match(html, /Acknowledge/); assert.match(html, /04 Sep — picked up/); assert.doesNotMatch(html, /What Noor did|Why it stopped|get_case/);
   assert.doesNotMatch(html, />done</);                                   // resolved hidden
   assert.equal((html.match(/Resolve</g) || []).length, 2);                // open + acknowledged
   assert.match(r(h(N.NoorEscalationInbox, { escalations: [], loading: false })), /Nothing escalated/);
@@ -164,4 +164,16 @@ test("status pill: a completed case with an open adjustment reads 'Sent back · 
   assert.match(L.r(hh(L.StatusPill, { caseObj: { ...c, stageIndex: 2 }, returningRound: round })), /Work in Progress/); // round on live work → stage still shown
   assert.match(L.r(hh(L.StatusPill, { caseObj: { ...c, cancelStatus: "cancelled" }, returningRound: round })), /Cancelled/); // cancellation still wins
   assert.equal(L.isReturningCase({ stageIndex: 4 }, round), true);
+});
+
+test('lab question panel contains no budget, usage or operational status details',()=>{
+ const html=r(h(N.AskNoorPanel,{}));assert.doesNotMatch(html,/Estimated AI|platform this month|monthly limit|daily limit|reserved|pilot active|Noor emails|Case check|recent AI request/i);assert.match(html,/Ask Noor/);
+});
+test('brief excludes finished work and historical stalled escalations, and labels returned deadlines',()=>{
+ const args={cases:[{id:'DONE',stageIndex:3,appointmentDate:'2026-10-14',clinicId:'k',prescription:{estReady:'2026-10-14'}},{id:'RETURN',stageIndex:4,appointmentDate:'2026-09-09',clinicId:'k',createdDate:'2026-09-01'}],flags:[],clarifications:[],escalations:[{caseId:'DONE',status:'open',category:'stale_case'}],today:'2026-10-14',rounds:[{parentCaseId:'RETURN',status:'open',createdAt:'2026-10-01'}],lab:{tat:6,turnaroundByClinic:{k:13}}};
+ const brief=composeNoorBriefClient(args);assert.deepEqual(brief.dueToday.map(c=>c.id),['RETURN']);assert.deepEqual(brief.decisions,[]);assert.equal(brief.dueDates.RETURN,'2026-10-14');assert.deepEqual(brief.returningIds,['RETURN']);
+});
+
+test('queue help starts collapsed with no automatic summary or telemetry',()=>{
+ const html=r(h(N.NoorHelpControl,{}));assert.match(html,/Ask Noor/);assert.match(html,/aria-expanded="false"/);assert.doesNotMatch(html,/Noor.s brief|Due today|Needs a decision|Monthly|allowance|reserved|Summarise my open follow-ups|<form/);
 });

@@ -81,7 +81,7 @@ import { RemakeModal } from "./Remake.jsx";
 import PrintRx from "./PrintRx.jsx";
 import PrintInvoice from "./PrintInvoice.jsx";
 import PrintReceipt from "./PrintReceipt.jsx";
-import { NoorFlagChips, NoorClarificationBanner, AskNoorPanel, NoorBriefCard, NoorEscalationInbox, NoorStatusPill } from "./Noor.jsx";
+import { NoorClarificationBanner, NoorHelpControl, NoorEscalationInbox } from "./Noor.jsx";
 import ContactLabModal from "./ContactLab.jsx";
 import { exportCasesCSV } from "./exportCsv.js";
 import {
@@ -2158,7 +2158,6 @@ function DentistDashboard({
                           <RefreshCcw size={10} /> {m.sentBack ? "Sent back" : "Follow-up"} · {m.label} · {fmtLogDate(r.createdAt)}
                         </span>
                       ); })()}
-                      <NoorFlagChips flags={noorFlagsByCase[c.id] ?? []} compact />
                       {c.remake && (
                         <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
                           <RefreshCcw size={9} /> Remake
@@ -2522,21 +2521,15 @@ function LabDashboard({ lab, queue, rounds = [], clinicsById, noor = null, onAdv
       <div>
         <h2 className="flex items-center gap-2 text-lg font-bold text-slate-800">
           <Building2 size={18} className="text-blue-600" /> {lab.name}
-          {noor && <NoorStatusPill />}
         </h2>
         <p className="text-sm text-slate-500">Production Queue</p>
       </div>
-
-      {/* Noor's brief — the same sections as the morning email, live */}
-      {noor && (
-        <NoorBriefCard lab={lab} rounds={rounds} cases={queue} flags={noor.flags} clarifications={noor.clarifications} escalations={noor.escalations} clinicsById={clinicsById} onOpenCase={onOpenCase} />
-      )}
 
       {/* Delivery pressure first: everything due within 72h (or overdue),
           most urgent on top, before any cards or lists */}
       <UpcomingDeadlines cases={queue} clinicsById={clinicsById} onOpenCase={onOpenCase} now={now} />
 
-      {noor && <AskNoorPanel />}
+      {noor && <NoorHelpControl />}
 
       {/* Active section header + Export, in one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2962,7 +2955,6 @@ function LabCaseCard({ c, clinicName, returningRound, noorFlags = [], onAdvance,
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           {urgent && <AppointmentBadge caseObj={c} />}
-          <NoorFlagChips flags={noorFlags} />
           {c.remake && (
             <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">
               <RefreshCcw size={11} /> Remake

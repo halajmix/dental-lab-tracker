@@ -1115,15 +1115,20 @@ export function composeNoorBriefClient({ cases, flags, clarifications, escalatio
     const calculated=due.toISOString().slice(0,10),stored=c.prescription?.estReady;
     return round?calculated:stored&&stored>calculated?stored:calculated;
   };
-  const dueToday = open.filter((c) => (!returning(c)&&c.appointmentDate === today) || promise(c) === today);
-  const overdue = open.filter((c) => !dueToday.includes(c) && ((flagsByCase.get(c.id) ?? []).some((f) => f.kind === "overdue") || (!returning(c)&&c.appointmentDate && c.appointmentDate < today && c.stageIndex < 3)));
-  const awaiting = open.filter((c) => clarByCase.has(c.id));
-  const stale = open.filter((c) => (flagsByCase.get(c.id) ?? []).some((f) => f.kind === "stale"));
+  const work=open.filter(c=>c.stageIndex<3||returning(c));
+  const workIds=new Set(work.map(c=>c.id));
+  const dueDates=Object.fromEntries(work.map(c=>[c.id,promise(c)]));
+  const dueToday = work.filter((c) => (!returning(c)&&c.appointmentDate === today) || promise(c) === today);
+  const overdue = work.filter((c) => !dueToday.includes(c) && ((flagsByCase.get(c.id) ?? []).some((f) => f.kind === "overdue") || (!returning(c)&&c.appointmentDate && c.appointmentDate < today && c.stageIndex < 3)));
+  const awaiting = work.filter((c) => clarByCase.has(c.id));
+  const stale = work.filter((c) => (flagsByCase.get(c.id) ?? []).some((f) => f.kind === "stale"));
+  const staleIds=new Set(stale.map(c=>c.id));
+  const labels={stale_case:'Review progress',fee_dispute:'Review fee query',complaint:'Review complaint',clinical_question:'Answer clinical question',clarification_failed:'Contact the clinic',tool_failure:'Review case',user_requested:'Staff help requested',pattern_observation:'Review recurring issue'};
   const decisions = [
-    ...escalations.filter((e) => e.status === "open").map((e) => ({ caseId: e.caseId, what: `open escalation — ${e.category.replace(/_/g, " ")}` })),
+    ...escalations.filter((e) => e.status === 'open' && (e.category!=='stale_case'||(workIds.has(e.caseId)&&!staleIds.has(e.caseId)))).map((e) => ({ caseId: e.caseId, what: labels[e.category]??'Review case' })),
     ...open.filter((c) => c.cancelStatus === "requested").map((c) => ({ caseId: c.id, what: "cancellation requested" })),
   ];
-  return { dueToday, overdue, awaiting, stale, decisions, isEmpty: !dueToday.length && !overdue.length && !awaiting.length && !stale.length && !decisions.length };
+  return { dueToday, overdue, awaiting, stale, decisions, dueDates,returningIds:work.filter(returning).map(c=>c.id), isEmpty: !dueToday.length && !overdue.length && !awaiting.length && !stale.length && !decisions.length };
 }
 
 /** Ask Noor a question. Sends the user's own session token; the function

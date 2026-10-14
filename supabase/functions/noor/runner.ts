@@ -45,7 +45,7 @@ export async function runAgent(o: RunOptions): Promise<RunResult> {
     } catch (e) {
       const detail=String((e as Error).message??'Model request failed').replace(/sk-[\w-]+/g,'[redacted]').slice(0,300);
       // Store errors on the run, but never echo provider response bodies to users.
-      return { text: /daily AI budget|monthly AI budget|context is too large/.test(detail)?detail:FAIL_CLOSED_TEXT[lang], outcome: "failed", toolCalls: calls, ...usage(), error:detail };
+      return { text: /daily AI budget|monthly AI budget/.test(detail)?(lang==='ar'?'نور غير متاح مؤقتًا للأسئلة. يمكنك متابعة العمل على الحالات.':'Noor is temporarily unavailable for questions. You can continue working on cases.'):/context is too large/.test(detail)?detail:FAIL_CLOSED_TEXT[lang], outcome: "failed", toolCalls: calls, ...usage(), error:detail };
     }
     inputTokens += res.usage?.input_tokens ?? 0; outputTokens += res.usage?.output_tokens ?? 0; model = res.model ?? model;
     cacheReadTokens+=res.usage?.cache_read_input_tokens??0;cacheCreationTokens+=res.usage?.cache_creation_input_tokens??0;estimatedCostUsd+=usageCost(res.usage??{});

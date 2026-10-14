@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, AlertTriangle, Clock, MessageSquareWarning, Send, Loader2, Check, CheckCheck, Inbox, Flag } from "lucide-react";
-import { answerNoorClarification, askNoor, composeNoorBriefClient, setNoorEscalationStatus,fetchNoorStatus,rateNoorAnswer } from "./lib/data.js";
+import { answerNoorClarification, askNoor, composeNoorBriefClient, setNoorEscalationStatus,rateNoorAnswer } from "./lib/data.js";
 
 /**
  * Noor — the in-app surfaces for the AI case coordinator.
@@ -134,7 +134,6 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white">
-      <NoorPilotStatus />
       <div className="flex items-center gap-2 border-b border-slate-100 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-400">
         <Sparkles size={13} className="text-violet-500" /> Ask Noor
         <span className="ml-auto text-[10px] font-medium normal-case tracking-normal text-slate-400">AI assistant · answers only from your cases</span>
@@ -178,25 +177,13 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
   );
 }
 
-export function NoorPilotStatus() {
-  const [status,setStatus]=useState(null),[error,setError]=useState('');
-  useEffect(()=>{let active=true;const load=()=>fetchNoorStatus().then(s=>{if(active){setStatus(s);setError('');}}).catch(e=>{if(active)setError(e.message);});load();const timer=setInterval(load,60000);return()=>{active=false;clearInterval(timer);};},[]);
-  const mode=error?'Status unavailable':!status?'Checking Noor…':Number(status.platform_budget?.remaining_usd)===0?'Monthly AI allowance used':status.usage.paused?'AI questions paused':status.mode==='pilot'?'Smile World pilot active':status.enabled?'Noor is observing':'Noor is off';
-  const stamp=status?.last_watch?.finished_at;
-  const monthly=status?.platform_budget;
-  const stale=stamp&&Date.now()-new Date(stamp).getTime()>45*60000;
-  return <div className="border-b border-violet-100 bg-violet-50 p-3 text-xs text-slate-700" role="status">
-    <div className="font-bold text-violet-800">{mode}</div>
-    {status&&<><p className="mt-1">Ask about your cases, due work, and follow-ups. {status.emails_enabled?'Email enabled.':'Noor emails are off; your normal case notifications continue.'}</p>
-      <p className="mt-1">{stamp?`Case check: ${new Date(stamp).toLocaleString('en-GB',{timeZone:'Asia/Muscat',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} Oman time${stale?' · monitoring delayed':''}`:'Waiting for the first case check.'}</p>
-      <p className="mt-1">Estimated AI today: ${Number(status.usage.spent_usd).toFixed(4)} of ${Number(status.budget_usd).toFixed(2)} daily limit · {status.feedback.helpful} helpful / {status.feedback.wrong} reported wrong.</p>
-      {monthly&&<p className="mt-1 font-semibold">Entire platform this month: ${Number(monthly.spent_usd).toFixed(4)} estimated use · ${Number(monthly.reserved_usd).toFixed(4)} reserved · ${Number(monthly.remaining_usd).toFixed(2)} available of the ${Number(monthly.limit_usd).toFixed(2)} shared monthly limit. Resets on the first in Oman time.</p>}
-      {Number(status.usage.reserved_usd)>0&&<p className="mt-1">${Number(status.usage.reserved_usd).toFixed(4)} held for ongoing or unconfirmed requests.</p>}
-      {Number(status.platform_budget?.remaining_usd)===0&&<p className="mt-1">The shared monthly allowance resets on the first of next month in Oman time. Case monitoring continues.</p>}
-      {status.usage.paused&&Number(status.platform_budget?.remaining_usd)!==0&&<p className="mt-1">Questions resume tomorrow. Case monitoring continues.</p>}
-      {status.recent.some(r=>r.outcome==='failed'||r.fallback_reason)&&<p className="mt-1 text-amber-800">A recent AI request needed attention. Please use “Something is wrong” if an answer is unhelpful.</p>}
-    </>}
-    {error&&<p className="mt-1 text-rose-700">{error}</p>}
+/** Quiet help: no panel, request or suggestions until the user opens it. */
+export function NoorHelpControl(){
+  const [open,setOpen]=useState(false);
+  const id=React.useId();
+  return <div>
+    <button type="button" aria-expanded={open} aria-controls={id} onClick={()=>setOpen(v=>!v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"><Sparkles size={13}/>{open?'Close Noor':'Ask Noor'}</button>
+    {open&&<div id={id} className="mt-2"><AskNoorPanel/></div>}
   </div>;
 }
 
@@ -237,8 +224,8 @@ export function NoorBriefCard({ cases, flags, clarifications, escalations, clini
       ) : (
         <div className="space-y-3">
           <Section title="Due today" tone="text-sky-700" count={brief.dueToday.length}>{brief.dueToday.map((c) => <Row key={c.id} c={c} note={c.deliveryTime !== "Anytime" ? c.deliveryTime : null} />)}</Section>
-          <Section title="Overdue" tone="text-rose-700" count={brief.overdue.length}>{brief.overdue.map((c) => <Row key={c.id} c={c} note={c.appointmentDate ? `needed ${c.appointmentDate}` : null} />)}</Section>
-          <Section title="Stalled" tone="text-orange-700" count={brief.stale.length}>{brief.stale.map((c) => <Row key={c.id} c={c} note="no activity" />)}</Section>
+          <Section title="Overdue" tone="text-rose-700" count={brief.overdue.length}>{brief.overdue.map((c) => <Row key={c.id} c={c} note={brief.returningIds.includes(c.id)?`Return due ${brief.dueDates[c.id]??'—'}`:c.appointmentDate?`Appointment ${c.appointmentDate}`:brief.dueDates[c.id]?`Due ${brief.dueDates[c.id]}`:null} />)}</Section>
+          <Section title="Stalled" tone="text-orange-700" count={brief.stale.length}>{brief.stale.map((c) => <Row key={c.id} c={c} note="Check progress" />)}</Section>
           <Section title="Awaiting clarification" tone="text-amber-700" count={brief.awaiting.length}>{brief.awaiting.map((c) => <Row key={c.id} c={c} note="clinic to answer" />)}</Section>
           <Section title="Needs a decision" tone="text-violet-700" count={brief.decisions.length}>
             {brief.decisions.map((d, i) => {
@@ -302,8 +289,6 @@ export function NoorEscalationInbox({ escalations, loading, onChanged, onOpenCas
                 <details className="mt-2 text-xs text-slate-600">
                   <summary className="cursor-pointer font-semibold text-slate-500">Context log</summary>
                   <ul className="mt-1 list-disc space-y-0.5 pl-5">{ctx.timeline.map((l, i) => <li key={i}>{l}</li>)}</ul>
-                  {ctx.attempted?.length > 0 && <p className="mt-1">What Noor did: {ctx.attempted.join(", ")}</p>}
-                  {ctx.stop_reason && <p>Why it stopped: {ctx.stop_reason}</p>}
                 </details>
               )}
               {e.status !== "resolved" && (
@@ -325,8 +310,8 @@ export function NoorEscalationInbox({ escalations, loading, onChanged, onOpenCas
 /** Small header pill so the lab knows Noor is on. */
 export function NoorStatusPill() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-bold text-violet-700" title="Noor, the AI case coordinator, is watching this lab's cases">
-      <Sparkles size={11} /> Noor pilot
+    <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-bold text-violet-700" title="Ask Noor about your cases">
+      <Sparkles size={11} /> Noor
     </span>
   );
 }
