@@ -167,7 +167,7 @@ test("status pill: a completed case with an open adjustment reads 'Sent back · 
 });
 
 test('lab question panel contains no budget, usage or operational status details',()=>{
- const html=r(h(N.AskNoorPanel,{}));assert.doesNotMatch(html,/Estimated AI|platform this month|monthly limit|daily limit|reserved|pilot active|Noor emails|Case check|recent AI request/i);assert.match(html,/Ask Noor/);
+ const html=r(h(N.AskNoorPanel,{}));assert.doesNotMatch(html,/Estimated AI|platform this month|monthly limit|daily limit|reserved|pilot active|Noor emails|Case check|recent AI request|Which cases are overdue|Summarise my open follow-ups/i);assert.match(html,/Ask Noor/);
 });
 test('brief excludes finished work and historical stalled escalations, and labels returned deadlines',()=>{
  const args={cases:[{id:'DONE',stageIndex:3,appointmentDate:'2026-10-14',clinicId:'k',prescription:{estReady:'2026-10-14'}},{id:'RETURN',stageIndex:4,appointmentDate:'2026-09-09',clinicId:'k',createdDate:'2026-09-01'}],flags:[],clarifications:[],escalations:[{caseId:'DONE',status:'open',category:'stale_case'}],today:'2026-10-14',rounds:[{parentCaseId:'RETURN',status:'open',createdAt:'2026-10-01'}],lab:{tat:6,turnaroundByClinic:{k:13}}};

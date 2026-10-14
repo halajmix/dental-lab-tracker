@@ -159,14 +159,13 @@ export function AskNoorPanel({ caseId = null, placeholder }) {
           <div ref={endRef} />
         </div>
       )}
-      {!thread.length&&<div className="flex flex-wrap gap-2 px-3 pt-3">{['What needs attention today?','Which cases are overdue?','Summarise my open follow-ups.'].map(text=><button key={text} type="button" onClick={()=>setQ(text)} className="rounded-full bg-violet-50 px-3 py-1.5 text-xs text-violet-700">{text}</button>)}</div>}
       {feedbackError&&<p role="alert" className="px-3 text-xs text-rose-700">{feedbackError}</p>}
       <form onSubmit={ask} className="flex gap-2 p-3">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           maxLength={2000}
-          placeholder={placeholder ?? (caseId ? `Ask about ${caseId}…` : "Where is case …? What's due this week?")}
+          placeholder={placeholder ?? (caseId ? `Ask about ${caseId}…` : "Ask about a case…")}
           className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
         />
         <button type="submit" disabled={busy || !q.trim()} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
