@@ -912,7 +912,7 @@ const emptyDraft = () => ({
 // troubleshooting files aimed at the same lab that made the original.
 function ModeToggle({ value, onChange }) {
   return (
-    <div className="mx-3 mt-3 grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 sm:mx-5">
+    <div className="mx-3 my-1 grid shrink-0 grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-0.5 sm:mx-4">
       {[
         { id: "new", label: "New Case", icon: FileText },
         { id: "followup", label: "Follow-up existing case", icon: RotateCcw },
@@ -921,7 +921,7 @@ function ModeToggle({ value, onChange }) {
           key={id}
           type="button"
           onClick={() => onChange(id)}
-          className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+          className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${
             value === id ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
           }`}
         >
@@ -2334,20 +2334,20 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
 
   /* ---------------- render ---------------- */
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-2">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => { if (!submitLock.current) onClose(); }} />
-      <div onChangeCapture={() => { if (sandbox) { setTestComplete(false); setReviewOpen(false); } }} role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 max-h-[100dvh] w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92dvh] sm:rounded-2xl">
+      <div onChangeCapture={() => { if (sandbox) { setTestComplete(false); setReviewOpen(false); } }} role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:h-[96dvh] sm:rounded-2xl">
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white">
+        <div data-rx-header className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-3 py-2 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white">
               <FileText size={18} />
             </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-800">
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-bold text-slate-800">
                 {isEditing ? `Edit Prescription · ${editing.id}` : "Digital Laboratory Prescription"}
               </h3>
-              <p className="text-[11px] text-slate-500">{sandbox ? "Private test · Nothing is sent" : "Laboratory prescription"}</p>
+              {sandbox && <p className="text-[10px] text-slate-500">Private test · Nothing is sent</p>}
             </div>
           </div>
           <button onClick={() => { if (!submitLock.current) onClose(); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
@@ -2359,20 +2359,21 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         {!isEditing && !sandbox && <ModeToggle value={formKind} onChange={value => { if (!submitLock.current) setFormKind(value); }} />}
 
         {assistMode && <div role="progressbar" aria-label="Prescription completion" aria-valuemin={0} aria-valuemax={3} aria-valuenow={[1,2,3].filter(stepComplete).length} className="h-1 shrink-0 bg-slate-100"><div className="h-full bg-violet-500 transition-all" style={{width:`${[1,2,3].filter(stepComplete).length/3*100}%`}} /></div>}
-        {assistMode && <nav aria-label="Prescription progress" className="grid shrink-0 grid-cols-3 gap-1 border-b bg-white px-3 py-3 sm:px-5">{guideLabels.map((label,i)=><button type="button" key={label} aria-current={!reviewOpen&&step===i+1?'step':undefined} disabled={assistMode==='ai'&&((i>0&&!stepComplete(1))||(i>1&&!stepComplete(2)))} onClick={()=>{setReviewOpen(false);setStep(i+1);}} className={`flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs sm:text-sm ${!reviewOpen&&step===i+1?'bg-violet-50 text-violet-800':'text-slate-500'}`}><span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${stepComplete(i+1)?'bg-emerald-100 text-emerald-700':'bg-slate-100'}`}>{stepComplete(i+1)?<Check size={14}/>:i+1}</span><span>{label}</span></button>)}</nav>}
-        {!isEditing && !sandbox && <div className="border-b border-slate-100 px-4 py-2 text-xs" role="status">
-          {hasDraft ? (draftJson === savedDraftJson
-            ? "Draft saved for 24 hours. You can close and resume later."
-            : draftStatus === "error" ? "Draft could not be saved. Keep this tab open until saving succeeds."
-            : "Saving your draft… Keep this tab open until saved.")
-            : "Complete the three steps below. Required fields are marked *."}
-          {hasDraft && draftStatus === "error" && <button type="button" className="ml-2 font-semibold text-blue-700 underline" onClick={() => setDraftRetry(n => n + 1)}>Retry draft save</button>}
-          {unsavedFiles && <span className="block text-amber-700">Unfinished uploads are not protected by the draft. Retry or remove failed files before sending.</span>}
-        </div>}
+        {assistMode && <nav aria-label="Prescription progress" className="grid shrink-0 grid-cols-3 gap-1 border-b bg-white px-2 py-1 sm:px-4">{guideLabels.map((label,i)=><button type="button" key={label} aria-current={!reviewOpen&&step===i+1?'step':undefined} disabled={assistMode==='ai'&&((i>0&&!stepComplete(1))||(i>1&&!stepComplete(2)))} onClick={()=>{setReviewOpen(false);setStep(i+1);}} className={`flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left text-[11px] sm:text-xs ${!reviewOpen&&step===i+1?'bg-violet-50 text-violet-800':'text-slate-500'}`}><span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${stepComplete(i+1)?'bg-emerald-100 text-emerald-700':'bg-slate-100'}`}>{stepComplete(i+1)?<Check size={14}/>:i+1}</span><span className="min-w-0 leading-tight">{label}</span></button>)}</nav>}
         {/* Fieldset's anonymous content box does not reliably receive wheel
             scrolling. A normal flex child owns scrolling; fieldset only
             disables the controls while a submission is in progress. */}
         <div data-rx-scroll className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-50/60">
+        {!isEditing && !sandbox && <div className="border-b border-slate-100 px-3 py-1 text-[11px]" role="status">
+          {hasDraft ? (draftJson === savedDraftJson
+            ? "Draft saved · 24 hours"
+            : draftStatus === "error" ? "Draft could not be saved. Keep this tab open until saving succeeds."
+            : "Saving your draft… Keep this tab open until saved.")
+            : "Required fields are marked *."}
+          {hasDraft && draftStatus === "error" && <button type="button" className="ml-2 font-semibold text-blue-700 underline" onClick={() => setDraftRetry(n => n + 1)}>Retry draft save</button>}
+          {unsavedFiles && <span className="block text-amber-700">Unfinished uploads are not protected by the draft. Retry or remove failed files before sending.</span>}
+        </div>}
+
         <fieldset disabled={submitting} className="min-w-0 space-y-3 px-3 py-4 sm:px-5">
           {assistMode==='ai' ? <GuidedPrescription
             step={step||1} setStep={n=>{setReviewOpen(false);setStep(n);}} review={reviewOpen} edit={n=>{setReviewOpen(false);setStep(n);}}
@@ -3010,14 +3011,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           </Step>
           </>}
         </fieldset>
-        </div>
-
-        {/* Sticky summary + action bar — always in reach, never scrolls away */}
-        {sandbox && testComplete && <p role="status" className="bg-emerald-50 px-6 py-3 text-sm font-semibold text-emerald-800">Test passed: the form is complete. Nothing was sent or saved. You can change details and test again.</p>}
-        {saveError && <p role="alert" className="bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-700">{saveError}</p>}
-        <div className={`shrink-0 border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
           {/* live order summary */}
-          <div className={`${assistMode==='manual'?'flex':'hidden'} flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-2 text-[11px] sm:px-6`}>
+          <div className={`${assistMode==='manual'?'flex':'hidden'} flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 px-3 py-1 text-[11px] sm:px-4`}>
             {caseMode === "restorations" ? (
               <>
                 <span className="flex items-center gap-1 font-semibold text-slate-700">
@@ -3063,8 +3058,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             </span>
           </div>
 
-          {/* actions */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="px-3 py-1.5 sm:px-4">
             {!assistMode ? <span className="text-xs text-slate-500">Use fictional patient details.</span> : touched && !isValid ? (
               <div role="alert" className="flex items-start gap-1.5 text-xs text-rose-700">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
@@ -3082,15 +3076,23 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                     : `Still needed: ${missing.join(", ")}.`}
               </div>
             )}
-            {/* Stacked full-width on phones (three inline buttons overflow a
-                320px viewport), inline once there's room. */}
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          </div>
+        </div>
+
+        {/* Only actions stay fixed; summary and status scroll with the form. */}
+        {sandbox && testComplete && <p role="status" className="bg-emerald-50 px-6 py-3 text-sm font-semibold text-emerald-800">Test passed: the form is complete. Nothing was sent or saved. You can change details and test again.</p>}
+        {saveError && <p role="alert" className="bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-700">{saveError}</p>}
+        <div data-rx-footer className="shrink-0 border-t border-slate-200 bg-white">
+          {/* actions */}
+          <div className="flex items-center justify-end px-3 py-2 sm:px-4">
+            {/* Two compact columns on phones; one action row on larger screens. */}
+            <div className="grid w-full grid-cols-2 gap-1.5 [&>button]:min-h-10 sm:flex sm:w-auto sm:flex-row sm:[&>button]:min-h-0">
               <button
                 type="button"
                 style={!assistMode ? {display:'none'} : undefined}
                 disabled={submitting}
                 onClick={() => submit()}
-                className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:py-2 ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white sm:order-2 ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
               >
                 <Check size={15} /> {assistMode==='ai'&&!reviewOpen?"Review prescription":sandbox ? "Test prescription" : submitting ? "Saving…" : isEditing ? "Save Changes" : "Submit Prescription"}
               </button>
@@ -3100,12 +3102,12 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   disabled={submitting}
                   onClick={() => submit({ share: true })}
                   title="Save the case and immediately share the Rx PDF with the patient"
-                  className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-3 sm:py-2 ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
+                  className={`flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white sm:order-3 ${isValid ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-300 cursor-not-allowed"}`}
                 >
                   <MessageCircle size={15} /> Submit &amp; Share
                 </button>
               )}
-              <button type="button" disabled={submitting} onClick={() => { if (!submitLock.current) onClose(); }} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
+              <button type="button" disabled={submitting} onClick={() => { if (!submitLock.current) onClose(); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 sm:order-1">
                 {sandbox ? "Close test" : isEditing ? "Cancel" : "Close & keep draft"}
               </button>
               {/* Cancel keeps the draft (it minimizes to a pill); Discard
@@ -3128,7 +3130,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   <button
                     type="button"
                     onClick={() => setDiscardConfirm(true)}
-                    className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 sm:order-0 sm:py-2"
+                    className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 sm:order-0"
                   >
                     <Trash2 size={14} /> Discard draft
                   </button>
