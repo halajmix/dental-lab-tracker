@@ -32,3 +32,12 @@ test("AI prescription must pass a separate human review before the test action",
  await vm.runInContext("(async (opts = {}) => {"+handler+")()",ctx);
  assert.deepEqual(ctx.events,[["touched",true],["complete",true]]);
 });
+
+test('sandbox attachment workers stop before storage calls, even when invoked directly',async()=>{
+ const main=source.split('export default function PrescriptionForm')[1];
+ for(const [name,next] of [['uploadOneScan','addScans'],['uploadOnePhoto','addPhotos']]){
+  const body=main.split(`  const ${name} = async (entryId, file) => {`)[1].split(`\n  const ${next}`)[0].trim().replace(/;$/,'');
+  // Any fall-through hits undefined storage/upload state and fails the test.
+  await vm.runInNewContext('(async (entryId,file) => {'+body+')("fictional",{})',{sandbox:true});
+ }
+});
