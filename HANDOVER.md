@@ -13,6 +13,10 @@ patients and real money. There is no separate staging backend. Super Admin has a
 
 Noor has a shared $15/month platform AI cap. Prescription dictation/typed assistance is now PRIVATE super-admin testing only; ordinary dentists use the manual form. Public prescription flag is off; private admin preview flag is on. Use Super Admin → Test prescription → select a clinic context → select Smile World → Treatment. This sandbox shares the form and Noor service, but cannot save/send cases, share prescriptions, upload files, invite dentists or read/write real drafts. Test input is memory-only and clears on close; AI requests still use the existing private gate and budget. The clinic named “Testing platform” is an ordinary production organization, not isolation by itself. The expired Anthropic key was replaced by the owner and real provider checks passed. See [the release notes](docs/agents/noor/08-prescription-assistant-and-budget.md) for scope, budget accounting, flags, verification and voice limitations.
 
+## 2026-10-19 private prescription sandbox
+
+Published frontend `index-BwNJqJz1.js`. Chrome Super Admin verified: Test prescription → Testing platform context → Smile World → Treatment. Real Noor synthetic request returned FDI 21 / Monolithic Zirconia / A2, reviewed and applied to the memory-only form. Missing patient/date validation passed; complete test clicked twice with local success, file controls disabled, closing/reopening cleared the patient and restorations. No live case-save handler is supplied by this entry point. No microphone recording or device compatibility claim was made. No browser console errors observed. Checks: 63 client tests (including 14 Noor UI tests and two sandbox handler tests), 66 Noor runtime tests, undefined identifier/component checks and production build. Public prescription flag remains off. This is a non-submitting form sandbox, not a separate staging backend; Noor calls retain normal private authorization, audit and budget enforcement.
+
 ## Stack
 
 | | |
