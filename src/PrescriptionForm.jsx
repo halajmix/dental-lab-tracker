@@ -40,7 +40,8 @@ import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
 import MobilePhotoQR from "./MobilePhotoQR.jsx";
 import ClinicDentistPicker from "./ClinicDentistPicker.jsx";
-import NoorPrescriptionAssist from './NoorPrescriptionAssist.jsx';
+import GuidedPrescription from './GuidedPrescription.jsx';
+import { guideLabels } from './lib/rxGuide.js';
 
 /* ================================================================== */
 /*  Reference data — clinical dictionaries                            */
@@ -1339,6 +1340,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // Sandbox never reads or writes a user’s persistent prescription draft.
   const userId = sandbox ? null : suppliedUserId;
   const [testComplete, setTestComplete] = useState(false);
+  const [assistMode, setAssistMode] = useState(sandbox ? null : 'manual');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [appointmentTime, setAppointmentTime] = useState('');
+  const [filesChoice, setFilesChoice] = useState(null);
+  const [shadePhotosRequired, setShadePhotosRequired] = useState(false);
   // Keep wheel/touch scrolling inside the prescription, including follow-ups.
   // Restore the page's existing styles when closing or unmounting the form.
   useEffect(() => {
@@ -1443,6 +1449,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // id per form session (no case row exists yet while the form is open).
   const [photos, setPhotos] = useState([]);
   const [photoGroupId, setPhotoGroupId] = useState(() => crypto.randomUUID());
+  const sandboxFiles = useRef([]);
+  sandboxFiles.current = sandbox ? [...photos, ...scans] : [];
+  useEffect(() => () => {
+    sandboxFiles.current.forEach(f => { if(f.url?.startsWith('blob:')) URL.revokeObjectURL(f.url); if(f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
+  }, []);
   // QR mobile upload modal (Phase 51) — MUST stay above the !open early return.
   const [qrOpen, setQrOpen] = useState(false);
   const [notes, setNotes] = useState("");
@@ -1511,6 +1522,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     }
     wasEditingRef.current = true;
     const p = editing.prescription ?? {};
+    setAppointmentTime(p.appointmentTime ?? "");
     setNotation(p.notation ?? "FDI");
     setPatientName(editing.patientName ?? "");
     const pid = editing.patientId === "PT-NEW" ? "" : editing.patientId ?? "";
@@ -1564,7 +1576,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   }, [open, editing]);
 
   const reset = () => {
-    setTestComplete(false);
+    setTestComplete(false); setReviewOpen(false); setAppointmentTime(''); setFilesChoice(null); setShadePhotosRequired(false);
     submissionId.current = null;
     setSavedDraftJson(""); setDraftStatus("idle");
     setNotation("FDI"); setMode("unit"); setSelection({});
@@ -1590,7 +1602,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // it into the minimized pill. Submitting or discarding deletes it; the
   // server hides + deletes drafts older than 24 hours.
   const serializeRxDraft = () => ({
-    notation, mode, selection,
+    notation, mode, selection, appointmentTime,
     patientName, patientId, patientPhone, showPatientExtras,
     selectedClinicId, treatingDentistId, treatingDentistName, included, includedOther,
     category, material, shadeGuide, vitaShade, stumpShade, arches,
@@ -1604,6 +1616,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   });
   const hydrateRxDraft = (d) => {
     submissionId.current = d.submissionId ?? null;
+    setAppointmentTime(d.appointmentTime ?? "");
     setNotation(d.notation ?? "FDI");
     setMode(d.mode ?? "unit");
     setSelection(d.selection ?? {});
@@ -1984,7 +1997,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   /* ---------------- TAT auto-calculation ---------------- */
   const lab = labById[labId];
   const applyNoorDraft=(proposal)=>{
-    setTestComplete(false);
+    setTestComplete(false);setReviewOpen(false);
     if(!proposal?.canApply) throw new Error('Clarify the missing treatment details before adding the draft.');
     if(draftDirty) throw new Error('Save or cancel the restoration currently being edited first.');
     const fixed=proposal.items.every(r=>RESTORATION_CATEGORIES.includes(r.category));
@@ -2000,6 +2013,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       setCaseMode('appliance');setCategory(r.category);setMaterial(r.material);setShadeGuide(r.shadeGuide);setVitaShade(r.vitaShade);setStumpShade(r.stumpShade);
       setSelection(Object.fromEntries(r.teeth.map(t=>[t.universal,t.role])));setImplantSystem(r.implantSystem);setAbutmentType(r.abutmentType);setAbutmentColor(r.abutmentColor);
     }
+    if(proposal.requiresShadePhotos){setShadePhotosRequired(true);setFilesChoice(true);}
     setNotation(proposal.notation);
     if(proposal.notes)setNotes(prev=>[prev,proposal.notes].filter(Boolean).join('\n'));
     if(proposal.appointmentDate&&!insertionDate)setInsertionDate(proposal.appointmentDate);
@@ -2067,7 +2081,6 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     }
   };
   const addScans = (fileList) => {
-    if (sandbox) return;
     const entries = Array.from(fileList).map((file) => {
       // The accept filter is off on iOS (scanPickerAccept) — gate by extension here.
       const typeOk = classifyRxFile(file.name).kind === "scan";
@@ -2076,8 +2089,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         file,
         name: file.name,
         size: file.size,
-        url: null,
-        uploading: typeOk && file.size <= SCAN_MAX_BYTES,
+        url: sandbox ? URL.createObjectURL(file) : null,
+        uploading: !sandbox && typeOk && file.size <= SCAN_MAX_BYTES,
         error: !typeOk ? "Not an STL or PDF" : file.size > SCAN_MAX_BYTES ? "Over 50 MB" : null,
       };
     });
@@ -2103,7 +2116,6 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   };
 
   const addPhotos = (fileList) => {
-    if (sandbox) return;
     const files = Array.from(fileList);
     const entries = files.map((file) => ({
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2111,12 +2123,12 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       name: file.name,
       size: file.size,
       previewUrl: URL.createObjectURL(file),
-      url: null,
-      uploading: true,
+      url: sandbox ? URL.createObjectURL(file) : null,
+      uploading: !sandbox,
       error: null,
     }));
     setPhotos((p) => [...p, ...entries]);
-    entries.forEach((entry) => uploadOnePhoto(entry.id, entry.file));
+    if(!sandbox) entries.forEach((entry) => uploadOnePhoto(entry.id, entry.file));
   };
 
   const retryPhoto = (entry) => {
@@ -2175,6 +2187,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     implantSystem: caseMode === "appliance" && isImplant && !implantSystem,
     abutmentType: caseMode === "appliance" && isImplant && !abutmentType,
     insertionDate: !insertionDate,
+    appointmentTime: assistMode === 'ai' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(appointmentTime),
+    filesChoice: assistMode === 'ai' && (filesChoice === null || (filesChoice === true && !photos.length && !scans.length)),
+    shadePhotos: shadePhotosRequired && !photos.length,
     photosUploading,
     failedFiles: [...photos, ...scans].some(f => f.error),
   };
@@ -2193,6 +2208,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     implantSystem: "Implant brand",
     abutmentType: "Abutment size",
     insertionDate: "Next appointment",
+    appointmentTime: "Appointment time",
+    filesChoice: "Attach files or choose No files",
+    shadePhotos: "Shade reference photos",
     photosUploading: "Files still uploading",
     failedFiles: "Retry or remove files that failed to upload",
   };
@@ -2210,6 +2228,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
       setStep(errors.patientName || errors.labId || errors.treatingDentist ? 1 : errors.restorations || errors.unsavedRestoration || errors.teeth || errors.material || errors.implantSystem || errors.abutmentType ? 2 : 3);
       return;
     }
+    if (assistMode === 'ai' && !reviewOpen) { setReviewOpen(true); return; }
     // Exit before case IDs, save callbacks, outbox, sharing or draft deletion.
     if (sandbox) { setTestComplete(true); return; }
     submitLock.current = true;
@@ -2217,6 +2236,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setSubmitting(true); setSaveError("");
     const common = {
       notation,
+      ...(appointmentTime ? { appointmentTime } : {}),
       included,
       includedOther: includedOther.trim(),
       baseTat,
@@ -2281,7 +2301,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   const stepErrors = {
     1: ["patientName", "labId", "treatingDentist"],
     2: ["restorations", "unsavedRestoration", "teeth", "material", "implantSystem", "abutmentType"],
-    3: ["insertionDate"],
+    3: ["insertionDate", "appointmentTime", "filesChoice", "shadePhotos", "photosUploading", "failedFiles"],
   };
   const stepInvalid = (n) => stepErrors[n].some((k) => errors[k]);
   const stepComplete = (n) => !stepInvalid(n);
@@ -2313,7 +2333,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => { if (!submitLock.current) onClose(); }} />
-      <div onChangeCapture={() => { if (sandbox) setTestComplete(false); }} role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 max-h-[100dvh] w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92dvh] sm:rounded-2xl">
+      <div onChangeCapture={() => { if (sandbox) { setTestComplete(false); setReviewOpen(false); } }} role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 max-h-[100dvh] w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92dvh] sm:rounded-2xl">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
@@ -2324,7 +2344,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               <h3 className="text-base font-bold text-slate-800">
                 {isEditing ? `Edit Prescription · ${editing.id}` : "Digital Laboratory Prescription"}
               </h3>
-              <p className="text-[11px] text-slate-500">Patient & lab → Treatment → Appointment & files</p>
+              <p className="text-[11px] text-slate-500">{sandbox ? "Private test · Nothing is sent" : "Laboratory prescription"}</p>
             </div>
           </div>
           <button onClick={() => { if (!submitLock.current) onClose(); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
@@ -2335,7 +2355,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         {/* New Case vs Follow-up — hidden while editing an existing case. */}
         {!isEditing && !sandbox && <ModeToggle value={formKind} onChange={value => { if (!submitLock.current) setFormKind(value); }} />}
 
-        {sandbox && <p className="border-b border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">Private test — use fictional patient details. Nothing is sent to a lab. Test data clears when you close.</p>}
+        {sandbox && assistMode && <div className="flex items-center justify-between border-b px-4 py-2 text-xs"><span>{assistMode === 'ai' ? 'AI-assisted' : 'Manual'}</span><button type="button" onClick={()=>{setReviewOpen(false);setAssistMode(assistMode==='ai'?'manual':'ai');setStep(1);}} className="text-violet-700">Switch to {assistMode==='ai'?'Manual':'AI-assisted'}</button></div>}
+        {assistMode && <div role="progressbar" aria-label="Prescription completion" aria-valuemin={0} aria-valuemax={3} aria-valuenow={[1,2,3].filter(stepComplete).length} className="h-1 shrink-0 bg-slate-100"><div className="h-full bg-violet-500 transition-all" style={{width:`${[1,2,3].filter(stepComplete).length/3*100}%`}} /></div>}
+        {assistMode && <nav aria-label="Prescription progress" className="grid shrink-0 grid-cols-3 gap-1 border-b bg-white px-3 py-3 sm:px-5">{guideLabels.map((label,i)=><button type="button" key={label} aria-current={!reviewOpen&&step===i+1?'step':undefined} disabled={assistMode==='ai'&&((i>0&&!stepComplete(1))||(i>1&&!stepComplete(2)))} onClick={()=>{setReviewOpen(false);setStep(i+1);}} className={`flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs sm:text-sm ${!reviewOpen&&step===i+1?'bg-violet-50 text-violet-800':'text-slate-500'}`}><span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${stepComplete(i+1)?'bg-emerald-100 text-emerald-700':'bg-slate-100'}`}>{stepComplete(i+1)?<Check size={14}/>:i+1}</span><span>{label}</span></button>)}</nav>}
         {!isEditing && !sandbox && <div className="border-b border-slate-100 px-4 py-2 text-xs" role="status">
           {hasDraft ? (draftJson === savedDraftJson
             ? "Draft saved for 24 hours. You can close and resume later."
@@ -2350,6 +2372,18 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             disables the controls while a submission is in progress. */}
         <div data-rx-scroll className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-50/60">
         <fieldset disabled={submitting} className="min-w-0 space-y-3 px-3 py-4 sm:px-5">
+          {!assistMode ? <section aria-label="Choose prescription mode" className="rounded-2xl border bg-white p-5">
+            <h4 className="mb-4 text-lg font-semibold">How would you like to prescribe?</h4>
+            <div className="grid gap-3 sm:grid-cols-2"><button type="button" onClick={()=>setAssistMode('ai')} className="rounded-xl border border-violet-300 bg-violet-50 p-5 text-left"><span className="block font-semibold text-violet-800">AI-assisted</span><span className="mt-1 block text-sm text-slate-600">Speak or type, one step at a time.</span></button><button type="button" onClick={()=>setAssistMode('manual')} className="rounded-xl border p-5 text-left"><span className="block font-semibold">Manual</span><span className="mt-1 block text-sm text-slate-600">Fill in the form yourself.</span></button></div>
+          </section> : assistMode==='ai' ? <GuidedPrescription
+            step={step||1} setStep={n=>{setReviewOpen(false);setStep(n);}} review={reviewOpen} edit={n=>{setReviewOpen(false);setStep(n);}}
+            form={{patientName,labId,clinicId:sendingClinicId,notation,insertionDate,appointmentTime,filesChoice,shadePhotosRequired,notes,insufficientTime,estReady:estReady?iso(estReady):null,treatment:caseMode==='restorations'?restorations:[{category,material,vitaShade,implantSystem,abutmentType,abutmentColor,teeth:selectedTeeth.map(t=>({...t,role:selection[t.universal]}))}]}}
+            setField={(key,value)=>{setTestComplete(false);setReviewOpen(false);const setters={patientName:setPatientName,labId:setLabId,insertionDate:setInsertionDate,appointmentTime:setAppointmentTime,filesChoice:setFilesChoice,assistMode:setAssistMode};setters[key]?.(value);}}
+            labs={labs.filter(l=>labAllowed(l.id,sendingClinicId))} onApply={applyNoorDraft} api={noorAssistApi}
+            onNext={n=>{if(stepInvalid(n))setTouched(true);else setStep(n+1);}}
+            files={[...scans,...photos]} onScans={addScans} onPhotos={addPhotos} onRemoveFile={f=>{setReviewOpen(false);setTestComplete(false);if(f.url?.startsWith('blob:'))URL.revokeObjectURL(f.url);setScans(p=>p.filter(x=>x.id!==f.id));removePhoto(f.id);}}
+            sandbox={sandbox}
+          /> : <>
           {/* ---------------- STEP 1 · Patient & Lab ---------------- */}
           <Step
             n={1}
@@ -2459,7 +2493,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             complete={stepComplete(2)}
             invalid={touched && stepInvalid(2)}
           >
-          {!isEditing&&sendingRole!=='receptionist'&&<div className="mb-5">{sendingClinicId&&labId?<NoorPrescriptionAssist key={`${sendingClinicId}:${labId}`} clinicId={sendingClinicId} labId={labId} notation={notation} onApply={applyNoorDraft} api={noorAssistApi}/>:null}</div>}
+
           {/* Included — what physically goes to the lab with this case */}
           <section className="mb-6">
             <SectionHeader icon={PackageCheck} n="a" title="Included" subtitle="Tick everything being sent to the lab with this case" />
@@ -2855,8 +2889,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           {/* Attachments & notes */}
           <section className="mt-6">
             <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach intraoral scans and clinical/shade photos for the lab" />
-            {sandbox && <p className="mb-2 text-xs text-slate-500">File uploads are disabled in this test.</p>}
-            <fieldset disabled={sandbox} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {sandbox && <p className="mb-2 text-xs text-slate-500">Files stay in this test.</p>}
+            <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* STL scans + PDFs — real uploads since Phase 61 */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Scans &amp; Documents (STL / PDF)</div>
@@ -2868,7 +2902,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   {/* Same QR session as the photos card — the phone page's
                       STL/PDF picker routes kind=scan entries back here. */}
                   {!isMobileDevice() && (
-                    <button type="button" onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
+                    <button type="button" disabled={sandbox} onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
                       <Smartphone size={13} /> From phone (QR)
                     </button>
                   )}
@@ -2916,7 +2950,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                     <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { addPhotos(e.target.files); e.target.value = ""; }} />
                   </label>
                   {!isMobileDevice() && (
-                    <button type="button" onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
+                    <button type="button" disabled={sandbox} onClick={() => setQrOpen(true)} className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:underline">
                       <Smartphone size={13} /> From phone (QR)
                     </button>
                   )}
@@ -2967,6 +3001,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             </div>
           </section>
           </Step>
+          </>}
         </fieldset>
         </div>
 
@@ -2975,7 +3010,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         {saveError && <p role="alert" className="bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-700">{saveError}</p>}
         <div className={`shrink-0 border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
           {/* live order summary */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-2 text-[11px] sm:px-6">
+          <div className={`${assistMode==='manual'?'flex':'hidden'} flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-2 text-[11px] sm:px-6`}>
             {caseMode === "restorations" ? (
               <>
                 <span className="flex items-center gap-1 font-semibold text-slate-700">
@@ -3023,7 +3058,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
 
           {/* actions */}
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-            {touched && !isValid ? (
+            {!assistMode ? <span className="text-xs text-slate-500">Use fictional patient details.</span> : touched && !isValid ? (
               <div className="flex items-start gap-1.5 text-xs text-rose-700">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                 <span>
@@ -3045,11 +3080,12 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <button
                 type="button"
+                style={!assistMode ? {display:'none'} : undefined}
                 disabled={submitting}
                 onClick={() => submit()}
                 className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:py-2 ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
               >
-                <Check size={15} /> {sandbox ? "Test prescription" : submitting ? "Saving…" : isEditing ? "Save Changes" : "Submit Prescription"}
+                <Check size={15} /> {assistMode==='ai'&&!reviewOpen?"Review prescription":sandbox ? "Test prescription" : submitting ? "Saving…" : isEditing ? "Save Changes" : "Submit Prescription"}
               </button>
               {!isEditing && !sandbox && (
                 <button

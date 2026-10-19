@@ -29,6 +29,7 @@ await build({
       import { composeNoorBriefClient } from ${JSON.stringify(join(root, "src/lib/data.js"))};
       export const r = (el) => renderToStaticMarkup(el);
       export { N, React, composeNoorBriefClient };
+      export { default as GuidedPrescription } from '/Users/abdulla/Documents/Codex/2026-10-11/i-want-you-to-tell-me/work/dental-lab-tracker/src/GuidedPrescription.jsx';
       export { default as PrescriptionForm } from '/Users/abdulla/Documents/Codex/2026-10-11/i-want-you-to-tell-me/work/dental-lab-tracker/src/PrescriptionForm.jsx';
     `, resolveDir: root, loader: "js",
   },
@@ -42,7 +43,7 @@ await build({
   } }],
   define: { "import.meta.env.VITE_SUPABASE_URL": '"https://x.supabase.co"', "import.meta.env.VITE_SUPABASE_ANON_KEY": '"anon"' },
 });
-const { r, N, React, composeNoorBriefClient, PrescriptionForm } = await import(`file://${out}`);
+const { r, N, React, composeNoorBriefClient, PrescriptionForm, GuidedPrescription } = await import(`file://${out}`);
 // Something in the bundled dependency graph keeps an open handle (the stubbed
 // client is inert, so it is a library-level timer). Tests are synchronous
 // renders; once the runner reports, let the process go.
@@ -180,9 +181,10 @@ test('queue help starts collapsed with no automatic summary or telemetry',()=>{
 });
 
 
-test("private sandbox has a local test action and cannot share, upload or offer follow-ups", () => {
+test("private sandbox starts with a mode choice and cannot share or offer follow-ups", () => {
   const html = r(h(PrescriptionForm, { open: true, sandbox: true, labs: [], clinics: [] }));
-  assert.match(html, /Private test — use fictional patient details/);
+  assert.match(html, /AI-assisted/);
+  assert.match(html, /How would you like to prescribe/);
   assert.match(html, /Test prescription/);
   assert.match(html, /Close test/);
   assert.doesNotMatch(html, /Submit Prescription|Submit &amp; Share|Close &amp; keep draft|Follow-up existing/);
@@ -194,4 +196,23 @@ test("normal prescription keeps its submit and draft controls", () => {
   assert.match(html, /Submit &amp; Share/);
   assert.match(html, /Close &amp; keep draft/);
   assert.doesNotMatch(html, /Private test —/);
+});
+
+
+test("manual prescription exposes real three-stage progress",()=>{
+ const html=r(h(PrescriptionForm,{open:true,labs:[],clinics:[]}));
+ assert.match(html,/role="progressbar"/);
+ assert.match(html,/aria-valuemax="3"/);
+ assert.match(html,/aria-label="Prescription progress"/);
+});
+test("guided start asks only for the patient, with later clinical details deferred",()=>{
+ const html=r(h(GuidedPrescription,{step:1,form:{patientName:'',labId:''},labs:[],files:[]}));
+ assert.match(html,/What is the patient’s name/);
+ assert.doesNotMatch(html,/Which material|implant brand|Which shade|platform allowance/);
+});
+test("guided review shows the actual patient, lab, tooth, date, time and attachments",()=>{
+ const form={patientName:'Fictional Patient',labId:'l',notation:'FDI',insertionDate:'2026-11-02',appointmentTime:'10:00',treatment:[{category:'Crown - tooth',material:'Monolithic Zirconia',vitaShade:'A2',teeth:[{fdi:21,universal:9}]}]};
+ const html=r(h(GuidedPrescription,{review:true,form,labs:[{id:'l',name:'Fictional Lab'}],files:[{name:'fictional.stl'}],sandbox:true}));
+ for(const value of ['Fictional Patient','Fictional Lab','21','Monolithic Zirconia','A2','2026-11-02','10:00','fictional.stl'])assert.ok(html.includes(value));
+ assert.doesNotMatch(html,/Dictate|<textarea/);
 });

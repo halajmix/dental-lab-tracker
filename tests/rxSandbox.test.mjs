@@ -8,7 +8,7 @@ const source = readFileSync(new URL("../src/PrescriptionForm.jsx", import.meta.u
 const handler = source.split("  const submit = async (opts = {}) => {")[1].split("\n  const err =")[0].trim().replace(/;$/, "");
 function context(valid) {
  const events = [];
- return {events, sandbox:true, isValid:valid, submitLock:{current:false},
+ return {events, assistMode:"manual", reviewOpen:false, setReviewOpen:v=>events.push(["review",v]), sandbox:true, isValid:valid, submitLock:{current:false},
   errors:{patientName:!valid}, setTouched:v=>events.push(["touched",v]),
   setTestComplete:v=>events.push(["complete",v]), setStep:v=>events.push(["step",v])};
 }
@@ -22,4 +22,13 @@ test("incomplete sandbox prescription still uses actual form validation",async()
  const ctx=context(false);vm.createContext(ctx);
  await vm.runInContext("(async (opts = {}) => {"+handler+")()",ctx);
  assert.deepEqual(ctx.events,[["touched",true],["complete",false],["step",1]]);
+});
+
+test("AI prescription must pass a separate human review before the test action",async()=>{
+ const ctx=context(true);ctx.assistMode="ai";vm.createContext(ctx);
+ await vm.runInContext("(async (opts = {}) => {"+handler+")()",ctx);
+ assert.deepEqual(ctx.events,[["touched",true],["review",true]]);
+ ctx.events.length=0;ctx.reviewOpen=true;
+ await vm.runInContext("(async (opts = {}) => {"+handler+")()",ctx);
+ assert.deepEqual(ctx.events,[["touched",true],["complete",true]]);
 });

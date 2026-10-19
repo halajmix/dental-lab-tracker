@@ -1,70 +1,52 @@
 import React,{useState,useEffect,useRef} from 'react';
-import {Sparkles,Mic,Square,Loader2,Check} from 'lucide-react';
+import {Sparkles,Loader2,Check} from 'lucide-react';
 import {noorPrescriptionStatus,draftPrescriptionWithNoor} from './lib/data.js';
+import SpeechAnswer from './SpeechAnswer.jsx';
+import {RX_CATEGORIES} from '../supabase/functions/_shared/rxCatalog.ts';
 const DEFAULT_API={status:noorPrescriptionStatus,draft:draftPrescriptionWithNoor};
+const QUESTIONS=['Which tooth or teeth?','Which prosthesis or treatment?','Which material?','Which shade?'];
 export default function NoorPrescriptionAssist({clinicId,labId,notation,onApply,api=DEFAULT_API}) {
- const [text,setText]=useState(''),[preview,setPreview]=useState(null),[busy,setBusy]=useState(false),[applied,setApplied]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState(null),[listening,setListening]=useState(false),[interim,setInterim]=useState(''),[language,setLanguage]=useState('en-GB'),[microphone,setMicrophone]=useState('unknown');
- const speech=useRef(null),timer=useRef(null),request=useRef(null),live=useRef(true);
- const Recognition=typeof window!=='undefined'&&(window.SpeechRecognition||window.webkitSpeechRecognition);
- useEffect(()=>{live.current=true;let active=true;api.status(clinicId,labId).then(s=>{if(active)setStatus(s);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;live.current=false;request.current?.abort();clearTimeout(timer.current);try{speech.current?.abort();}catch{}};},[clinicId,labId,api]);
- const change=value=>{setText(value);setPreview(null);setApplied(false);setError('');};
- const allowMicrophone=async()=>{
-  if(!navigator.mediaDevices?.getUserMedia){setError('Microphone access is unavailable here. Open Dr-Crown in a browser with microphone support.');return;}
-  setMicrophone('requesting');setError('');
-  try{
-   const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-   // Permission check only: release every track without recording or sending audio.
-   stream.getTracks().forEach(track=>track.stop());
-   if(live.current)setMicrophone('granted');
-  }catch(e){if(live.current){setMicrophone('denied');setError(e.name==='NotAllowedError'?'Microphone access is blocked. Allow the microphone in your browser’s settings for dr-crown.com, then try again.':e.name==='NotFoundError'?'No microphone was found. Connect a microphone and try again.':'The microphone could not be opened. Check your device settings and try again.');}}
- };
- const record=()=>{
-  if(listening){try{speech.current?.stop();}catch{setListening(false);}clearTimeout(timer.current);return;}
-  if(!Recognition)return;
-  setError('');const rec=new Recognition();speech.current=rec;rec.lang=language;rec.continuous=true;rec.interimResults=true;
-  rec.onstart=()=>{if(live.current)setMicrophone('granted');};
-  rec.onresult=e=>{if(!live.current)return;let final='',pending='';for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';else pending+=e.results[i][0].transcript;}if(final){setText(t=>(t+' '+final).trim().slice(0,4000));setPreview(null);setApplied(false);}setInterim(pending);};
-  rec.onerror=e=>{if(live.current){setListening(false);setInterim('');if(e.error==='not-allowed')setMicrophone('denied');setError(e.error==='not-allowed'?'Microphone permission was not granted. You can type instead.':'Dictation stopped. Check the transcript, then type or try again.');}};
-  rec.onend=()=>{if(live.current){setListening(false);setInterim('');}clearTimeout(timer.current);};
-  try{rec.start();setListening(true);timer.current=setTimeout(()=>{try{rec.stop();}catch{}},45000);}catch{setError('Voice dictation is unavailable. Type your instructions instead.');}
- };
- const prepare=async()=>{
-  if(busy||listening||!text.trim())return;
-  setBusy(true);setError('');setPreview(null);setApplied(false);const controller=new AbortController();request.current=controller;
-  try{const r=await api.draft(text,{clinicId,labId,notation,signal:controller.signal});if(live.current){setPreview(r.draft);setStatus(s=>({...s,platform_budget:r.platform_budget}));}}
-  catch(e){if(live.current&&e.name!=='AbortError')setError(/monthly AI budget|daily AI budget/.test(e.message)?'Noor is temporarily paused. You can still fill the form manually.':e.message);}
+ const [text,setText]=useState(''),[answers,setAnswers]=useState([]),[index,setIndex]=useState(0);
+ const [preview,setPreview]=useState(null),[busy,setBusy]=useState(false),[applied,setApplied]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState(null);
+ const [photoReference,setPhotoReference]=useState(false);
+ const request=useRef(null),live=useRef(true);
+ useEffect(()=>{live.current=true;let active=true;api.status(clinicId,labId).then(s=>{if(active)setStatus(s);}).catch(()=>{if(active)setError('Noor is unavailable. Switch to Manual to continue.');});return()=>{active=false;live.current=false;request.current?.abort();};},[clinicId,labId,api]);
+ const prepare=async(transcript)=>{
+  if(busy||!transcript.trim())return;
+  setBusy(true);setError('');const controller=new AbortController();request.current=controller;
+  try{const r=await api.draft(transcript,{clinicId,labId,notation,signal:controller.signal});if(live.current){setPreview(r.draft);setStatus(s=>({...s,platform_budget:r.platform_budget}));setText('');}}
+  catch(e){if(live.current&&e.name!=='AbortError')setError('Noor could not prepare the treatment. Retry or switch to Manual.');}
   finally{if(live.current)setBusy(false);}
  };
- const apply=()=>{try{onApply(preview);setApplied(true);setError('');}catch(e){setError(e.message);}};
- if(!status||status.visible===false)return null;
- const budget=status?.platform_budget;
- return <section aria-label="Noor prescription assistant" className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
-  <div className="flex flex-wrap items-center gap-2"><Sparkles size={17} className="text-violet-600"/><h4 className="font-bold text-slate-800">Noor prescription assistant</h4><span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-700">{status.private_preview?'Private admin test':'Doctor preview'}</span></div>
-  <p className="mt-1 text-sm text-slate-600">Speak or type, then review the draft before adding it. Noor never submits the form.</p>
-  <p className="mt-2 rounded-lg bg-violet-50 p-2 text-xs text-violet-900" aria-label="What to dictate"><strong>Say:</strong> teeth (FDI 21, or “upper right 4”), treatment, material and shade. For bridges, identify pontics. For implants, add brand, abutment type/size and colour.</p>
-  <label className="mt-3 block text-xs font-semibold text-slate-700" htmlFor="noor-rx-instructions">Treatment instructions · current notation: {notation}</label>
-  <textarea id="noor-rx-instructions" value={text} onChange={e=>change(e.target.value)} disabled={busy} maxLength={4000} dir="auto" rows={3} placeholder="For example: FDI 26, monolithic zirconia crown, Vita Classical A2. " className="mt-1 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"/>
-  {interim&&<p className="mt-1 text-sm italic text-slate-500" dir="auto">{interim}</p>}
-  <div className="mt-2 flex flex-wrap items-center gap-2">
-   <select aria-label="Dictation language" value={language} onChange={e=>setLanguage(e.target.value)} disabled={listening||busy} className="rounded-lg border border-slate-200 p-2 text-xs"><option value="en-GB">English</option><option value="ar-OM">العربية</option></select>
-   <button type="button" onClick={allowMicrophone} disabled={busy||listening||microphone==='requesting'||microphone==='granted'} className="flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 disabled:opacity-50"><Mic size={14}/> {microphone==='requesting'?'Waiting for microphone permission…':microphone==='granted'?'Microphone allowed':'Allow microphone access'}</button>
-   <button type="button" onClick={record} disabled={!Recognition||busy||microphone==='requesting'} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${listening?'border-rose-300 bg-rose-50 text-rose-700':'border-slate-200 text-slate-700'} disabled:opacity-50`}>{listening?<Square size={14}/>:<Mic size={14}/>} {listening?'Stop dictation':'Dictate'}</button>
-   <button type="button" onClick={prepare} disabled={busy||listening||!text.trim()||!status?.enabled||Number(status?.platform_budget?.remaining_usd)===0} className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">{busy?<Loader2 size={14} className="animate-spin"/>:<Sparkles size={14}/>} {busy?'Preparing draft…':'Prepare draft'}</button>
-
-  </div>
-  <details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">Dictation guidance &amp; privacy</summary><p className="mt-1">Check the transcript and tooth numbers. Upper right 4 = FDI 14; upper left 3 = FDI 23. Missing details require clarification. Keep patient names/contact details in the patient section. Your browser may process speech; only the transcript you send goes to Noor.</p></details>
-  {!Recognition&&<p className="mt-2 text-xs text-slate-500">Browser dictation is unavailable here. Use your keyboard’s microphone or type your instructions.</p>}
-  {budget&&Number(budget.remaining_usd)===0&&<p className="mt-2 text-xs text-amber-700">Noor is temporarily paused. You can still fill the form manually.</p>}
-  {status&&!status.enabled&&<p className="mt-2 text-xs text-amber-700">Noor assistance is paused. You can fill the form manually.</p>}
-  {error&&<p role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
-  {preview&&<div className="mt-3 rounded-xl bg-violet-50 p-3">
-   <h5 className="text-sm font-bold text-violet-900">Review Noor’s draft · {preview.notation}</h5>
-   {preview.items.map((r,i)=><div key={i} className="mt-2 rounded-lg bg-white p-3 text-sm text-slate-700"><p className="font-semibold">{r.category||'Treatment not specified'}</p><p>Teeth: {r.teeth.map(t=>`${preview.notation==='FDI'?t.fdi:t.universal}${t.role==='pontic'?' (pontic)':''}`).join(', ')||'Not specified'}</p><p>Material: {r.material||'Not specified / not required'}</p>{r.vitaShade&&<p>Shade: {r.shadeGuide} · {r.vitaShade}</p>}{r.category.includes('implant')&&<><p>Implant: {r.implantSystem||'Not specified'}</p><p>Abutment: {r.abutmentType||'Not specified'}</p><p>Abutment colour: {r.abutmentColor||'Not specified'}</p></>}</div>)}
-   {preview.notes&&<p className="mt-2 whitespace-pre-wrap text-sm" dir="auto">Notes: {preview.notes}</p>}
-   {preview.appointmentDate&&<p className="mt-2 text-sm">Appointment: {preview.appointmentDate}</p>}
-   {preview.questions.length>0&&<div className="mt-2 text-sm text-amber-900"><p className="font-semibold">Clarify before adding</p><ul className="list-disc pl-5">{preview.questions.map((q,i)=><li key={i} dir="auto">{q}</li>)}</ul><p className="mt-1">Add the answers to your instructions above, then prepare the draft again.</p></div>}
-   <p className="mt-2 text-xs text-slate-600">Check tooth numbering, material, shade and any implant details. Existing patient details, lab selection and appointment are kept.</p>
-   <button type="button" onClick={apply} disabled={!preview.canApply||applied} className="mt-3 flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{applied&&<Check size={14}/>} {applied?'Added to form':'Review complete — add to form'}</button>
-  </div>}
+ const next=(answer=text)=>{
+  if(busy||!answer.trim())return;
+  const line=`${index<4?QUESTIONS[index]:preview?.questions?.[0]||'Clarification'} ${answer.trim()}`;
+  const updated=[...answers,line];
+  if(updated.join('\n').length>4000){setError('Instructions are too long. Edit the answers below.');return;}
+  setAnswers(updated);setText('');setError('');
+  const canonical=Object.entries(RX_CATEGORIES).find(([name])=>name.toLowerCase()===answer.trim().toLowerCase());
+  const skipSpecs=index===1&&canonical&&canonical[1].materials.length===0;
+  if(index<3&&!skipSpecs)setIndex(index+1);else{setIndex(4);prepare(updated.join('\n'));}
+ };
+ const ready=status?.enabled&&Number(status?.platform_budget?.remaining_usd)!==0;
+ const question=index<4?QUESTIONS[index]:preview?.questions?.[0]||'Add any missing treatment details.';
+ const apply=()=>{try{onApply({...preview,requiresShadePhotos:photoReference});setApplied(true);setError('');}catch(e){setError(e.message);}};
+ return <section aria-label="Noor prescription assistant" className="rounded-2xl border border-violet-200 bg-white p-4 sm:p-5">
+  <div className="mb-4 flex items-center justify-between gap-2"><h4 className="flex items-center gap-2 font-semibold text-slate-800"><Sparkles size={17} className="text-violet-600"/> Noor</h4><span className="text-xs text-slate-500">{applied?'Treatment added':preview?.canApply?'Review treatment':`Treatment · ${Math.min(index+1,4)} of 4`}</span></div>
+  {applied?<p className="flex items-center gap-2 text-sm text-emerald-700"><Check size={16}/> Treatment added. Continue to the appointment.</p>:preview?.canApply?<div className="space-y-3">
+   {preview.items.map((r,i)=><div key={i} className="rounded-xl bg-slate-50 p-3 text-sm"><p className="font-semibold">{r.category} · {r.teeth.map(t=>`${preview.notation==='FDI'?t.fdi:t.universal}${t.role==='pontic'?' (pontic)':''}`).join(', ')}</p><p>{[r.material,r.vitaShade].filter(Boolean).join(' · ')}</p>{r.category.includes('implant')&&<p>{[r.implantSystem,r.abutmentType,r.abutmentColor].join(' · ')}</p>}</div>)}
+   {preview.notes&&<p className="text-sm" dir="auto">{preview.notes}</p>}
+   <div className="flex gap-2"><button type="button" onClick={apply} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white">Use treatment</button><button type="button" onClick={()=>{setPreview(null);setIndex(0);setAnswers([]);setText('');}} className="rounded-lg border px-3 py-2 text-sm">Start treatment again</button></div>
+  </div>:<>
+   <SpeechAnswer prompt={question} value={text} onChange={setText} disabled={busy||!ready} hint={index===0?`${notation}: e.g. 21, 23 or “upper right 4”. For an appliance, say the arch.`:index===3?'Say the shade and guide, or choose below.':''}>
+    <button type="button" onClick={()=>next()} disabled={!ready||busy||!text.trim()} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy?<span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin"/> Checking…</span>:index<3?'Next':'Check treatment'}</button>
+   </SpeechAnswer>
+   {index===3&&<div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={!ready||busy} onClick={()=>{setPhotoReference(false);next('Shade by Lab');}} className="rounded-lg border px-3 py-2 text-sm">Shade by lab</button><button type="button" disabled={!ready||busy} onClick={()=>{setPhotoReference(true);next('Shade by Lab; shade reference photographs will be attached. The laboratory must confirm the shade.');}} className="rounded-lg border px-3 py-2 text-sm">Use shade photos</button></div>}
+   {index===4&&!preview&&answers.length>0&&!busy&&<button type="button" onClick={()=>prepare(answers.join('\n'))} className="mt-3 rounded-lg border px-3 py-2 text-sm">Retry treatment check</button>}
+  </>}
+  {answers.length>0&&!applied&&<details className="mt-3 text-xs text-slate-500"><summary className="cursor-pointer">Your answers</summary><textarea aria-label="Edit treatment answers" rows={4} maxLength={4000} value={answers.join('\n')} disabled={busy} onChange={e=>{setAnswers([e.target.value]);setPreview(null);setIndex(4);}} className="mt-2 w-full rounded-lg border p-2"/><button type="button" disabled={busy||!ready} onClick={()=>prepare(answers.join('\n'))} className="mt-2 rounded border px-3 py-2">Check changes</button></details>}
+  {!status&&!error&&<p className="mt-3 text-xs text-slate-500">Connecting to Noor…</p>}
+  {status&&!ready&&<p className="mt-3 text-sm text-amber-800">Noor is unavailable. Switch to Manual to continue.</p>}
+  {error&&<p role="alert" className="mt-3 text-sm text-rose-700">{error}</p>}
  </section>;
 }
