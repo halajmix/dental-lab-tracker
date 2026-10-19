@@ -586,3 +586,9 @@ Owner requested the previous organised prescription layout. Restored one typed P
 80 client tests, undefined JSX/identifier checks and production build passed. Local Chrome fictional multi-clinic fixture verified patient and lab columns have identical top position and width; screenshot inspected. The private sandbox remains manual and non-submitting.
 
 Live verified: source `ed06424`, bundle `index-DFPCI1e3.js`, Pages run 39308039081 succeeded. Signed-in dentist with three clinics opened the actual New Prescription form: one Patient Name input and Select Lab have identical vertical positions and equal widths; clinic/dentist context is above. No browser console errors. The form was left empty; no patient values, draft, prescription or notification was created. Previous user tabs were preserved; a separate updated empty prescription tab is ready. Old PWA tabs may need refresh.
+
+## 2026-10-19 visible required-field warnings on Next
+
+Owner's live form had an empty Patient Name and a selected lab; Next correctly blocked on validation but only changed a distant footer, making the button appear broken. Next now shows a live alert immediately beside the button listing missing patient/lab/dentist details, gives the patient input an accessible invalid state and explicit example, and focuses that input when it is missing/invalid. Treatment Next likewise lists its missing clinical details. The final submission warning is an accessible alert. Required-field checks remain enforced; no automatic submission or field clearing.
+
+Local fictional Chrome checks: empty name/lab shows both; selecting a lab removes it from warning without clearing other entries; entering F. Example then Next opens Treatment; omitted restoration shows the appropriate treatment warning. The actual user's saved draft was inspected read-only and left unchanged. 80 client tests, undefined JSX/identifier checks and production build passed. Noor remains deactivated.

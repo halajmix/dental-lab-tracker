@@ -1466,6 +1466,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   const [draftChoiceError, setDraftChoiceError] = useState("");
   const clearingDraftRef = useRef(false);
   const [step, setStep] = useState(1); // 1 = Patient & Lab, 2 = Clinical, 3 = Logistics
+  const patientNameInput = useRef(null);
+  const patientNameHintId = React.useId();
 
   // Brief green confirmation on the card that was just added/updated.
   // MUST stay above the `if (!open)` early return below — hooks declared
@@ -2200,9 +2202,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // guessing why the Submit button does nothing.
   const MISSING_LABEL = {
     treatingDentist: "Treating dentist",
-    patientName: "Typed first-name initial and surname",
+    patientName: "Patient name (initial and surname)",
     teeth: "At least one tooth on the chart",
-    labId: "Target lab",
+    labId: "Laboratory",
     restorations: "At least one restoration",
     unsavedRestoration: 'Click "Add to Case" to save the restoration you started',
     material: "Material",
@@ -2412,8 +2414,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               {isEditing && editing.treatingDentistName && <div className="sm:col-span-2 text-sm text-slate-600">Treating dentist: <strong>{editing.treatingDentistName}</strong></div>}
             </div>}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-rx-patient-lab>
-              <Field label="Patient Name" required hint="Type the initial and surname only.">
-                <input type="text" required aria-label="Patient Name" className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="A. Al Harthi" autoComplete="off" autoCorrect="off" spellCheck={false} dir="auto" />
+              <Field label="Patient Name" required>
+                <input ref={patientNameInput} type="text" required aria-label="Patient Name" aria-invalid={!!err("patientName")} aria-describedby={patientNameHintId} className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="A. Al Harthi" autoComplete="off" autoCorrect="off" spellCheck={false} dir="auto" />
+                <span id={patientNameHintId} className={`mt-0.5 block text-[11px] ${err("patientName") ? "font-medium text-rose-700" : "text-slate-400"}`}>{err("patientName") ? "Enter an initial and surname, e.g. A. Al Harthi." : "Type the initial and surname only."}</span>
               </Field>
               {/* The lab is locked while editing: the case is already in that
                   lab's queue and they were emailed on submission — re-routing
@@ -2477,8 +2480,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 <Plus size={13} /> Add patient ID or WhatsApp <span className="font-normal text-slate-400">(optional)</span>
               </button>
             )}
-            <div className="mt-4 flex justify-end">
-              <button type="button" onClick={() => { if (stepInvalid(1)) setTouched(true); else setStep(2); }} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+              {touched && stepInvalid(1) && <p role="alert" className="min-w-0 flex-1 text-sm font-medium text-rose-700">To continue, complete: {stepErrors[1].filter(k=>errors[k]).map(k=>MISSING_LABEL[k]).join(" · ")}.</p>}
+              <button type="button" onClick={() => { if (stepInvalid(1)) { setTouched(true); if(errors.patientName) patientNameInput.current?.focus(); } else setStep(2); }} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
                 Next · Treatment <ChevronDown size={15} className="-rotate-90" />
               </button>
             </div>
@@ -2803,7 +2807,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
               </section>
             </>
           )}
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+              {touched && stepInvalid(2) && <p role="alert" className="min-w-0 flex-1 text-sm font-medium text-rose-700">To continue, complete: {stepErrors[2].filter(k=>errors[k]).map(k=>MISSING_LABEL[k]).join(" · ")}.</p>}
               <button type="button" onClick={() => { if (stepInvalid(2)) setTouched(true); else setStep(3); }} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
                 Next · Appointment & files <ChevronDown size={15} className="-rotate-90" />
               </button>
@@ -3061,7 +3066,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           {/* actions */}
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             {!assistMode ? <span className="text-xs text-slate-500">Use fictional patient details.</span> : touched && !isValid ? (
-              <div className="flex items-start gap-1.5 text-xs text-rose-700">
+              <div role="alert" className="flex items-start gap-1.5 text-xs text-rose-700">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                 <span>
                   <b>Can't submit yet</b> — still needed: {missing.join(", ")}.
