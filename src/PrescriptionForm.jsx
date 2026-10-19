@@ -1335,7 +1335,10 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
 /*  Digital Laboratory Prescription Form                               */
 /* ================================================================== */
 
-export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId, authorName = "", cases = [], clinics = [], defaultClinicId = null, labAllowed = () => true,noorAssistApi }) {
+export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId: suppliedUserId, sandbox = false, authorName = "", cases = [], clinics = [], defaultClinicId = null, labAllowed = () => true,noorAssistApi }) {
+  // Sandbox never reads or writes a user’s persistent prescription draft.
+  const userId = sandbox ? null : suppliedUserId;
+  const [testComplete, setTestComplete] = useState(false);
   // Keep wheel/touch scrolling inside the prescription, including follow-ups.
   // Restore the page's existing styles when closing or unmounting the form.
   useEffect(() => {
@@ -1561,6 +1564,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   }, [open, editing]);
 
   const reset = () => {
+    setTestComplete(false);
     submissionId.current = null;
     setSavedDraftJson(""); setDraftStatus("idle");
     setNotation("FDI"); setMode("unit"); setSelection({});
@@ -1715,11 +1719,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   }, []);
   const unsavedFiles = [...photos, ...scans].some(f => f.uploading || f.error || !f.url);
   useEffect(() => {
-    if (!hasDraft || (draftJson === savedDraftJson && !unsavedFiles)) return;
+    if (sandbox || !hasDraft || (draftJson === savedDraftJson && !unsavedFiles)) return;
     const warn = event => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [hasDraft, draftJson, savedDraftJson, unsavedFiles]);
+  }, [sandbox, hasDraft, draftJson, savedDraftJson, unsavedFiles]);
 
   // Restore on load: one fetch per session, and only into an idle, empty,
   // non-editing form — never over live typing.
@@ -1980,6 +1984,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   /* ---------------- TAT auto-calculation ---------------- */
   const lab = labById[labId];
   const applyNoorDraft=(proposal)=>{
+    setTestComplete(false);
     if(!proposal?.canApply) throw new Error('Clarify the missing treatment details before adding the draft.');
     if(draftDirty) throw new Error('Save or cancel the restoration currently being edited first.');
     const fixed=proposal.items.every(r=>RESTORATION_CATEGORIES.includes(r.category));
@@ -2053,6 +2058,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // nothing), so the normalized contentType from classifyRxFile is what the
   // bucket's exact mime allowlist accepts.
   const uploadOneScan = async (entryId, file) => {
+    if (sandbox) return;
     try {
       const url = await uploadCasePhoto(userId, photoGroupId, file, classifyRxFile(file.name).contentType);
       setScans((p) => p.map((s) => (s.id === entryId ? { ...s, url, uploading: false, error: null } : s)));
@@ -2061,6 +2067,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     }
   };
   const addScans = (fileList) => {
+    if (sandbox) return;
     const entries = Array.from(fileList).map((file) => {
       // The accept filter is off on iOS (scanPickerAccept) — gate by extension here.
       const typeOk = classifyRxFile(file.name).kind === "scan";
@@ -2086,6 +2093,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // object-URL thumbnail immediately, then the entry is patched in place
   // once the upload resolves (or fails, with a retry option).
   const uploadOnePhoto = async (entryId, file) => {
+    if (sandbox) return;
     try {
       const url = await uploadCasePhoto(userId, photoGroupId, file);
       setPhotos((p) => p.map((ph) => (ph.id === entryId ? { ...ph, url, uploading: false, error: null } : ph)));
@@ -2095,6 +2103,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   };
 
   const addPhotos = (fileList) => {
+    if (sandbox) return;
     const files = Array.from(fileList);
     const entries = files.map((file) => ({
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2130,6 +2139,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // rehydration) — no spinner, no retry state. Phase 61: the phone can send
   // STL/PDF too — routed into the scan list by kind.
   const addMobilePhotos = (list) => {
+    if (sandbox) return;
     const entry = (m, i) => ({
       id: `mob-${Date.now().toString(36)}-${i}`,
       name: m.name || `phone-file-${i + 1}`,
@@ -2196,9 +2206,12 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
     setTouched(true);
     if (submitLock.current) return;
     if (!isValid) {
+      setTestComplete(false);
       setStep(errors.patientName || errors.labId || errors.treatingDentist ? 1 : errors.restorations || errors.unsavedRestoration || errors.teeth || errors.material || errors.implantSystem || errors.abutmentType ? 2 : 3);
       return;
     }
+    // Exit before case IDs, save callbacks, outbox, sharing or draft deletion.
+    if (sandbox) { setTestComplete(true); return; }
     submitLock.current = true;
     if (!isEditing && !submissionId.current) submissionId.current = newCaseId();
     setSubmitting(true); setSaveError("");
@@ -2300,7 +2313,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => { if (!submitLock.current) onClose(); }} />
-      <div role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 max-h-[100dvh] w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92dvh] sm:rounded-2xl">
+      <div onChangeCapture={() => { if (sandbox) setTestComplete(false); }} role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 max-h-[100dvh] w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92dvh] sm:rounded-2xl">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
@@ -2320,9 +2333,10 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         </div>
 
         {/* New Case vs Follow-up — hidden while editing an existing case. */}
-        {!isEditing && <ModeToggle value={formKind} onChange={value => { if (!submitLock.current) setFormKind(value); }} />}
+        {!isEditing && !sandbox && <ModeToggle value={formKind} onChange={value => { if (!submitLock.current) setFormKind(value); }} />}
 
-        {!isEditing && <div className="border-b border-slate-100 px-4 py-2 text-xs" role="status">
+        {sandbox && <p className="border-b border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">Private test — use fictional patient details. Nothing is sent to a lab. Test data clears when you close.</p>}
+        {!isEditing && !sandbox && <div className="border-b border-slate-100 px-4 py-2 text-xs" role="status">
           {hasDraft ? (draftJson === savedDraftJson
             ? "Draft saved for 24 hours. You can close and resume later."
             : draftStatus === "error" ? "Draft could not be saved. Keep this tab open until saving succeeds."
@@ -2841,7 +2855,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           {/* Attachments & notes */}
           <section className="mt-6">
             <SectionHeader icon={Upload} n="b" title="Digital Attachments & Notes" subtitle="Attach intraoral scans and clinical/shade photos for the lab" />
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {sandbox && <p className="mb-2 text-xs text-slate-500">File uploads are disabled in this test.</p>}
+            <fieldset disabled={sandbox} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* STL scans + PDFs — real uploads since Phase 61 */}
               <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><ScanLine size={16} className="text-blue-600" /> Scans &amp; Documents (STL / PDF)</div>
@@ -2906,7 +2921,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                     </button>
                   )}
                 </span>
-                <MobilePhotoQR open={qrOpen ? photoGroupId : false} onClose={() => setQrOpen(false)} onPhotos={addMobilePhotos} />
+                <MobilePhotoQR open={!sandbox && qrOpen ? photoGroupId : false} onClose={() => setQrOpen(false)} onPhotos={addMobilePhotos} />
                 {photos.length === 0 ? (
                   <p className="mt-3 text-[11px] text-slate-400">No photos attached — the lab only sees what's uploaded here.</p>
                 ) : (
@@ -2943,7 +2958,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   </div>
                 )}
               </div>
-            </div>
+            </fieldset>
 
             <div className="mt-3">
               <Field label="Special Instructions">
@@ -2956,6 +2971,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         </div>
 
         {/* Sticky summary + action bar — always in reach, never scrolls away */}
+        {sandbox && testComplete && <p role="status" className="bg-emerald-50 px-6 py-3 text-sm font-semibold text-emerald-800">Test passed: the form is complete. Nothing was sent or saved. You can change details and test again.</p>}
         {saveError && <p role="alert" className="bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-700">{saveError}</p>}
         <div className={`shrink-0 border-t ${touched && !isValid ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
           {/* live order summary */}
@@ -3017,7 +3033,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             ) : (
               <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                 <Info size={13} />
-                {isEditing
+                {sandbox ? "Private test: no lab submission." : isEditing
                   ? "Changes go straight to the lab's live case."
                   : isValid
                     ? "Ready to submit to lab queue."
@@ -3033,9 +3049,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 onClick={() => submit()}
                 className={`flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:py-2 ${isValid ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-300 cursor-not-allowed"}`}
               >
-                <Check size={15} /> {submitting ? "Saving…" : isEditing ? "Save Changes" : "Submit Prescription"}
+                <Check size={15} /> {sandbox ? "Test prescription" : submitting ? "Saving…" : isEditing ? "Save Changes" : "Submit Prescription"}
               </button>
-              {!isEditing && (
+              {!isEditing && !sandbox && (
                 <button
                   type="button"
                   disabled={submitting}
@@ -3047,11 +3063,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 </button>
               )}
               <button type="button" disabled={submitting} onClick={() => { if (!submitLock.current) onClose(); }} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:order-1 sm:py-2">
-                {isEditing ? "Cancel" : "Close & keep draft"}
+                {sandbox ? "Close test" : isEditing ? "Cancel" : "Close & keep draft"}
               </button>
               {/* Cancel keeps the draft (it minimizes to a pill); Discard
                   actually throws the started prescription away. */}
-              {!isEditing && hasDraft && (
+              {!isEditing && !sandbox && hasDraft && (
                 discardConfirm ? (
                   <span className="flex items-center justify-center gap-1 sm:order-0">
                     <button

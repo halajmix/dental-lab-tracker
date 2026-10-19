@@ -29,6 +29,7 @@ await build({
       import { composeNoorBriefClient } from ${JSON.stringify(join(root, "src/lib/data.js"))};
       export const r = (el) => renderToStaticMarkup(el);
       export { N, React, composeNoorBriefClient };
+      export { default as PrescriptionForm } from '/Users/abdulla/Documents/Codex/2026-10-11/i-want-you-to-tell-me/work/dental-lab-tracker/src/PrescriptionForm.jsx';
     `, resolveDir: root, loader: "js",
   },
   bundle: true, platform: "node", format: "cjs", outfile: out, jsx: "automatic", logLevel: "error",
@@ -41,7 +42,7 @@ await build({
   } }],
   define: { "import.meta.env.VITE_SUPABASE_URL": '"https://x.supabase.co"', "import.meta.env.VITE_SUPABASE_ANON_KEY": '"anon"' },
 });
-const { r, N, React, composeNoorBriefClient } = await import(`file://${out}`);
+const { r, N, React, composeNoorBriefClient, PrescriptionForm } = await import(`file://${out}`);
 // Something in the bundled dependency graph keeps an open handle (the stubbed
 // client is inert, so it is a library-level timer). Tests are synchronous
 // renders; once the runner reports, let the process go.
@@ -176,4 +177,21 @@ test('brief excludes finished work and historical stalled escalations, and label
 
 test('queue help starts collapsed with no automatic summary or telemetry',()=>{
  const html=r(h(N.NoorHelpControl,{}));assert.match(html,/Ask Noor/);assert.match(html,/aria-expanded="false"/);assert.doesNotMatch(html,/Noor.s brief|Due today|Needs a decision|Monthly|allowance|reserved|Summarise my open follow-ups|<form/);
+});
+
+
+test("private sandbox has a local test action and cannot share, upload or offer follow-ups", () => {
+  const html = r(h(PrescriptionForm, { open: true, sandbox: true, labs: [], clinics: [] }));
+  assert.match(html, /Private test — use fictional patient details/);
+  assert.match(html, /Test prescription/);
+  assert.match(html, /Close test/);
+  assert.doesNotMatch(html, /Submit Prescription|Submit &amp; Share|Close &amp; keep draft|Follow-up existing/);
+});
+
+test("normal prescription keeps its submit and draft controls", () => {
+  const html = r(h(PrescriptionForm, { open: true, labs: [], clinics: [] }));
+  assert.match(html, /Submit Prescription/);
+  assert.match(html, /Submit &amp; Share/);
+  assert.match(html, /Close &amp; keep draft/);
+  assert.doesNotMatch(html, /Private test —/);
 });

@@ -1,3 +1,4 @@
+import PrescriptionSandbox from "./PrescriptionSandbox.jsx";
 import PickupFollowup from "./PickupFollowup.jsx";
 import React, { useState, useEffect, useMemo } from "react";
 import {
@@ -231,6 +232,7 @@ function StaffLogsPanel() {
 export default function AdminDashboard({ auth }) {
   const { profile, signOut } = auth;
 
+  const [testingRx, setTestingRx] = useState(false);
   const [clinics, setClinics] = useState([]);
   const [labs, setLabs] = useState([]);
   const [cases, setCases] = useState([]);
@@ -364,6 +366,7 @@ export default function AdminDashboard({ auth }) {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
+      {testingRx && profile?.role === "admin" && <PrescriptionSandbox clinics={clinics} labs={labs} onClose={() => setTestingRx(false)} />}
       {/* ------------------------- Header ------------------------- */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
@@ -435,6 +438,7 @@ export default function AdminDashboard({ auth }) {
                       : "Every clinic and lab on Dr-Crown, at a glance."}
                 </p>
               </div>
+              <button type="button" onClick={() => setTestingRx(true)} className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700"><FlaskConical size={16} /> Test prescription</button>
               <nav className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
                 {[["overview", "Overview"], ["pickup", "Pickup follow-up"], ["labaccess", "Lab access"], ["logs", "Staff logs"]].map(([id, label]) => (
                   <button
