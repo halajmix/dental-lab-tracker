@@ -602,3 +602,5 @@ Live verified: source `bb22ee0`, bundle `index-B3m8jtq-.js`, Pages run 393091341
 ## 2026-10-19 remove patient name-format restriction
 
 Shared validity now checks only that a string contains a non-whitespace entry. Removed initial/surname parsing and formatting, split-name UI and restrictive helper messages, including in dormant guided UI. Manual placeholder remains A. Al Harthi; empty field shows Enter a patient name or reference. No case data rewritten. 80 client tests, undefined JSX/identifier checks and production build passed; fictional Chrome flow accepted Fictional Person / 123 and advanced to Treatment with its text intact.
+
+Live verified: source `3d4f23c`, bundle `index-4yVojef1.js`, Pages run 39309910308 succeeded. The owner's saved non-initial-form name was retained; Next opened Treatment successfully. No name was typed or rewritten in production, no case submitted, and the existing draft was kept. Original user tab untouched. Local fictional screenshot shows free-form identification accepted; no real patient name included in the evidence artifact.
