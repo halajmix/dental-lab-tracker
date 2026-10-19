@@ -2440,7 +2440,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             </div>}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-rx-patient-lab>
               <Field label="Patient Name" required>
-                <input ref={patientNameInput} type="text" required aria-label="Patient Name" aria-invalid={!!err("patientName")} aria-describedby={patientNameHintId} className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="A. Al Harthi" autoComplete="off" autoCorrect="off" spellCheck={false} dir="auto" />
+                <input ref={patientNameInput} type="text" required aria-label="Patient Name" aria-invalid={!!err("patientName")} aria-describedby={patientNameHintId} className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Patient Name.." autoComplete="off" autoCorrect="off" spellCheck={false} dir="auto" />
                 <span id={patientNameHintId} className={`mt-0.5 block text-[11px] ${err("patientName") ? "font-medium text-rose-700" : "text-slate-400"}`}>{err("patientName") ? "Enter a patient name or reference." : ""}</span>
               </Field>
               {/* The lab is locked while editing: the case is already in that

@@ -1,3 +1,4 @@
+import { sortCasesBySubmission } from "./lib/caseSubmissionOrder.js";
 import FirstCaseGuide from "./FirstCaseGuide.jsx";
 import AttendancePanel, { fetchAttendanceConnections } from "./AttendancePanel.jsx";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
@@ -2042,6 +2043,9 @@ function DentistDashboard({
   onRequestCancel,
   onWithdrawCancel,
 }) {
+  const [submissionOrder, setSubmissionOrder] = useState("newest");
+  const orderedCases = useMemo(() => sortCasesBySubmission(cases, submissionOrder), [cases, submissionOrder]);
+
   // Counts for the filter pills always reflect the searched-but-unfiltered set,
   // so switching pills never has to fight the currently active one.
   const followUpCases = countBase.filter((c) => openRoundByCase.has(c.id));
@@ -2098,6 +2102,13 @@ function DentistDashboard({
           <FilterPill active={statusFilter === "in_lab"} onClick={() => setStatusFilter("in_lab")} label="In Lab" count={inLabCount} />
           <FilterPill active={statusFilter === "received"} onClick={() => setStatusFilter("received")} label="Clinic Received" count={receivedCount} />
           <FilterPill active={statusFilter === "urgent"} onClick={() => setStatusFilter("urgent")} label="Appt. Alerts" count={urgentCases.length} tone="alert" />
+          <div role="group" aria-label="Submission order" className="flex flex-wrap gap-1 rounded-full border border-slate-200 bg-white p-1">
+            {[["newest", "Newest first"], ["oldest", "Oldest first"]].map(([order, label]) => (
+              <button key={order} type="button" aria-pressed={submissionOrder === order} onClick={() => setSubmissionOrder(order)} className={`min-h-[44px] rounded-full px-3 text-sm font-semibold transition ${submissionOrder === order ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
@@ -2143,7 +2154,7 @@ function DentistDashboard({
                   </td>
                 </tr>
               )}
-              {[...cases].sort((a, b) => { const rk = (c) => { const r = openRoundByCase.get(c.id); return !r ? 2 : roundMeta(r.kind).sentBack ? 0 : 1; }; return rk(a) - rk(b); }).map((c) => (
+              {orderedCases.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50/60">
                   {/* Case id lives in the details drawer only — the full id is
                       still on this cell's tooltip for quick cross-reference. */}

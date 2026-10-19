@@ -11,7 +11,7 @@ patients and real money. There is no separate staging backend. Super Admin has a
 
 ## Current patient-name policy — owner override, 19 October 2026
 
-The dentist may type ANY nonblank patient name or reference. Keep placeholder `A. Al Harthi` as an example only. Never require initials, surnames, punctuation, spelling or a particular character set, now or in future. This explicitly supersedes the earlier typed-initial/surname restrictions described below. Patient identity stays typed; Noor remains off. No patient-code or Oman-hosting migration has been implemented.
+The dentist may type ANY nonblank patient name or reference. Use placeholder `Patient Name..` (owner update, 19 October 2026). Never require initials, surnames, punctuation, spelling or a particular character set, now or in future. This explicitly supersedes the earlier typed-initial/surname restrictions described below. Patient identity stays typed; Noor remains off. No patient-code or Oman-hosting migration has been implemented.
 
 ## Noor update — 13 October 2026
 
@@ -622,3 +622,7 @@ Shared new/follow-up form overlays follow visualViewport height/offset when keyb
 80 client tests, 66 Noor runtime tests, JSX/identifier checks and build passed. Chrome CUA viewport tests covered 320x568, 360x640, 375x667, 390x844, 430x932, 540x720, 640x600, 768x1024, 820x1180, 1024x768, 1280x720, 1440x900, 1920x1080, 2560x1440, 844x390, 568x320, 390x360. No page-wide overflow; touch controls >=44px at phone/tablet widths. Short-view actions were reached by scrolling. At 390x360 lab search remained within view. Chart offsets matched centre at widths 320/390/844/768/1440; teeth 21/23/24 stayed selected through all changes. Extended the repository browser test matrix and added a chart/rotation regression; that browser script was syntax-checked, while interactions in this task were exercised through CUA. These are Chrome viewport/reduced-height simulations, not real iOS/Android keyboard or Safari/Firefox/Windows device certification. Source retains unrestricted patient names, Noor off and existing clinical/draft/security behavior.
 
 Live verification: source `9dc3e29`, bundle `index-Dc8mdrGo.js`, successful Pages run 39313736830. New signed-in dentist tab opened an empty form; at 390x844 the actual live FDI chart measured scrollLeft=295 and centre=295, glyph width=44px, no page overflow and no browser console errors. Blank restoration editor was cancelled and form closed without entering patient data or submitting/sending a case. Browser viewport override reset. Live phone screenshot contains no patient data. Original user tabs were preserved. Several CUA preview sessions lost their debugger attachment during development/HMR; fresh previews were used and final live verification succeeded.
+
+## 2026-10-19 submission order and placeholder
+
+Dentist case toolbar now offers Newest first (default) and Oldest first. Sorting uses the Sent to Lab timestamp (createdAt, first history timestamp, then createdDate), with undated cases last in either direction. Explicit submission order replaces the previous follow-up-priority table ordering; existing follow-up badges, banners, filters and counts remain. Search/status filtering still applies. Patient Name placeholder is now `Patient Name..` in both input components. No validation, records, security, backend, or Noor settings changed.
