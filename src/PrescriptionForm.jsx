@@ -40,7 +40,6 @@ import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
 import MobilePhotoQR from "./MobilePhotoQR.jsx";
 import ClinicDentistPicker from "./ClinicDentistPicker.jsx";
-import PatientNameInput from './PatientNameInput.jsx';
 import {validPatientLabel} from './lib/patientLabel.js';
 import GuidedPrescription from './GuidedPrescription.jsx';
 import { guideLabels } from './lib/rxGuide.js';
@@ -2393,7 +2392,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             complete={stepComplete(1)}
             invalid={touched && stepInvalid(1)}
           >
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-3">
+            {(clinics.length > 1 && !isEditing || delegateRx || isEditing && editing.treatingDentistName) && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {/* Multi-clinic: only shown once a dentist actually owns more
                   than one clinic — no clutter for the common single-clinic
                   case, where it just silently uses their default clinic. */}
@@ -2410,7 +2410,11 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 autoSelectSelf={sendingRole === "admin"}
                 onChange={(id, name) => { setTreatingDentistId(id); setTreatingDentistName(name); }} onValidity={setDentistValid} />}
               {isEditing && editing.treatingDentistName && <div className="sm:col-span-2 text-sm text-slate-600">Treating dentist: <strong>{editing.treatingDentistName}</strong></div>}
-              <PatientNameInput value={patientName} onChange={setPatientName} invalid={!!err("patientName")} />
+            </div>}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-rx-patient-lab>
+              <Field label="Patient Name" required hint="Type the initial and surname only.">
+                <input type="text" required aria-label="Patient Name" className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="A. Al Harthi" autoComplete="off" autoCorrect="off" spellCheck={false} dir="auto" />
+              </Field>
               {/* The lab is locked while editing: the case is already in that
                   lab's queue and they were emailed on submission — re-routing
                   a live case is a delete-and-resend, not an edit. */}
@@ -2433,6 +2437,8 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                   />
                 </Field>
               )}
+            </div>
+
             </div>
 
             {/* Patient ID / WhatsApp are optional and tucked away by default so

@@ -184,7 +184,9 @@ test('queue help starts collapsed with no automatic summary or telemetry',()=>{
 test("deactivated Noor leaves a manual sandbox without AI, sharing or follow-ups", () => {
   const html = r(h(PrescriptionForm, { open: true, sandbox: true, labs: [], clinics: [] }));
   assert.doesNotMatch(html, /AI-assisted|How would you like to prescribe|Dictate|Enable mic|Guided prescription/);
-  assert.match(html, /First-name initial/);
+  assert.match(html, /aria-label="Patient Name"/);
+  assert.match(html, /data-rx-patient-lab/);
+  assert.doesNotMatch(html, /aria-label="First-name initial"|aria-label="Patient surname"/);
   assert.match(html, /Test prescription/);
   assert.match(html, /Close test/);
   assert.doesNotMatch(html, /Submit Prescription|Submit &amp; Share|Close &amp; keep draft|Follow-up existing/);
