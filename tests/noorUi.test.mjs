@@ -209,8 +209,8 @@ test("manual prescription exposes real three-stage progress",()=>{
 });
 test("guided start asks only for the patient, with later clinical details deferred",()=>{
  const html=r(h(GuidedPrescription,{step:1,form:{patientName:'',labId:''},labs:[],files:[]}));
- assert.match(html,/First-name initial/);
- assert.match(html,/Patient surname/);
+ assert.match(html,/aria-label="Patient Name"/);
+ assert.doesNotMatch(html,/First-name initial|Patient surname|initial and surname only/);
  assert.doesNotMatch(html,/Dictate|Enable mic|Dictation language|Use name/);
  assert.doesNotMatch(html,/Which material|implant brand|Which shade|platform allowance/);
 });
@@ -219,4 +219,12 @@ test("guided review shows the actual patient, lab, tooth, date, time and attachm
  const html=r(h(GuidedPrescription,{review:true,form,labs:[{id:'l',name:'Fictional Lab'}],files:[{name:'fictional.stl'}],sandbox:true}));
  for(const value of ['F. Patient','Fictional Lab','21','Monolithic Zirconia','A2','2026-11-02','10:00','fictional.stl'])assert.ok(html.includes(value));
  assert.doesNotMatch(html,/Dictate|<textarea/);
+});
+
+
+test("free-form patient reference is preserved and accepted by the patient step",()=>{
+ const html=r(h(GuidedPrescription,{step:1,form:{patientName:'Fictional Person / 123',labId:''},labs:[],files:[]}));
+ assert.match(html,/Fictional Person \/ 123/);
+ assert.match(html,/Which laboratory/);
+ assert.doesNotMatch(html,/First-name initial|Enter an initial and surname/);
 });

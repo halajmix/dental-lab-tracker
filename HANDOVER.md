@@ -9,6 +9,10 @@ patients and real money. There is no separate staging backend. Super Admin has a
 
 ---
 
+## Current patient-name policy — owner override, 19 October 2026
+
+The dentist may type ANY nonblank patient name or reference. Keep placeholder `A. Al Harthi` as an example only. Never require initials, surnames, punctuation, spelling or a particular character set, now or in future. This explicitly supersedes the earlier typed-initial/surname restrictions described below. Patient identity stays typed; Noor remains off. No patient-code or Oman-hosting migration has been implemented.
+
 ## Noor update — 13 October 2026
 
 Noor has a shared $15/month platform AI cap. Prescription dictation/typed assistance is now PRIVATE super-admin testing only; ordinary dentists use the manual form. Public prescription flag is off; private admin preview flag is on. Use Super Admin → Test prescription → AI-assisted (or Manual). The private guide walks through patient/lab, treatment, appointment/files, then human review. This sandbox shares the form and Noor service, but cannot save/send cases, share prescriptions, upload files to storage, invite dentists or read/write real drafts. Sandbox attachments are local blobs only. Test input is memory-only and clears on close; AI requests still use the existing private gate and budget. The clinic named “Testing platform” is an ordinary production organization, not isolation by itself. The expired Anthropic key was replaced by the owner and real provider checks passed. See [the release notes](docs/agents/noor/08-prescription-assistant-and-budget.md) for scope, budget accounting, flags, verification and voice limitations.
@@ -594,3 +598,7 @@ Owner's live form had an empty Patient Name and a selected lab; Next correctly b
 Local fictional Chrome checks: empty name/lab shows both; selecting a lab removes it from warning without clearing other entries; entering F. Example then Next opens Treatment; omitted restoration shows the appropriate treatment warning. The actual user's saved draft was inspected read-only and left unchanged. 80 client tests, undefined JSX/identifier checks and production build passed. Noor remains deactivated.
 
 Live verified: source `bb22ee0`, bundle `index-B3m8jtq-.js`, Pages run 39309134193 succeeded. In a separate Chrome tab, resumed the owner's existing draft read-only, clicked Next without editing values, and confirmed the alert specifically names missing Patient name (initial and surname), with aria-invalid=true and focus on that input. Existing Smile World selection and saved draft retained. Original owner tab untouched. No prescription submitted, notification sent or patient data entered. Screenshot saved outside the public repository.
+
+## 2026-10-19 remove patient name-format restriction
+
+Shared validity now checks only that a string contains a non-whitespace entry. Removed initial/surname parsing and formatting, split-name UI and restrictive helper messages, including in dormant guided UI. Manual placeholder remains A. Al Harthi; empty field shows Enter a patient name or reference. No case data rewritten. 80 client tests, undefined JSX/identifier checks and production build passed; fictional Chrome flow accepted Fictional Person / 123 and advanced to Treatment with its text intact.
