@@ -41,6 +41,8 @@ New lab dictation replaces the preceding attempt and clears an old selection whi
 
 Validation: 80 client tests; local Chrome simulated speech checks for alternative recovery, retry replacement, noisy suggestion/confirmation, conflicting-lab rejection and disabled Continue until selection. No actual microphone accessed in these simulated tests, no case submitted, no new model/provider or platform AI spend for lab matching. Private AI launch gate remains unchanged.
 
+Live lab-matching release verified: `index-BvkbYYPJ.js`, source `5e50c68`, successful Pages run 39302486911 (the superseded concurrent run was cancelled). In a separate signed-in Chrome test, typed short name Smile World Lab resolved to the real Smile world dental lab; editing it to small world love cleared the selection/disabled Continue and offered the correct confirmation. Confirming selected it and re-enabled Continue. No console errors. The auto-speech-end/alternatives path was tested with the local simulated recognizer; actual owner-accent microphone recognition remains an owner test. Existing owner test tab was preserved; a separate current-version private lab question was left ready. No clinical case submitted.
+
 ## Stack
 
 | | |
