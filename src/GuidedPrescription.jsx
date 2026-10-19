@@ -1,14 +1,16 @@
 import React,{useState} from 'react';
 import SpeechAnswer from './SpeechAnswer.jsx';
+import PatientNameInput from './PatientNameInput.jsx';
+import {validPatientLabel} from './lib/patientLabel.js';
 import NoorPrescriptionAssist from './NoorPrescriptionAssist.jsx';
 import {matchSpokenLab,spokenAppointment} from './lib/rxGuide.js';
 const button='rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50';
 const input='w-full rounded-lg border border-slate-300 bg-white p-2.5 text-base';
 export default function GuidedPrescription({step,setStep,review,edit,form,setField,labs,onApply,api,onNext,files,onScans,onPhotos,onRemoveFile,sandbox}) {
  const [answer,setAnswer]=useState(''),[error,setError]=useState('');
- const [identityPart,setIdentityPart]=useState(form.patientName?'lab':'patient');
+ const [identityPart,setIdentityPart]=useState(validPatientLabel(form.patientName)?'lab':'patient');
  const changeStep=n=>{setAnswer('');setError('');setStep(n);};
- const usePatient=()=>{if(!answer.trim())return;setField('patientName',answer.trim());setAnswer('');setIdentityPart('lab');};
+ const usePatient=()=>{if(!validPatientLabel(form.patientName))return;setAnswer('');setIdentityPart('lab');};
  const useLab=()=>{
   const match=matchSpokenLab(answer,labs);
   if(!match){setError('Select the lab below to confirm the name.');return;}
@@ -29,12 +31,12 @@ export default function GuidedPrescription({step,setStep,review,edit,form,setFie
  </section>;
  return <section aria-label="Guided prescription" className="space-y-4 rounded-2xl border border-violet-100 bg-white p-4 sm:p-5">
   {step===1&&<>
-   {identityPart==='patient'?<SpeechAnswer prompt="What is the patient’s name?" value={answer} onChange={setAnswer}><button type="button" disabled={!answer.trim()} onClick={usePatient} className={button}>Use name</button></SpeechAnswer>:<>
-    <div className="flex items-center justify-between text-sm"><span>{form.patientName||'Patient name needed'}</span><button type="button" onClick={()=>{setIdentityPart('patient');setAnswer(form.patientName);}} className="text-violet-700">Edit name</button></div>
+   {identityPart==='patient'?<div className="space-y-4"><PatientNameInput value={form.patientName} onChange={v=>setField('patientName',v)}/><button type="button" disabled={!validPatientLabel(form.patientName)} onClick={usePatient} className={button}>Continue to lab</button></div>:<>
+    <div className="flex items-center justify-between text-sm"><span>{form.patientName||'Patient name needed'}</span><button type="button" onClick={()=>{setIdentityPart('patient');setAnswer('');}} className="text-violet-700">Edit name</button></div>
     <SpeechAnswer prompt="Which laboratory?" value={answer} onChange={setAnswer}><button type="button" disabled={!answer.trim()} onClick={useLab} className={button}>Use lab name</button></SpeechAnswer>
     <label className="block text-sm font-medium">Laboratory<select aria-label="Laboratory" value={form.labId} onChange={e=>{setField('labId',e.target.value);setError('');}} className={'mt-1 '+input}><option value="">Select a lab</option>{labs.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
    </>}
-   <div className="flex justify-end"><button type="button" disabled={!form.patientName.trim()||!form.labId} onClick={()=>{setAnswer('');setError('');onNext(1);}} className={button}>Continue to treatment</button></div>
+   <div className="flex justify-end"><button type="button" disabled={!validPatientLabel(form.patientName)||!form.labId} onClick={()=>{setAnswer('');setError('');onNext(1);}} className={button}>Continue to treatment</button></div>
   </>}
   {step===2&&<>
    {form.treatment.length>0&&<div className="rounded-xl bg-slate-50 p-3 text-sm">{form.treatment.map((r,i)=><p key={i}>{r.category} · {r.teeth.map(t=>form.notation==='FDI'?t.fdi:t.universal).join(', ')} · {r.material} · {r.vitaShade}</p>)}<button type="button" onClick={()=>setField('assistMode','manual')} className="mt-2 text-violet-700">Edit in manual form</button></div>}

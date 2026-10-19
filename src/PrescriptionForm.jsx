@@ -40,6 +40,8 @@ import { SectionBoundary } from "./ErrorBoundary.jsx";
 import { SignedImage } from "./lib/storageUrl.jsx";
 import MobilePhotoQR from "./MobilePhotoQR.jsx";
 import ClinicDentistPicker from "./ClinicDentistPicker.jsx";
+import PatientNameInput from './PatientNameInput.jsx';
+import {validPatientLabel} from './lib/patientLabel.js';
 import GuidedPrescription from './GuidedPrescription.jsx';
 import { guideLabels } from './lib/rxGuide.js';
 
@@ -2171,7 +2173,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // is one or the other, never both, so only one set is ever "live".
   const errors = {
     treatingDentist: delegateRx && !dentistValid,
-    patientName: !patientName.trim(),
+    patientName: !validPatientLabel(patientName),
     labId: !labId,
     restorations: caseMode === "restorations" && restorations.length === 0,
     unsavedRestoration: draftDirty,
@@ -2199,7 +2201,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // guessing why the Submit button does nothing.
   const MISSING_LABEL = {
     treatingDentist: "Treating dentist",
-    patientName: "Patient name",
+    patientName: "Typed first-name initial and surname",
     teeth: "At least one tooth on the chart",
     labId: "Target lab",
     restorations: "At least one restoration",
@@ -2412,9 +2414,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
                 autoSelectSelf={sendingRole === "admin"}
                 onChange={(id, name) => { setTreatingDentistId(id); setTreatingDentistName(name); }} onValidity={setDentistValid} />}
               {isEditing && editing.treatingDentistName && <div className="sm:col-span-2 text-sm text-slate-600">Treating dentist: <strong>{editing.treatingDentistName}</strong></div>}
-              <Field label="Patient Name" required>
-                <input className={`${inputCls} ${err("patientName") ? "border-rose-400 ring-rose-100" : ""}`} value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Full name" />
-              </Field>
+              <PatientNameInput value={patientName} onChange={setPatientName} invalid={!!err("patientName")} />
               {/* The lab is locked while editing: the case is already in that
                   lab's queue and they were emailed on submission — re-routing
                   a live case is a delete-and-resend, not an edit. */}

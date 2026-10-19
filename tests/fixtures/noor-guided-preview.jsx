@@ -4,7 +4,7 @@ import {createRoot} from 'react-dom/client';
 import Form from '/src/PrescriptionForm.jsx';
 import '/src/index.css';
 // Test-only browser speech adapter. No microphone/audio is accessed.
-const voiceAnswers=['Fictional Voice Patient','Fictional Dental Lab','FDI 21','Crown over implant','Zirconia','Vita Classical A2','Straumann, custom titanium, colour N/A','2 November 2026 at 10 am'];
+const voiceAnswers=['Fictional Dental Lab','FDI 21','Crown over implant','Zirconia','Vita Classical A2','Straumann, custom titanium, colour N/A','2 November 2026 at 10 am'];
 window.SpeechRecognition=window.webkitSpeechRecognition=class {
  start(){this.onstart?.();const transcript=voiceAnswers.shift()||'';const result=[{transcript}];result.isFinal=true;queueMicrotask(()=>{this.onresult?.({resultIndex:0,results:[result]});this.onend?.();});}
  stop(){this.onend?.();} abort(){this.onend?.();}

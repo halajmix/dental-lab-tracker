@@ -207,12 +207,14 @@ test("manual prescription exposes real three-stage progress",()=>{
 });
 test("guided start asks only for the patient, with later clinical details deferred",()=>{
  const html=r(h(GuidedPrescription,{step:1,form:{patientName:'',labId:''},labs:[],files:[]}));
- assert.match(html,/What is the patient’s name/);
+ assert.match(html,/First-name initial/);
+ assert.match(html,/Patient surname/);
+ assert.doesNotMatch(html,/Dictate|Enable mic|Dictation language|Use name/);
  assert.doesNotMatch(html,/Which material|implant brand|Which shade|platform allowance/);
 });
 test("guided review shows the actual patient, lab, tooth, date, time and attachments",()=>{
- const form={patientName:'Fictional Patient',labId:'l',notation:'FDI',insertionDate:'2026-11-02',appointmentTime:'10:00',treatment:[{category:'Crown - tooth',material:'Monolithic Zirconia',vitaShade:'A2',teeth:[{fdi:21,universal:9}]}]};
+ const form={patientName:'F. Patient',labId:'l',notation:'FDI',insertionDate:'2026-11-02',appointmentTime:'10:00',treatment:[{category:'Crown - tooth',material:'Monolithic Zirconia',vitaShade:'A2',teeth:[{fdi:21,universal:9}]}]};
  const html=r(h(GuidedPrescription,{review:true,form,labs:[{id:'l',name:'Fictional Lab'}],files:[{name:'fictional.stl'}],sandbox:true}));
- for(const value of ['Fictional Patient','Fictional Lab','21','Monolithic Zirconia','A2','2026-11-02','10:00','fictional.stl'])assert.ok(html.includes(value));
+ for(const value of ['F. Patient','Fictional Lab','21','Monolithic Zirconia','A2','2026-11-02','10:00','fictional.stl'])assert.ok(html.includes(value));
  assert.doesNotMatch(html,/Dictate|<textarea/);
 });

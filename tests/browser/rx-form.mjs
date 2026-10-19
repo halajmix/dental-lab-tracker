@@ -10,7 +10,7 @@ await server.listen();
 const origin = server.resolvedUrls.local[0].replace(/\/$/, '');
 const self = {id:'dentist-self',user_id:'user-self',name:'Dr Test'};
 const other = {id:'dentist-other',user_id:'user-other',name:'Dr Other'};
-const draft = {patientName:'Fictional Patient',labId:'lab-a',selectedClinicId:'clinic-a',insertionDate:'2030-01-10',caseMode:'restorations',restorations:[{id:'restoration-a',category:'Crown - tooth',material:'Zirconia',teeth:[8],shadeGuide:'Vita Classical',vitaShade:'A2'}]};
+const draft = {patientName:'F. Patient',labId:'lab-a',selectedClinicId:'clinic-a',insertionDate:'2030-01-10',caseMode:'restorations',restorations:[{id:'restoration-a',category:'Crown - tooth',material:'Zirconia',teeth:[8],shadeGuide:'Vita Classical',vitaShade:'A2'}]};
 let browser;
 try {
 for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
@@ -145,29 +145,30 @@ for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
  console.log(`PASS ${engineName} all 35 follow-up cases browse/search/select, including older completed cases`);
  {
   const {page,errors,deleteCount}=await setup({savedDraft:{...draft,patientName:'5'},draftAction:'choose',failDeleteOnce:true});
-  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).count(),0,'No silently restored patient field');
+  assert.equal(await page.getByRole('textbox',{name:'Patient surname',exact:true}).count(),0,'No silently restored patient field');
   assert.ok(await page.getByText('Saved patient name:',{exact:false}).isVisible());
   await page.getByRole('button',{name:'Discard draft & start blank',exact:true}).click();
   await page.getByRole('alert').filter({hasText:"Couldn't discard"}).waitFor();
-  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).count(),0,'Failed delete preserves the draft choice');
+  assert.equal(await page.getByRole('textbox',{name:'Patient surname',exact:true}).count(),0,'Failed delete preserves the draft choice');
   await page.getByRole('button',{name:'Resume saved draft',exact:true}).click();
-  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'5','Explicit resume preserves original value');
+  assert.equal(await page.getByRole('textbox',{name:'Patient surname',exact:true}).inputValue(),'','Legacy full/invalid labels are not guessed into surname fields');
   await page.getByRole('button',{name:'Close & keep draft',exact:true}).click();
   await page.getByRole('button',{name:'Open prescription',exact:true}).click();
   await page.getByRole('dialog',{name:'Unfinished prescription found'}).waitFor();
   await page.getByRole('button',{name:'Discard draft & start blank',exact:true}).click();
   await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).waitFor();
-  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'');
+  assert.equal(await page.getByRole('textbox',{name:'Patient surname',exact:true}).inputValue(),'');
   assert.equal(deleteCount(),2);
   await page.getByRole('button',{name:'Close & keep draft',exact:true}).click();
   await page.reload();
   await page.getByRole('button',{name:'Open prescription',exact:true}).click();
   await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).waitFor();
-  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'','Discarded name stays gone after reload');
-  await page.getByPlaceholder('Full name',{exact:true}).fill('Fresh Patient');
+  assert.equal(await page.getByRole('textbox',{name:'Patient surname',exact:true}).inputValue(),'','Discarded name stays gone after reload');
+  await page.getByRole('textbox',{name:'First-name initial',exact:true}).fill('F');
+  await page.getByRole('textbox',{name:'Patient surname',exact:true}).fill('Patient');
   await page.getByRole('button',{name:'Close & keep draft',exact:true}).click();
   await page.getByRole('button',{name:/Unfinished Rx.*Resume/}).click();
-  assert.equal(await page.getByPlaceholder('Full name',{exact:true}).inputValue(),'Fresh Patient','Resume shortcut retains work');
+  assert.equal(await page.getByRole('textbox',{name:'Patient surname',exact:true}).inputValue(),'Patient','Resume shortcut retains work');
   assert.deepEqual(errors,[]);await page.close();
  }
  console.log(`PASS ${engineName} saved name 5 requires explicit resume; failed discard preserves work; successful discard starts blank`);

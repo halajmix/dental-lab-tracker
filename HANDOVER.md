@@ -25,6 +25,12 @@ Local browser checks cover full typed flow, simulated speech callbacks through p
 
 Live guided release verified in Chrome: `index-qO1LADb7.js` (source `5f388ef`, test follow-up `e4eb997`). Real structured treatment request and actual new UI both returned tooth 21 / Monolithic Zirconia / A2. Completed patient/lab → treatment → date/time → No files → review → sandbox test, then closed/reopened to verify empty patient. No browser console errors observed. Public flag read back false; private preview true. Original Pages run failed at deploy with HTTP 500; a fresh Pages build completed successfully (run 39299949938). Production backend and clinical records were not modified. The doctor’s own real-device microphone remains an owner test.
 
+## 2026-10-19 typed patient identification
+
+Owner explicitly prohibited patient-name dictation. Both assisted and manual prescriptions now use the shared PatientNameInput: first-name initial plus surname, stored in existing patientName as e.g. `A. Al Harthi`. Guided patient stage has no SpeechAnswer, microphone/language controls, or spoken-name apply action. Voice starts only after Continue to lab. Shared form validation rejects full given-name labels and missing/invalid initials/surnames. Unicode letters, Arabic names, compound/hyphenated surnames and apostrophes are supported. Existing full names are never guessed into initials or surnames and historical records are not migrated; authoring/editing such a prescription requires the dentist to enter the abbreviated label. New UI validation does not replace server access controls or disable operating-system keyboard dictation.
+
+Verification: 74 client tests including name format/privacy renders; undefined JSX/identifier checks and production build. Local Chrome confirmed zero Dictate controls during patient identification, typed `A` + `Al Harthi` becomes `A. Al Harthi`, Manual preserves both fields, and `AB` initial is rejected. Patient identity never enters the Noor treatment payload. Updated existing browser fixtures for split typed name fields. No backend/SQL/feature-flag change.
+
 ## Stack
 
 | | |

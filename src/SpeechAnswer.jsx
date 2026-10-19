@@ -59,7 +59,7 @@ export default function SpeechAnswer({ prompt, value, onChange, disabled = false
       <button type="button" onClick={dictate} disabled={disabled||!Recognition||mic==='requesting'} className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm disabled:opacity-50">{listening?<Square size={14}/>:<Mic size={14}/>} {listening?'Stop':'Dictate'}</button>
       <fieldset disabled={disabled||listening} className="contents">{children}</fieldset>
     </div>
-    <details className="text-xs text-slate-500"><summary className="cursor-pointer">Voice privacy</summary><p className="mt-1">Your browser may process audio. Patient and appointment answers stay out of Noor requests.</p></details>
+    <details className="text-xs text-slate-500"><summary className="cursor-pointer">Voice privacy</summary><p className="mt-1">Your browser may process audio. Only treatment answers go to Noor.</p></details>
     {!Recognition&&<p className="text-xs text-slate-500">Use your keyboard microphone or type.</p>}
     {error&&<p role="alert" className="text-sm text-rose-700">{error}</p>}
   </div>;
