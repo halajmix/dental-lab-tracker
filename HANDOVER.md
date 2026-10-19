@@ -33,6 +33,14 @@ Verification: 74 client tests including name format/privacy renders; undefined J
 
 Live release verified: `index-DLJMcpa9.js`, source `9227af7`, Pages run 39301071334 succeeded. Chrome patient stage has zero Dictate buttons; typed A + Al Harthi becomes A. Al Harthi and remains split correctly in Manual. Closing/reopening cleared the synthetic values; left an empty typed-only patient step open. No real prescription submitted.
 
+## 2026-10-19 lab dictation matching
+
+Owner reported “Smile World Lab” transcribed as “small world love” and no automatic lab selection. The lab step now uses a short single-utterance recognition session with up to five browser alternatives. A unique catalog name/short brand (e.g. Smile World Lab → Smile world dental lab) selects automatically after a final result and recognition end. Joined/spaced brand names and omitted generic Dental/Laboratory suffixes are supported. Brand/branch collisions, conflicting recognized labs and negative/disjunctive utterances require explicit confirmation. No fuzzy match can automatically route a case. The reported noisy phrase produces a “Did you mean …?” button instead. Only currently available labs supplied to the form participate.
+
+New lab dictation replaces the preceding attempt and clears an old selection while listening; typed edits also invalidate it. Re-emitted speech result lists are rebuilt rather than appended, preventing duplicated words. Each recording has a generation guard against late results/end events from a previous session. Patient entry remains typed initials/surname with no speech component; treatment is not auto-corrected or auto-submitted. Browser speech recognition is still the existing provider: alternate transcripts are not guaranteed, and real accented/audio quality still requires owner microphone testing. Experimental phrase bias was deliberately not enabled because support is limited; see MDN SpeechRecognition.maxAlternatives and SpeechRecognition.phrases.
+
+Validation: 80 client tests; local Chrome simulated speech checks for alternative recovery, retry replacement, noisy suggestion/confirmation, conflicting-lab rejection and disabled Continue until selection. No actual microphone accessed in these simulated tests, no case submitted, no new model/provider or platform AI spend for lab matching. Private AI launch gate remains unchanged.
+
 ## Stack
 
 | | |

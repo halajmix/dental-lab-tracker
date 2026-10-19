@@ -1,11 +1,12 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Mic, Square } from 'lucide-react';
+import {collectSpeechResults} from './lib/speechResults.js';
 
 // Voice stays in the browser. Only the treatment component sends a reviewed
 // transcript to Noor; identity and appointment inputs never enter that request.
-export default function SpeechAnswer({ prompt, value, onChange, disabled = false, children, hint = '' }) {
-  const id = useId(), speech = useRef(null), timer = useRef(null), latest = useRef({value,onChange});
-  latest.current = {value,onChange};
+export default function SpeechAnswer({ prompt, value, onChange, disabled = false, children, hint = '', singleUtterance = false, replaceOnDictate = false, onFinal, onDictationStart }) {
+  const id = useId(), speech = useRef(null), timer = useRef(null), latest = useRef({value,onChange,onFinal,onDictationStart});
+  latest.current = {value,onChange,onFinal,onDictationStart};
   const [listening,setListening] = useState(false), [pending,setPending] = useState('');
   const [language,setLanguage] = useState('en-GB'), [mic,setMic] = useState(''), [error,setError] = useState('');
   const live = useRef(true), generation = useRef(0);
@@ -31,22 +32,21 @@ export default function SpeechAnswer({ prompt, value, onChange, disabled = false
   const dictate = () => {
     if(listening){speech.current?.stop();return;}
     if(!Recognition)return;
-    const turn=generation.current;
-    const rec=new Recognition();speech.current=rec; rec.lang=language;rec.continuous=true;rec.interimResults=true;
+    const turn=++generation.current;
+    const rec=new Recognition();speech.current=rec; rec.lang=language;rec.continuous=!singleUtterance;rec.interimResults=true;rec.maxAlternatives=singleUtterance?5:1;
+    const base=replaceOnDictate?'':latest.current.value;
+    let receivedFinal=false, failed=false, alternatives=[];
     setError('');
     rec.onresult=e=>{
       if(!live.current||turn!==generation.current)return;
-      let final='',interim='';
-      for(let i=e.resultIndex;i<e.results.length;i++){
-        if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';else interim+=e.results[i][0].transcript;
-      }
-      if(final){const next=(latest.current.value+' '+final).trim().slice(0,4000);latest.current.value=next;latest.current.onChange(next);}
-      setPending(interim);
+      const result=collectSpeechResults(e.results,base);alternatives=result.alternatives;
+      if(result.hasFinal){receivedFinal=true;latest.current.value=result.text;latest.current.onChange(result.text);}
+      setPending(result.interim);
     };
     rec.onstart=()=>{if(live.current&&turn===generation.current){setListening(true);setMic('allowed');}};
-    rec.onerror=e=>{if(live.current&&turn===generation.current){setError(e.error==='not-allowed'?'Allow the microphone in your browser settings, or type.':'Dictation stopped. Check your answer and try again.');setListening(false);setPending('');}};
-    rec.onend=()=>{clearTimeout(timer.current);if(live.current&&turn===generation.current){setListening(false);setPending('');}};
-    try{rec.start();setListening(true);timer.current=setTimeout(()=>{try{rec.stop();}catch{}},45000);}catch{setError('Dictation is unavailable. You can type instead.');}
+    rec.onerror=e=>{failed=true;if(live.current&&turn===generation.current){setError(e.error==='not-allowed'?'Allow the microphone in your browser settings, or type.':'Dictation stopped. Check your answer and try again.');setListening(false);setPending('');}};
+    rec.onend=()=>{if(live.current&&turn===generation.current){clearTimeout(timer.current);setListening(false);setPending('');if(receivedFinal&&!failed)latest.current.onFinal?.(latest.current.value,alternatives);else if(singleUtterance&&!failed)setError('No speech was recognised. Try again or type the lab name.');}};
+    try{latest.current.onDictationStart?.();if(replaceOnDictate){latest.current.value='';latest.current.onChange('');}rec.start();setListening(true);timer.current=setTimeout(()=>{try{rec.stop();}catch{}},45000);}catch{setError('Dictation is unavailable. You can type instead.');}
   };
   return <div className="space-y-3">
     <label htmlFor={id} className="block text-base font-semibold text-slate-800">{prompt}</label>

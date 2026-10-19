@@ -3,7 +3,7 @@ import SpeechAnswer from './SpeechAnswer.jsx';
 import PatientNameInput from './PatientNameInput.jsx';
 import {validPatientLabel} from './lib/patientLabel.js';
 import NoorPrescriptionAssist from './NoorPrescriptionAssist.jsx';
-import {matchSpokenLab,spokenAppointment} from './lib/rxGuide.js';
+import {matchSpokenLab,labFromAlternatives,suggestSpokenLabs,spokenAppointment} from './lib/rxGuide.js';
 const button='rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50';
 const input='w-full rounded-lg border border-slate-300 bg-white p-2.5 text-base';
 export default function GuidedPrescription({step,setStep,review,edit,form,setField,labs,onApply,api,onNext,files,onScans,onPhotos,onRemoveFile,sandbox}) {
@@ -11,10 +11,19 @@ export default function GuidedPrescription({step,setStep,review,edit,form,setFie
  const [identityPart,setIdentityPart]=useState(validPatientLabel(form.patientName)?'lab':'patient');
  const changeStep=n=>{setAnswer('');setError('');setStep(n);};
  const usePatient=()=>{if(!validPatientLabel(form.patientName))return;setAnswer('');setIdentityPart('lab');};
+ const updateLabAnswer=text=>{setAnswer(text);setError('');setField('labId','');};
+ const selectLab=lab=>{setField('labId',lab.id);setAnswer(lab.name);setError('');};
+ const finishLabSpeech=(text,alternatives)=>{
+  const result=labFromAlternatives([{transcript:text},...alternatives],labs);
+  if(result.lab)selectLab(result.lab);
+  else if(result.ambiguous)setError('More than one lab matched. Select the correct lab below.');
+  else setError(suggestSpokenLabs(text,labs).length?'':'Confirm the lab below, or try again.');
+ };
+ const suggestions=identityPart==='lab'&&!form.labId?suggestSpokenLabs(answer,labs):[];
  const useLab=()=>{
   const match=matchSpokenLab(answer,labs);
   if(!match){setError('Select the lab below to confirm the name.');return;}
-  setField('labId',match.id);setAnswer('');setError('');
+  selectLab(match);
  };
  const useAppointment=()=>{
   const parsed=spokenAppointment(answer);
@@ -33,8 +42,10 @@ export default function GuidedPrescription({step,setStep,review,edit,form,setFie
   {step===1&&<>
    {identityPart==='patient'?<div className="space-y-4"><PatientNameInput value={form.patientName} onChange={v=>setField('patientName',v)}/><button type="button" disabled={!validPatientLabel(form.patientName)} onClick={usePatient} className={button}>Continue to lab</button></div>:<>
     <div className="flex items-center justify-between text-sm"><span>{form.patientName||'Patient name needed'}</span><button type="button" onClick={()=>{setIdentityPart('patient');setAnswer('');}} className="text-violet-700">Edit name</button></div>
-    <SpeechAnswer prompt="Which laboratory?" value={answer} onChange={setAnswer}><button type="button" disabled={!answer.trim()} onClick={useLab} className={button}>Use lab name</button></SpeechAnswer>
-    <label className="block text-sm font-medium">Laboratory<select aria-label="Laboratory" value={form.labId} onChange={e=>{setField('labId',e.target.value);setError('');}} className={'mt-1 '+input}><option value="">Select a lab</option>{labs.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+    <SpeechAnswer prompt="Which laboratory?" value={answer} onChange={updateLabAnswer} singleUtterance replaceOnDictate onFinal={finishLabSpeech} onDictationStart={()=>{setField('labId','');setError('');}}><button type="button" disabled={!answer.trim()} onClick={useLab} className={button}>Use lab name</button></SpeechAnswer>
+    {suggestions.map(l=><button key={l.id} type="button" onClick={()=>selectLab(l)} className="block rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-left text-sm text-violet-800">Did you mean {l.name}?</button>)}
+    {form.labId&&<span role="status" className="sr-only">Selected {labs.find(l=>l.id===form.labId)?.name}</span>}
+    <label className="block text-sm font-medium">Laboratory<select aria-label="Laboratory" value={form.labId} onChange={e=>{const lab=labs.find(l=>l.id===e.target.value);if(lab)selectLab(lab);else{setField('labId','');setAnswer('');}}} className={'mt-1 '+input}><option value="">Select a lab</option>{labs.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
    </>}
    <div className="flex justify-end"><button type="button" disabled={!validPatientLabel(form.patientName)||!form.labId} onClick={()=>{setAnswer('');setError('');onNext(1);}} className={button}>Continue to treatment</button></div>
   </>}
