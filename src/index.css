@@ -31,3 +31,38 @@ input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/* Prescription surfaces follow the visual viewport, including phone keyboards. */
+.rx-overlay { box-sizing: border-box; }
+.rx-dialog { height: 100%; max-height: 100%; }
+@media (min-width: 640px) {
+  .rx-dialog { height: 96%; }
+}
+@media (max-width: 1024px), (pointer: coarse) {
+  .rx-overlay {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+  .rx-surface button, .rx-surface select, .rx-surface input:not([type="checkbox"]):not([type="file"]),
+  .rx-surface label:has(input[type="file"]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .rx-surface input:not([type="checkbox"]), .rx-surface select, .rx-surface textarea {
+    font-size: 16px;
+  }
+  .rx-surface input, .rx-surface select, .rx-surface textarea { max-width: 100%; }
+  .rx-surface nav button > span:last-child { overflow-wrap: anywhere; }
+  .rx-surface button { touch-action: manipulation; }
+}
+/* A short landscape screen or open keyboard needs one useful scrolling page,
+   rather than a tiny editor between two fixed bars. Actions remain reachable. */
+@media (max-height: 450px) {
+  .rx-dialog { display: block; overflow-y: auto; overscroll-behavior: contain; }
+  .rx-dialog [data-rx-scroll], .rx-dialog > .flex-1 { overflow: visible; }
+}
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px; }
+}

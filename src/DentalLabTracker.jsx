@@ -2327,7 +2327,7 @@ function CaseLogTable({ cases, otherPartyLabel, otherPartyName, onOpenCase, open
       {cases.length === 0 ? (
         <p className="px-4 py-6 text-center text-xs text-slate-400">No cases yet.</p>
       ) : (
-        <div className="max-h-[420px] overflow-y-auto">
+        <div className="max-h-[420px] overflow-auto">
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
               <tr>

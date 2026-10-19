@@ -1,3 +1,4 @@
+import {usePrescriptionViewport} from './lib/usePrescriptionViewport.js';
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { fetchClinicDentists, createClinicInvitation } from "./lib/data.js";
@@ -8,6 +9,7 @@ export default function ClinicDentistPicker({ clinicId, userId, value, onChange,
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [adding, setAdding] = useState(false);
+  const viewportStyle=usePrescriptionViewport(adding);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,7 +98,7 @@ export default function ClinicDentistPicker({ clinicId, userId, value, onChange,
     <div className="flex flex-wrap gap-2">
       <select ref={selectRef} id="treating-dentist" value={rows.some((d) => d.id === value) ? value : ""} disabled={loading || busy}
         onChange={(e) => { const d = rows.find((r) => r.id === e.target.value); onChange(d?.id ?? "", d?.name ?? ""); }}
-        className="min-w-48 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+        className="min-w-0 w-full sm:w-auto flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
         <option value="">{loading ? "Loading dentists…" : "Select a dentist"}</option>
         {rows.map((d) => <option key={d.id} value={d.id}>{d.name}{!d.user_id ? " · Invited" : ""}</option>)}
       </select>
@@ -105,8 +107,8 @@ export default function ClinicDentistPicker({ clinicId, userId, value, onChange,
     {!loading && !error && rows.length === 0 && <p className="mt-1 text-xs text-slate-500">Add and invite a dentist to send this prescription on their behalf.</p>}
     {error && <p role="alert" className="mt-1 text-xs text-rose-700">{error} <button type="button" onClick={() => setRefresh((n) => n + 1)} className="underline">Try again</button></p>}
     {notice && <p role="status" className="mt-1 text-xs text-emerald-700">{notice}</p>}
-    {adding && createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onClick={close}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-dentist-title" onKeyDown={dialogKeys} onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+    {adding && createPortal(<div style={viewportStyle} className="rx-overlay rx-surface fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" onClick={close}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-dentist-title" onKeyDown={dialogKeys} onClick={(e) => e.stopPropagation()} className="max-h-full w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 sm:p-6 shadow-xl">
         <h2 id="add-dentist-title" className="text-lg font-bold text-slate-900">Add a Dentist</h2>
         <p className="mt-1 text-sm text-slate-500">Invite a dentist to this clinic. You can select them immediately.</p>
         <form onSubmit={add} className="mt-4 space-y-4">

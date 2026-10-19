@@ -1,5 +1,6 @@
 import {RX_IMPLANT_SYSTEMS as IMPLANT_SYSTEMS,RX_ABUTMENT_TYPES as ABUTMENT_TYPES,RX_CATEGORIES as CATEGORIES,RX_SHADE_GUIDES as SHADE_GUIDES,UNIVERSAL_TO_FDI} from "../supabase/functions/_shared/rxCatalog.ts";
 import React, { useMemo, useState, useRef, useEffect } from "react";
+import {usePrescriptionViewport} from "./lib/usePrescriptionViewport.js";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -235,8 +236,8 @@ export function toothSummary(prescription) {
 /* ================================================================== */
 
 // Larger touch targets for chairside use (was 30/37).
-const TOOTH_W = 38;
-const STEP = 45;
+const TOOTH_W = 44;
+const STEP = 50;
 const MARGIN_X = 26;
 const MIDGAP = 22;
 const colX = (i) => MARGIN_X + i * STEP + (i >= 8 ? MIDGAP : 0);
@@ -261,6 +262,18 @@ const APPLIANCE_TOOTH_MODES = [
 ];
 
 function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onClear, onGroup, disabled, modes = DEFAULT_TOOTH_MODES }) {
+  const chartScroll = useRef(null);
+  const centreChart = () => {
+    const el=chartScroll.current;
+    if(el)el.scrollLeft=Math.max(0,(el.scrollWidth-el.clientWidth)/2);
+  };
+  useEffect(()=>{
+    const el=chartScroll.current;if(!el)return;
+    let frame=requestAnimationFrame(centreChart);
+    const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(centreChart);});
+    observer?.observe(el);
+    return()=>{cancelAnimationFrame(frame);observer?.disconnect();};
+  },[]);
   const isDisabled = (u) => !!disabled?.has(u);
   const rows = [
     { key: "upper", teeth: UPPER_ROW, y: 34 },
@@ -327,6 +340,7 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
         </button>
       </div>
 
+      <button type="button" onClick={centreChart} className="mb-2 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600">Centre chart</button>
       {/* Quick-select groups — whole segments in one tap */}
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span className="text-[11px] font-medium text-slate-400">Quick select:</span>
@@ -346,14 +360,14 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
           32-tooth chart scale down to a phone's width puts each tooth at
           ~6px, far too small to tap accurately. A floor of 640px keeps
           teeth at a usable size and the container scrolls instead. */}
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2">
+      <div ref={chartScroll} data-tooth-scroll role="region" aria-label={`${notation} tooth chart`} tabIndex={0} dir="ltr" className="max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-slate-200 bg-slate-50 p-2">
         <svg
           viewBox={`0 0 ${CHART_W} 210`}
           className="select-none"
-          style={{ width: "100%", minWidth: 640, maxHeight: 300 }}
+          style={{ width: "100%", minWidth: CHART_W, maxHeight: 300 }}
         >
           <style>{`
-            .tooth-empty:hover .glyph { fill:#e2e8f0; stroke:#94a3b8; }
+            @media (hover: hover) { .tooth-empty:hover .glyph { fill:#e2e8f0; stroke:#94a3b8; } }
             .tooth-hit { cursor:pointer; }
           `}</style>
 
@@ -387,6 +401,8 @@ function ToothChart({ notation, selection, mode, setMode, onToggle, onArch, onCl
               return (
                 <g
                   key={u}
+                  role="button" tabIndex={locked?-1:0} aria-label={`Tooth ${label(u, notation)}`} aria-pressed={!!role} aria-disabled={locked}
+                  onKeyDown={e=>{if(!locked && (e.key==='Enter'||e.key===' ')){e.preventDefault();onToggle(u);}}}
                   className={`tooth-hit ${role ? "" : "tooth-empty"}`}
                   style={locked ? { cursor: "not-allowed" } : undefined}
                   onClick={() => !locked && onToggle(u)}
@@ -459,7 +475,7 @@ const inputCls =
  */
 function MultiSelect({ options, selected, onToggle, placeholder = "Select…" }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0, maxHeight:288 });
   const btnRef = useRef(null);
   const panelRef = useRef(null);
 
@@ -472,7 +488,12 @@ function MultiSelect({ options, selected, onToggle, placeholder = "Select…" })
   // scroll/resize since a stale anchor is worse than just closing.
   const openPanel = () => {
     const r = btnRef.current.getBoundingClientRect();
-    setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    const viewport=window.visualViewport;
+    const top=viewport?.offsetTop||0,height=viewport?.height||window.innerHeight,width=viewport?.width||window.innerWidth;
+    const below=top+height-r.bottom-8,above=r.top-top-8,down=below>=Math.min(240,above);
+    const maxHeight=Math.max(44,Math.min(288,down?below:above));
+    const panelWidth=Math.min(r.width,width-16);
+    setPos({ top:down?r.bottom+4:Math.max(top+8,r.top-maxHeight-4),left:Math.max(8,Math.min(r.left,width-panelWidth-8)),width:panelWidth,maxHeight });
     setOpen(true);
   };
 
@@ -483,7 +504,7 @@ function MultiSelect({ options, selected, onToggle, placeholder = "Select…" })
       setOpen(false);
     };
     const onEsc = (e) => e.key === "Escape" && setOpen(false);
-    const close = () => setOpen(false);
+    const close = (e) => { if(e?.target instanceof Node && panelRef.current?.contains(e.target))return; setOpen(false); };
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onEsc);
     window.addEventListener("scroll", close, true);
@@ -518,8 +539,8 @@ function MultiSelect({ options, selected, onToggle, placeholder = "Select…" })
         createPortal(
           <div
             ref={panelRef}
-            style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
-            className="z-50 flex max-h-72 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl"
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, maxHeight:pos.maxHeight }}
+            className="rx-surface z-[80] flex max-h-72 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl"
           >
             <div className="overflow-y-auto py-1">
               {options.map((opt) => {
@@ -617,6 +638,7 @@ function LabPickerCard({ lab, selected, onPick }) {
 
 function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
   const [open, setOpen] = useState(false);
+  const viewportStyle=usePrescriptionViewport(open);
   const [query, setQuery] = useState("");
 
   const selected = labs.find((l) => l.id === value) ?? null;
@@ -652,8 +674,8 @@ function LabPicker({ labs, value, onChange, clinicGov, invalid }) {
 
       {open &&
         createPortal(
-          <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
-            <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-md sm:rounded-2xl">
+          <div style={viewportStyle} className="rx-overlay rx-surface fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
+            <div className="flex max-h-[90%] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-md sm:rounded-2xl">
               <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
                 <Building2 size={16} className="text-blue-600" />
                 <h3 className="text-sm font-bold text-slate-800">Choose a lab</h3>
@@ -1089,12 +1111,13 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
     }
   };
 
+  const viewportStyle=usePrescriptionViewport(open);
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-4">
+    <div style={viewportStyle} className="rx-overlay rx-surface fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-2">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 flex w-full max-w-3xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:max-h-[92vh] sm:rounded-2xl">
+      <div className="rx-dialog relative z-10 flex min-h-0 w-full max-w-3xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:rounded-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white">
@@ -1112,7 +1135,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
 
         <ModeToggle value="followup" onChange={(v) => v === "new" && onSwitchToNew()} />
 
-        <div className="flex-1 space-y-4 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto bg-slate-50/60 px-3 py-4 sm:px-5">
           {/* 1 · Pick the existing case (active or completed) */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <p className="mb-2 text-sm font-bold text-slate-800">1 · Which case is this about?</p>
@@ -1338,6 +1361,7 @@ function FollowupModal({ open, cases = [], labs = [], userId, authorName = "", d
 /* ================================================================== */
 
 export default function PrescriptionForm({ open, onClose, onResume, labs, onSave, onSaveEdit, onSubmitFollowup, editing = null, userId: suppliedUserId, sandbox = false, authorName = "", cases = [], clinics = [], defaultClinicId = null, labAllowed = () => true,noorAssistApi }) {
+  const viewportStyle=usePrescriptionViewport(open);
   // Sandbox never reads or writes a user’s persistent prescription draft.
   const userId = sandbox ? null : suppliedUserId;
   const [testComplete, setTestComplete] = useState(false);
@@ -2334,9 +2358,9 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
 
   /* ---------------- render ---------------- */
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-2">
+    <div style={viewportStyle} className="rx-overlay rx-surface fixed inset-0 z-50 flex items-stretch justify-center sm:items-center sm:p-2">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => { if (!submitLock.current) onClose(); }} />
-      <div onChangeCapture={() => { if (sandbox) { setTestComplete(false); setReviewOpen(false); } }} role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="relative z-10 flex min-h-0 h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:h-[96dvh] sm:rounded-2xl">
+      <div onChangeCapture={() => { if (sandbox) { setTestComplete(false); setReviewOpen(false); } }} role="dialog" aria-modal="true" aria-label="Digital Laboratory Prescription" className="rx-dialog relative z-10 flex min-h-0 h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 sm:h-[96dvh] sm:rounded-2xl">
         {/* Header */}
         <div data-rx-header className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-3 py-2 sm:px-4">
           <div className="flex min-w-0 items-center gap-2">
@@ -3086,7 +3110,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
           {/* actions */}
           <div className="flex items-center justify-end px-3 py-2 sm:px-4">
             {/* Two compact columns on phones; one action row on larger screens. */}
-            <div className="grid w-full grid-cols-2 gap-1.5 [&>button]:min-h-10 sm:flex sm:w-auto sm:flex-row sm:[&>button]:min-h-0">
+            <div className="grid w-full grid-cols-2 gap-1.5 sm:flex sm:w-auto sm:flex-row">
               <button
                 type="button"
                 style={!assistMode ? {display:'none'} : undefined}

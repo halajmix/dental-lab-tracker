@@ -1053,7 +1053,7 @@ function LabStaffRoles({ labs }) {
       ) : members.length === 0 ? (
         <p className="px-5 py-6 text-center text-sm text-slate-400">No signed-up members in this lab yet.</p>
       ) : (
-        <table className="w-full text-left text-sm">
+        <div className="max-w-full overflow-x-auto"><table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-400">
             <tr>
               <th className="px-5 py-2">Member</th>
@@ -1135,7 +1135,7 @@ function LabStaffRoles({ labs }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

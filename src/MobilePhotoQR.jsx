@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {usePrescriptionViewport} from "./lib/usePrescriptionViewport.js";
 import { X, Smartphone, Loader2, CheckCircle2, AlertTriangle, RefreshCcw } from "lucide-react";
 import {
   createMobileUploadSession,
@@ -17,6 +18,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 export default function MobilePhotoQR({ open, onClose, onPhotos }) {
+  const viewportStyle=usePrescriptionViewport(open);
   const [session, setSession] = useState(null); // {id, expiresAt}
   const [state, setState] = useState("creating"); // creating | waiting | received | expired | error
   const [count, setCount] = useState(0);
@@ -97,8 +99,8 @@ export default function MobilePhotoQR({ open, onClose, onPhotos }) {
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-xs rounded-2xl bg-white p-5 text-center shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div style={viewportStyle} className="rx-overlay rx-surface fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4" onClick={onClose}>
+      <div className="max-h-full w-full max-w-xs overflow-y-auto rounded-2xl bg-white p-5 text-center shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
             <Smartphone size={15} className="text-blue-600" /> Photos &amp; files from your phone

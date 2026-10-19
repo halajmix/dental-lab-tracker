@@ -44,13 +44,14 @@ for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
   await page.waitForTimeout(150);
   return {page,errors,drafts,deleteCount:()=>deletes};
  }
- for(const viewport of [{width:1041,height:631},{width:1440,height:900},{width:390,height:844},{width:320,height:568}]) {
+ for(const viewport of [{width:320,height:568},{width:360,height:640},{width:375,height:667},{width:390,height:844},{width:430,height:932},{width:540,height:720},{width:640,height:600},{width:768,height:1024},{width:820,height:1180},{width:1024,height:768},{width:1280,height:720},{width:1440,height:900},{width:1920,height:1080},{width:2560,height:1440},{width:844,height:390},{width:568,height:320},{width:390,height:360}]) {
   const {page,errors}=await setup({viewport});
   assert.equal(await page.locator('#treating-dentist').count(),0);
   assert.equal(await page.getByRole('button',{name:'Add a Dentist',exact:true}).count(),0);
   assert.equal(await page.getByText('Dr Test',{exact:true}).count(),1);
-  const scroller=page.locator('[data-rx-scroll]');
-  const box=await scroller.boundingBox(); assert.ok(box.height>60, 'Usable scroll area');
+  const shortPage=await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).evaluate(e=>getComputedStyle(e).display==='block');
+  const scroller=shortPage?page.getByRole('dialog',{name:'Digital Laboratory Prescription'}):page.locator('[data-rx-scroll]');
+  const box=await scroller.boundingBox(); assert.ok(box.height>=Math.min(220,viewport.height*.35), 'Usable prescription work area');
   await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
   await page.mouse.wheel(0,1500);await page.waitForTimeout(250);
   const dimensions=await scroller.evaluate(e=>({top:e.scrollTop,height:e.clientHeight,total:e.scrollHeight}));
@@ -58,7 +59,8 @@ for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
   assert.equal(await page.evaluate(()=>window.scrollY),0,'Background stays still');
   assert.ok(await page.getByRole('button',{name:'Next · Treatment',exact:true}).isVisible());
   const footer=await page.getByRole('button',{name:'Submit Prescription',exact:true}).boundingBox();
-  assert.ok(footer.y>=0 && footer.y+footer.height<=viewport.height,'Submit remains on screen');
+  if(!shortPage)assert.ok(footer.y>=0 && footer.y+footer.height<=viewport.height+1,'Submit remains on screen');
+  if(viewport.width<=1024){const small=await page.getByRole('dialog',{name:'Digital Laboratory Prescription'}).locator('button').evaluateAll(es=>es.filter(e=>{const r=e.getBoundingClientRect();return r.width&&r.height&&(r.width<43.9||r.height<43.9)}).map(e=>e.innerText));assert.deepEqual(small,[],'Phone/tablet touch controls are at least 44px');}
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.getByRole('button',{name:'Close & keep draft',exact:true}).click();
   assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
@@ -69,6 +71,18 @@ for (const engineName of (process.env.RX_BROWSERS || 'chromium').split(',')) {
   assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden');
   assert.deepEqual(errors,[]);await page.close();
   console.log(`PASS ${engineName} scroll/identity/close/reopen ${viewport.width}×${viewport.height}`);
+ }
+ {
+  const {page,errors}=await setup({viewport:{width:390,height:844}});
+  await page.getByRole('button',{name:'2 Treatment',exact:true}).click();
+  await page.getByRole('button',{name:'Add Restoration',exact:true}).click();
+  await page.waitForFunction(()=>{const e=document.querySelector('[data-tooth-scroll]');return e&&Math.abs(e.scrollLeft-(e.scrollWidth-e.clientWidth)/2)<1;});
+  for(const n of [21,23,24])await page.getByRole('button',{name:`Tooth ${n}`,exact:true}).click();
+  await page.setViewportSize({width:844,height:390});
+  await page.waitForFunction(()=>{const e=document.querySelector('[data-tooth-scroll]');return Math.abs(e.scrollLeft-(e.scrollWidth-e.clientWidth)/2)<1;});
+  for(const n of [21,23,24])assert.equal(await page.getByRole('button',{name:`Tooth ${n}`,exact:true}).getAttribute('aria-pressed'),'true');
+  assert.deepEqual(errors,[]);await page.close();
+  console.log(`PASS ${engineName} chart opens centred and retains teeth through rotation`);
  }
  for(const config of [{role:'admin',roster:[self,other]},{role:'receptionist',roster:[other]},{role:'admin',roster:[]},{role:'admin',roster:[{...other,user_id:null}]}]) {
   const {page,errors}=await setup(config);
