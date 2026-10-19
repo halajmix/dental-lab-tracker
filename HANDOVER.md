@@ -568,3 +568,9 @@ Owner applied the pending-invitation repair. The production RPC is present and
 rejects a no-user probe before writing. Frontend `index-Cmhhvbxo.js` is live
 and its bytes match the built artifact; it calls `add_clinic_dentist`. No real
 invitation or case was submitted during rollout verification.
+
+## 2026-10-19 Noor deactivated by owner
+
+Owner explicitly requested deactivation after unsatisfactory prescription dictation. Live database read-back verified all three `noor.*` flags false (global, public prescription assistance, private admin preview); no lab has `noor_enabled=true`; pilot `role_modes={}` and `emails_enabled=false`. A private settings snapshot is outside the public repo. Existing Noor data and provider credentials are retained; do not reactivate without a new owner instruction. Global gate stops scheduled/event processing before audit/model/tools; the database scheduling and event-posting wrappers also return while global is off. Ordinary case-notify and other feature flags were not changed.
+
+Authenticated live probes verified: admin prescription status invisible/disabled with private preview false, draft request rejected before model invocation (403), lab status disabled, lab question skipped with `noor disabled`. No case or email was created. Frontend sandbox now opens the manual form directly and has no AI mode choice or switch. Normal submit/draft controls and the non-submitting manual sandbox remain. Unfinished, untracked tooth-selection experiments were not included in this release.

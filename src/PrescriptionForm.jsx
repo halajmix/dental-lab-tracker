@@ -1342,7 +1342,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
   // Sandbox never reads or writes a user’s persistent prescription draft.
   const userId = sandbox ? null : suppliedUserId;
   const [testComplete, setTestComplete] = useState(false);
-  const [assistMode, setAssistMode] = useState(sandbox ? null : 'manual');
+  const [assistMode, setAssistMode] = useState('manual');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [appointmentTime, setAppointmentTime] = useState('');
   const [filesChoice, setFilesChoice] = useState(null);
@@ -2357,7 +2357,6 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
         {/* New Case vs Follow-up — hidden while editing an existing case. */}
         {!isEditing && !sandbox && <ModeToggle value={formKind} onChange={value => { if (!submitLock.current) setFormKind(value); }} />}
 
-        {sandbox && assistMode && <div className="flex items-center justify-between border-b px-4 py-2 text-xs"><span>{assistMode === 'ai' ? 'AI-assisted' : 'Manual'}</span><button type="button" onClick={()=>{setReviewOpen(false);setAssistMode(assistMode==='ai'?'manual':'ai');setStep(1);}} className="text-violet-700">Switch to {assistMode==='ai'?'Manual':'AI-assisted'}</button></div>}
         {assistMode && <div role="progressbar" aria-label="Prescription completion" aria-valuemin={0} aria-valuemax={3} aria-valuenow={[1,2,3].filter(stepComplete).length} className="h-1 shrink-0 bg-slate-100"><div className="h-full bg-violet-500 transition-all" style={{width:`${[1,2,3].filter(stepComplete).length/3*100}%`}} /></div>}
         {assistMode && <nav aria-label="Prescription progress" className="grid shrink-0 grid-cols-3 gap-1 border-b bg-white px-3 py-3 sm:px-5">{guideLabels.map((label,i)=><button type="button" key={label} aria-current={!reviewOpen&&step===i+1?'step':undefined} disabled={assistMode==='ai'&&((i>0&&!stepComplete(1))||(i>1&&!stepComplete(2)))} onClick={()=>{setReviewOpen(false);setStep(i+1);}} className={`flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs sm:text-sm ${!reviewOpen&&step===i+1?'bg-violet-50 text-violet-800':'text-slate-500'}`}><span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${stepComplete(i+1)?'bg-emerald-100 text-emerald-700':'bg-slate-100'}`}>{stepComplete(i+1)?<Check size={14}/>:i+1}</span><span>{label}</span></button>)}</nav>}
         {!isEditing && !sandbox && <div className="border-b border-slate-100 px-4 py-2 text-xs" role="status">
@@ -2374,10 +2373,7 @@ export default function PrescriptionForm({ open, onClose, onResume, labs, onSave
             disables the controls while a submission is in progress. */}
         <div data-rx-scroll className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-50/60">
         <fieldset disabled={submitting} className="min-w-0 space-y-3 px-3 py-4 sm:px-5">
-          {!assistMode ? <section aria-label="Choose prescription mode" className="rounded-2xl border bg-white p-5">
-            <h4 className="mb-4 text-lg font-semibold">How would you like to prescribe?</h4>
-            <div className="grid gap-3 sm:grid-cols-2"><button type="button" onClick={()=>setAssistMode('ai')} className="rounded-xl border border-violet-300 bg-violet-50 p-5 text-left"><span className="block font-semibold text-violet-800">AI-assisted</span><span className="mt-1 block text-sm text-slate-600">Speak or type, one step at a time.</span></button><button type="button" onClick={()=>setAssistMode('manual')} className="rounded-xl border p-5 text-left"><span className="block font-semibold">Manual</span><span className="mt-1 block text-sm text-slate-600">Fill in the form yourself.</span></button></div>
-          </section> : assistMode==='ai' ? <GuidedPrescription
+          {assistMode==='ai' ? <GuidedPrescription
             step={step||1} setStep={n=>{setReviewOpen(false);setStep(n);}} review={reviewOpen} edit={n=>{setReviewOpen(false);setStep(n);}}
             form={{patientName,labId,clinicId:sendingClinicId,notation,insertionDate,appointmentTime,filesChoice,shadePhotosRequired,notes,insufficientTime,estReady:estReady?iso(estReady):null,treatment:caseMode==='restorations'?restorations:[{category,material,vitaShade,implantSystem,abutmentType,abutmentColor,teeth:selectedTeeth.map(t=>({...t,role:selection[t.universal]}))}]}}
             setField={(key,value)=>{setTestComplete(false);setReviewOpen(false);const setters={patientName:setPatientName,labId:setLabId,insertionDate:setInsertionDate,appointmentTime:setAppointmentTime,filesChoice:setFilesChoice,assistMode:setAssistMode};setters[key]?.(value);}}
