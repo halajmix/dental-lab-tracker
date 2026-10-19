@@ -23,6 +23,8 @@ Private sandbox now opens directly on AI-assisted / Manual choice. AI-assisted u
 
 Local browser checks cover full typed flow, simulated speech callbacks through patient/lab/treatment/date, implant omissions and follow-up, local STL/photo attachments, repeated final testing, manual switching preserving entered form details, and 375px layout without horizontal overflow. Microphone/device recognition is not certified by these simulated tests. Sandbox file selections never reach storage; QR upload is disabled there, and final test still exits before all case save/share callbacks. Tests: 71 client tests, 66 Noor tests, undefined-name/component gates and production build. No backend/schema/secret/feature-flag change.
 
+Live guided release verified in Chrome: `index-qO1LADb7.js` (source `5f388ef`, test follow-up `e4eb997`). Real structured treatment request and actual new UI both returned tooth 21 / Monolithic Zirconia / A2. Completed patient/lab → treatment → date/time → No files → review → sandbox test, then closed/reopened to verify empty patient. No browser console errors observed. Public flag read back false; private preview true. Original Pages run failed at deploy with HTTP 500; a fresh Pages build completed successfully (run 39299949938). Production backend and clinical records were not modified. The doctor’s own real-device microphone remains an owner test.
+
 ## Stack
 
 | | |
