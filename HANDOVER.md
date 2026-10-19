@@ -31,6 +31,8 @@ Owner explicitly prohibited patient-name dictation. Both assisted and manual pre
 
 Verification: 74 client tests including name format/privacy renders; undefined JSX/identifier checks and production build. Local Chrome confirmed zero Dictate controls during patient identification, typed `A` + `Al Harthi` becomes `A. Al Harthi`, Manual preserves both fields, and `AB` initial is rejected. Patient identity never enters the Noor treatment payload. Updated existing browser fixtures for split typed name fields. No backend/SQL/feature-flag change.
 
+Live release verified: `index-DLJMcpa9.js`, source `9227af7`, Pages run 39301071334 succeeded. Chrome patient stage has zero Dictate buttons; typed A + Al Harthi becomes A. Al Harthi and remains split correctly in Manual. Closing/reopening cleared the synthetic values; left an empty typed-only patient step open. No real prescription submitted.
+
 ## Stack
 
 | | |
