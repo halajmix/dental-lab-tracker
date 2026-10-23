@@ -78,40 +78,18 @@ async function sendEmail(to: string, replyTo: string | undefined, subject: strin
 }
 
 type CaseRow = {
-  id: string;
-  invoice_number: string | null;
-  patient_name: string | null;
   total_price: number | null;
   clinic_id: string;
   lab_id: string;
 };
 
-function invoiceTable(rows: CaseRow[]): { html: string; total: number } {
-  let total = 0;
-  const tr = rows
-    .map((c) => {
-      const amount = typeof c.total_price === "number" ? c.total_price : null;
-      if (amount !== null) total += amount;
-      return `<tr>
-        <td style="padding:4px 12px 4px 0;color:#1e293b;font-weight:600">${esc(c.invoice_number || c.id)}</td>
-        <td style="padding:4px 12px 4px 0;color:#475569">${esc(c.patient_name ?? "")}</td>
-        <td style="padding:4px 0;color:#1e293b;text-align:right">${amount !== null ? fmtOMR(amount) : "&mdash;"}</td>
-      </tr>`;
-    })
-    .join("");
+function invoiceSummary(rows: CaseRow[]): { html: string; total: number } {
+  const total = rows.reduce((sum, c) => sum + (typeof c.total_price === "number" ? c.total_price : 0), 0);
+  // Keep individual invoices and patient-linked line items inside the
+  // authenticated platform. Email only the organisation-level summary.
   const html = `
-    <table style="font-size:13px;border-collapse:collapse;margin:12px 0;width:100%">
-      <tr>
-        <th style="text-align:left;color:#94a3b8;font-weight:600;padding-right:12px">Invoice</th>
-        <th style="text-align:left;color:#94a3b8;font-weight:600;padding-right:12px">Patient</th>
-        <th style="text-align:right;color:#94a3b8;font-weight:600">Amount</th>
-      </tr>
-      ${tr}
-      <tr>
-        <td colspan="2" style="padding:8px 12px 0 0;color:#1e293b;font-weight:700;border-top:1px solid #e2e8f0">Total outstanding</td>
-        <td style="padding:8px 0 0;color:#1e293b;font-weight:700;text-align:right;border-top:1px solid #e2e8f0">${fmtOMR(total)}</td>
-      </tr>
-    </table>`;
+    <p style="color:#1e293b;font-weight:600">${rows.length} outstanding invoice${rows.length === 1 ? "" : "s"}: ${fmtOMR(total)}</p>
+    <p style="color:#475569">Sign in to Dr-Crown to review the individual invoices.</p>`;
   return { html, total };
 }
 
@@ -174,20 +152,12 @@ Deno.serve(async (req) => {
   if (task === "error-digest") {
     const { data: errors, error } = await admin
       .from("client_errors")
-      .select("id, at, message, url")
+      .select("id, at")
       .eq("alerted", false)
       .order("id", { ascending: false })
       .limit(50);
     if (error) throw error;
     if (!errors?.length) return json({ ok: true, errors: 0 });
-
-    const items = errors
-      .slice(0, 5)
-      .map(
-        (e) => `<li style="margin-bottom:8px"><b>${esc(e.message).slice(0, 200)}</b><br>
-          <span style="color:#64748b;font-size:12px">${new Date(e.at).toUTCString()} &mdash; ${esc(e.url).slice(0, 120)}</span></li>`,
-      )
-      .join("");
 
     const emailed = await sendEmail(
       "alajmix@gmail.com",
@@ -195,8 +165,8 @@ Deno.serve(async (req) => {
       subj(`Dr-Crown: ${errors.length} client error${errors.length === 1 ? "" : "s"} in the last hour`),
       `<div style="font-family:system-ui,sans-serif;max-width:560px">
         <h2 style="margin:0 0 10px">${errors.length} new client error${errors.length === 1 ? "" : "s"}</h2>
-        <ul style="padding-left:18px">${items}</ul>
-        <p style="color:#64748b;font-size:12px">Newest 5 shown. Full details (stack traces, user ids) are in the client_errors table.</p>
+        <p style="color:#475569">Sign in to Dr-Crown to investigate. Raw error messages, page URLs and user details are not included in this email.</p>
+        <p><a href="${APP_URL}" style="color:#2563eb;font-weight:600">Open Dr-Crown &rarr;</a></p>
       </div>`,
     );
     if (emailed) {
@@ -208,7 +178,7 @@ Deno.serve(async (req) => {
   try {
     const { data: unpaid, error } = await admin
       .from("cases")
-      .select("id, invoice_number, patient_name, total_price, clinic_id, lab_id")
+      .select("total_price, clinic_id, lab_id")
       .eq("invoice_status", "issued");
     if (error) throw error;
     if (!unpaid?.length) return json({ ok: true, groups: 0, emailed: 0 });
@@ -240,7 +210,7 @@ Deno.serve(async (req) => {
       if (lab?.payment_reminders_enabled === false) continue;
       if (!clinic?.email) continue; // surfaced in the lab's dashboard as "no email &mdash; can't be reminded"
 
-      const { html, total } = invoiceTable(rows);
+      const { html, total } = invoiceSummary(rows);
       const ok = await sendEmail(
         clinic.email,
         lab?.email || undefined,

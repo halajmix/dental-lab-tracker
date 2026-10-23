@@ -3,6 +3,7 @@ import { X, MessageCircle, Mail, Phone, Copy, Check, Send } from "lucide-react";
 import { toothSummary, SHADE_BY_LAB } from "./PrescriptionForm.jsx";
 import { waLink } from "./lib/whatsapp.js";
 import { STAGES } from "./LifecycleEngine.jsx";
+import { buildCaseEmail } from "./lib/caseEmail.js";
 
 // Digits only, no leading zeros — the format WhatsApp's click-to-chat
 // endpoint expects.
@@ -73,14 +74,11 @@ export default function ContactLabModal({ open, caseObj, lab, clinic, onClose })
   const context = buildCaseContext(caseObj);
   const signature = `— ${clinic.dentist}, ${clinic.name}`;
   const fullMessage = [context, "", note.trim() || "(your message)", "", signature].join("\n");
-  const subjectRx = caseObj.prescription?.restorations?.length
-    ? `${caseObj.prescription.restorations.length} restoration${caseObj.prescription.restorations.length === 1 ? "" : "s"}`
-    : caseObj.prescription?.category ?? "Lab case";
-  const subject = `${caseObj.id} — ${caseObj.patientName} · ${subjectRx}`;
+  const email = buildCaseEmail(caseObj.id, note, signature);
 
   const phone = waPhone(lab?.contact);
   const waUrl = waLink(phone, fullMessage);
-  const mailUrl = `mailto:${lab?.email ?? ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(fullMessage)}`;
+  const mailUrl = `mailto:${lab?.email ?? ""}?subject=${encodeURIComponent(email.subject)}&body=${encodeURIComponent(email.body)}`;
 
   const copy = async () => {
     try {
@@ -134,10 +132,11 @@ export default function ContactLabModal({ open, caseObj, lab, clinic, onClose })
 
           {/* auto-generated context */}
           <div>
-            <p className="mb-1 text-xs font-medium text-slate-600">Case details (added automatically)</p>
+            <p className="mb-1 text-xs font-medium text-slate-600">Case details (WhatsApp and copy)</p>
             <pre className="whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 ring-1 ring-inset ring-slate-200">
               {context}
             </pre>
+            <p className="mt-2 text-xs text-slate-500">Email includes the case reference and your message only. Avoid patient details in your email message.</p>
           </div>
 
           {/* the dentist's own message */}

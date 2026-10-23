@@ -9,6 +9,29 @@ patients and real money. There is no separate staging backend. Super Admin has a
 
 ---
 
+## 2026-10-23 patient information in email
+
+Owner authorised email minimisation during the Oman compliance work. Deployed
+`case-notify` now emails the case reference, organisation, operational status
+and sign-in link, without automatically adding patient identity, treatment,
+material or appointment details. Pickup notices and invitation handling remain.
+Deployed `payment-reminders` emails organisation-level invoice count/total,
+without querying or rendering patient-linked invoice lines. Its client-error
+digest no longer queries/emails raw error messages or page URLs.
+
+The prepared Contact Lab frontend uses `src/lib/caseEmail.js` for a case-reference
+email and the sender's deliberate message; WhatsApp/copy context remains. Its
+frontend release is pending confirmation of the operator's registered wording.
+Public operator name/CR preparation is separate from the deployed backend.
+
+Checks: 91 application tests, both Deno type checks, undefined JSX/identifier
+checks and production build passed. Ten privacy/routing tests also passed
+against source downloaded from the newly deployed functions using fictional
+data and blocked external calls. Live GET/unauthorised POST checks remain
+405/401. No real prescription or email was sent as a test. Noor remains off,
+clinical files remain private, and no schema, secrets, recipients, provider,
+clinical records or hosting location changed. Prior email copies are not erased.
+
 ## Current patient-name policy — owner override, 19 October 2026
 
 The dentist may type ANY nonblank patient name or reference. Use placeholder `Patient Name..` (owner update, 19 October 2026). Never require initials, surnames, punctuation, spelling or a particular character set, now or in future. This explicitly supersedes the earlier typed-initial/surname restrictions described below. Patient identity stays typed; Noor remains off. No patient-code or Oman-hosting migration has been implemented.
@@ -204,8 +227,9 @@ the live page as the affected role before calling a deploy done.
   is public — profile pictures only.
 - Only the `anon` key ships in the browser bundle. The service-role key is in
   the Keychain and used by local scripts only.
-- Email **subjects** carry the case ID, never the patient's name; bodies do name
-  the patient, since the lab and clinic are both treating them.
+- Automatic case emails carry the case ID, not patient identity or clinical
+  details. Payment emails use aggregate organisation totals. Clinical records
+  remain inside authenticated Dr-Crown; intentional user sharing is separate.
 - Every case view is written to `login_events`.
 
 ## Known open issues (refreshed 2026-09-12)

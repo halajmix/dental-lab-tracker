@@ -97,19 +97,6 @@ function emailShell(title: string, bodyHtml: string): string {
     </div>`;
 }
 
-function caseSummaryRows(record: Record<string, unknown>): string {
-  const rx = (record.prescription ?? {}) as Record<string, unknown>;
-  const row = (label: string, value: unknown) =>
-    value ? `<tr><td style="padding:2px 12px 2px 0;color:#94a3b8">${label}</td><td style="color:#1e293b;font-weight:600">${esc(value)}</td></tr>` : "";
-  return `
-    <table style="font-size:13px;border-collapse:collapse;margin:12px 0">
-      ${row("Patient", record.patient_name)}
-      ${row("Restoration", rx.category)}
-      ${row("Material", rx.material && rx.material !== "Refer to notes" ? rx.material : "")}
-      ${row("Deliver by", record.appointment_date)}
-    </table>`;
-}
-
 /* ------------------------------------------------------------------ */
 
 /**
@@ -294,12 +281,12 @@ Deno.serve(async (req) => {
         // exposed part of an email — it shows in lock-screen previews and is
         // indexed by every mail client — and it reaches Resend and the
         // recipient's provider regardless of what the database stores. The
-        // body still names the patient: the lab needs it, and both parties
-        // are already treating them.
+        // body also omits patient identity and clinical details. Recipients
+        // sign in to the existing authorised dashboard to read the case.
         subj(`New case from ${clinic?.name ?? "a clinic"}: ${record.id}${rxData.pickupRequested ? " (pick-up requested)" : ""}`),
         emailShell(
-          `New case sent to ${lab.name}`,
-          `<p style="color:#475569">${esc(clinic?.name ?? "A clinic")} just sent you a new case, case ID <b>${esc(record.id)}</b>.</p>${pickupLine}${caseSummaryRows(record)}`,
+          `New case sent to ${lab?.name ?? "your lab"}`,
+          `<p style="color:#475569">${esc(clinic?.name ?? "A clinic")} just sent you a new case, case ID <b>${esc(record.id)}</b>.</p>${pickupLine}<p style="color:#475569">Sign in to Dr-Crown to view the prescription and appointment details.</p>`,
         ),
       );
       return json({ ok: true, emailed });
@@ -323,7 +310,7 @@ Deno.serve(async (req) => {
         subj(`${lab?.name ?? "Your lab"} marked case ${record.id} complete`),
         emailShell(
           "Case complete: ready for pickup",
-          `<p style="color:#475569">${esc(lab?.name ?? "Your lab")} finished case <b>${esc(record.id)}</b> and it's ready to collect.</p>${caseSummaryRows(record)}`,
+          `<p style="color:#475569">${esc(lab?.name ?? "Your lab")} finished case <b>${esc(record.id)}</b> and it's ready to collect.</p><p style="color:#475569">Sign in to Dr-Crown to view the case details.</p>`,
         ),
       );
       return json({ ok: true, emailed });
