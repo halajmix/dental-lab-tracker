@@ -41,6 +41,14 @@ data and blocked external calls. Live GET/unauthorised POST checks remain
 clinical files remain private, and no schema, secrets, recipients, provider,
 clinical records or hosting location changed. Prior email copies are not erased.
 
+Live release verification: source `b0cd342` (email minimisation) and `12d3bcb`
+(registered operator/CR); Pages run `39951379877` succeeded and serves bundle
+`index-BdRKTvBe.js`. Chrome confirmed the footer, privacy and terms show
+Paradise Tech LLC / CR 1673833, with no console errors in those checks. Edge
+versions: case-notify 20, payment-reminders 14; Noor remains version 26 and off.
+Retained prior static chunks for existing open tabs. Hosting enquiry drafts
+are private and unsent; no supplier contract, account purchase or migration.
+
 ## Current patient-name policy — owner override, 19 October 2026
 
 The dentist may type ANY nonblank patient name or reference. Use placeholder `Patient Name..` (owner update, 19 October 2026). Never require initials, surnames, punctuation, spelling or a particular character set, now or in future. This explicitly supersedes the earlier typed-initial/surname restrictions described below. Patient identity stays typed; Noor remains off. No patient-code or Oman-hosting migration has been implemented.
