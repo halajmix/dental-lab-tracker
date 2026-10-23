@@ -9,6 +9,15 @@ patients and real money. There is no separate staging backend. Super Admin has a
 
 ---
 
+## Service continuity — owner instruction, 23 October 2026
+
+No interruption to the existing service. Hosting evaluation and supplier
+enquiries must leave production database, Auth, storage, DNS and backend URLs
+in place. Prepare any future migration in isolation with synthetic data;
+verify compatibility, restoration and rollback before scheduling a cutover.
+Preserve existing cases, drafts, uploads, billing and ordinary notifications.
+Do not claim zero downtime without a demonstrated cutover plan. Noor stays off.
+
 ## 2026-10-23 patient information in email
 
 Owner selected the newer company in Desktop/Companies as operator. The matched
