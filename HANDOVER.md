@@ -11,6 +11,15 @@ patients and real money. There is no separate staging backend. Super Admin has a
 
 ## 2026-10-23 patient information in email
 
+Owner selected the newer company in Desktop/Companies as operator. The matched
+CR, Chamber certificate and newer activities licence identify Paradise Tech LLC
+(Limited Liability Company), CR 1673833. The owner pronounced/spelled it "TIC";
+use the registered English spelling from those matching documents. Footer,
+privacy and terms now use that company/CR in source. Existing public contact
+inbox is retained until a verified replacement is provided; no contracts or
+vendor-account ownership are transferred by changing the website wording.
+Company-document copies and hosting enquiries stay private, outside this repo.
+
 Owner authorised email minimisation during the Oman compliance work. Deployed
 `case-notify` now emails the case reference, organisation, operational status
 and sign-in link, without automatically adding patient identity, treatment,
@@ -19,10 +28,10 @@ Deployed `payment-reminders` emails organisation-level invoice count/total,
 without querying or rendering patient-linked invoice lines. Its client-error
 digest no longer queries/emails raw error messages or page URLs.
 
-The prepared Contact Lab frontend uses `src/lib/caseEmail.js` for a case-reference
+The Contact Lab frontend uses `src/lib/caseEmail.js` for a case-reference
 email and the sender's deliberate message; WhatsApp/copy context remains. Its
-frontend release is pending confirmation of the operator's registered wording.
-Public operator name/CR preparation is separate from the deployed backend.
+frontend release includes the matched operator name/CR wording. Check the live
+release verification below before treating source changes as deployed.
 
 Checks: 91 application tests, both Deno type checks, undefined JSX/identifier
 checks and production build passed. Ten privacy/routing tests also passed

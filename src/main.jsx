@@ -100,16 +100,7 @@ function PageLoader() {
 function SiteFooter() {
   return (
     <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
-      Developed and powered by{" "}
-      <a
-        href="https://paradiseharbours.com"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-semibold text-blue-600 hover:underline"
-      >
-        paradiseharbours.com
-      </a>
-      , a purely Omani Company.
+      Operated by <span className="font-semibold text-slate-600">Paradise Tech LLC</span> · CR 1673833.
       <span className="mx-1.5">·</span>
       <a href="/privacy.html" className="text-slate-400 underline hover:text-slate-600">Privacy</a>
       <span className="mx-1.5">·</span>
