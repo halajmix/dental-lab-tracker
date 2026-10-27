@@ -99,8 +99,10 @@ function PageLoader() {
 // login screen and inside every role's dashboard alike.
 function SiteFooter() {
   return (
-    <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
-      Operated by <span className="font-semibold text-slate-600">Paradise Tech LLC</span> · CR 1673833.
+    <footer className="border-t border-slate-200 bg-white px-4 py-4 text-center text-xs text-slate-400">
+      Operated by <a href="https://paradise-tch.com/" target="_blank" rel="noopener noreferrer" className="font-semibold text-slate-600 underline hover:text-slate-800">Paradise Tech LLC</a> · CR 1673833
+      <span className="mx-1.5">·</span>
+      <span className="inline-block">Sultanate of Oman</span>
       <span className="mx-1.5">·</span>
       <a href="/privacy.html" className="text-slate-400 underline hover:text-slate-600">Privacy</a>
       <span className="mx-1.5">·</span>
